@@ -9,7 +9,6 @@ COPY package.json vite.config.js ./
 RUN npm install
 
 COPY index.html ./
-COPY public ./public
 COPY src ./src
 RUN npm run build
 
