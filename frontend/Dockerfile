@@ -1,9 +1,7 @@
 # Stage 1: Build
-FROM node:18-alpine as build
+FROM node:18 as build
 
 WORKDIR /app
-
-RUN apk add --no-cache python3 make g++
 
 COPY package.json vite.config.js ./
 RUN npm install
