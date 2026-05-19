@@ -410,10 +410,22 @@ body {
 
 /* AG Grid customization */
 .ag-theme-alpine {
-  --ag-header-background-color: #f8f9fa;
+  --ag-header-background-color: #f0f4ff;
   --ag-header-foreground-color: #333;
   --ag-row-hover-color: #f0f4ff;
   --ag-selected-row-background-color: #e8ecff;
+  --ag-floating-filter-height: 40px;
+  --ag-header-height: 48px;
+  font-size: 13px;
+}
+
+.ag-theme-alpine .ag-floating-filter-input {
+  font-size: 12px;
+}
+
+.ag-theme-alpine .ag-header-cell-text {
+  font-weight: 600;
+  font-size: 13px;
 }
 
 /* Loading */

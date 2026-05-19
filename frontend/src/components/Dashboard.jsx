@@ -46,46 +46,74 @@ const Dashboard = () => {
   const [isUploading, setIsUploading] = useState(false)
   
   const columnDefs = [
-    { field: 'bin', headerName: 'БИН', sortable: true, filter: true, width: 120 },
-    { field: 'bin_name', headerName: 'Название', sortable: true, filter: true, width: 300 },
-    { field: 'contract_number', headerName: '№ Договора', sortable: true, filter: true, width: 150 },
-    { field: 'contract_date', headerName: 'Дата договора', sortable: true, filter: true, width: 140 },
-    { field: 'date_beg', headerName: 'Начало', sortable: true, filter: true, width: 120 },
-    { field: 'date_end', headerName: 'Окончание', sortable: true, filter: true, width: 120 },
-    { field: 'obl_name', headerName: 'Область', sortable: true, filter: true, width: 150 },
-    { field: 'rai_name', headerName: 'Район', sortable: true, filter: true, width: 150 },
-    { field: 'address', headerName: 'Адрес', sortable: true, filter: true, width: 250 },
-    { field: 'phone', headerName: 'Телефон', sortable: true, filter: true, width: 130 },
+    // Основные поля застрахованной компании
+    { field: 'bin', headerName: 'БИН', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 130, pinned: 'left' },
+    { field: 'bin_name', headerName: 'Название компании', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 300 },
+    // Страховая компания (кто дал страховку)
+    { field: 'system_delimiter_bin', headerName: 'БИН страховой компании', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 190 },
+    // Договор
+    { field: 'contract_number', headerName: '№ Договора', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 150 },
+    { field: 'contract_date', headerName: 'Дата договора', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, width: 150 },
+    { field: 'date_beg', headerName: 'Дата начала', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, width: 140 },
+    { field: 'date_end', headerName: 'Дата окончания', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, width: 150 },
+    { field: 'rescinding_date', headerName: 'Дата расторжения', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 160 },
+    // Финансы и сотрудники
+    { field: 'calculated_amount', headerName: 'Сумма', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 130 },
+    { field: 'count_employees', headerName: 'Застрахованных', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 150 },
+    { field: 'total_employees_count', headerName: 'Всего сотр.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 130 },
+    { field: 'kol_12mes', headerName: 'Кол-во 12 мес.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 140 },
+    { field: 'fot_12mes', headerName: 'ФОТ 12 мес.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 140 },
+    { field: 'esutd_akt_td', headerName: 'ESUTD акт. ТД', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 140 },
+    // Местоположение
+    { field: 'obl_name', headerName: 'Область', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 180 },
+    { field: 'rai_name', headerName: 'Район', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 180 },
+    { field: 'address', headerName: 'Адрес', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 280 },
+    // Контакты
+    { field: 'phone', headerName: 'Телефон', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 150 },
+    // Руководитель
     { 
       field: 'leader_surname', 
       headerName: 'Руководитель', 
       sortable: true, 
-      filter: true, 
-      width: 200,
+      filter: 'agTextColumnFilter',
+      floatingFilter: true,
+      width: 220,
       valueGetter: (params) => {
-        const { leader_surname, leader_name, leader_middlename } = params.data
-        return `${leader_surname || ''} ${leader_name || ''} ${leader_middlename || ''}`.trim()
+        if (!params.data) return ''
+        const s = params.data.leader_surname || ''
+        const n = params.data.leader_name || ''
+        const m = params.data.leader_middlename || ''
+        return `${s} ${n} ${m}`.trim()
       }
     },
-    { field: 'opf_name', headerName: 'ОПФ', sortable: true, filter: true, width: 150 },
-    { field: 'id_oked', headerName: 'ОКЭД', sortable: true, filter: true, width: 100 },
-    { field: 'name_oked', headerName: 'Вид деятельности', sortable: true, filter: true, width: 250 },
-    { field: 'count_employees', headerName: 'Сотрудники', sortable: true, filter: true, width: 120, type: 'numericColumn' },
-    { field: 'total_employees_count', headerName: 'Всего сотр.', sortable: true, filter: true, width: 120, type: 'numericColumn' },
-    { field: 'calculated_amount', headerName: 'Сумма', sortable: true, filter: true, width: 130, type: 'numericColumn' },
+    // ОПФ и деятельность
+    { field: 'opf_name', headerName: 'ОПФ', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 200 },
+    { field: 'id_oked', headerName: 'Код ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 120 },
+    { field: 'name_oked', headerName: 'Вид деятельности (ОКЭД)', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 280 },
+    // Доп. поля
+    { field: 'ip', headerName: 'ИП', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 90 },
+    { field: 'tip', headerName: 'ТИП', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 90 },
+    { field: 'flag_head', headerName: 'Флаг', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, width: 90 },
     { 
       field: 'is_insured', 
       headerName: 'Застрахован', 
       sortable: true, 
-      filter: true, 
+      filter: 'agTextColumnFilter',
+      floatingFilter: true,
       width: 130,
-      cellRenderer: (params) => params.value ? 'Да' : 'Нет'
+      cellRenderer: (params) => {
+        if (!params.data) return ''
+        return params.value ? '✅ Да' : '❌ Нет'
+      }
     },
   ]
 
   const defaultColDef = {
     resizable: true,
-    filter: 'agTextColumnFilter',
+    sortable: true,
+    filter: true,
+    floatingFilter: true,
+    suppressMenu: false,
   }
 
   const buildFilterParams = () => {
@@ -409,7 +437,7 @@ const Dashboard = () => {
           </div>
         </div>
         
-        <div className="ag-theme-alpine" style={{ height: 600, width: '100%' }}>
+        <div className="ag-theme-alpine" style={{ height: 650, width: '100%' }}>
           <AgGridReact
             ref={gridRef}
             rowData={rowData}
@@ -419,6 +447,7 @@ const Dashboard = () => {
             domLayout="normal"
             enableCellTextSelection={true}
             suppressClipboard={false}
+            floatingFiltersHeight={40}
           />
         </div>
 
