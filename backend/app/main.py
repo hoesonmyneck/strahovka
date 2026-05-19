@@ -273,9 +273,9 @@ def download_records(
     data = []
     for r in records:
         data.append({
-            'БИН': r.bin,
+            'БИН': str(int(r.bin)).zfill(12) if r.bin is not None else '',
             'Название компании': r.bin_name,
-            'БИН страховой компании': r.system_delimiter_bin,
+            'БИН страховой компании': str(int(r.system_delimiter_bin)).zfill(12) if r.system_delimiter_bin is not None else '',
             'Страховая компания': r.system_delimiter_bin_name,
             'Номер договора': r.contract_number,
             'Дата договора': r.contract_date,
