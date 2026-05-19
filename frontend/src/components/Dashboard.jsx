@@ -16,27 +16,56 @@ import {
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 
-// ─── Названия месяцев в предложном падеже ───────────────────────────────────
-const MONTHS_RU = [
+// ─── Вспомогательные функции ─────────────────────────────────────────────────
+const MONTHS_RU_PREP = [
   'январе','феврале','марте','апреле','мае','июне',
   'июле','августе','сентябре','октябре','ноябре','декабре'
 ]
 
-const getExpiryLabel = (n) => {
+// Возвращает {label, date_end_from, date_end_to} для месяца +offset от текущего
+const getMonthOption = (offset) => {
   const now = new Date()
-  const names = Array.from({ length: n }, (_, i) => MONTHS_RU[(now.getMonth() + i) % 12])
-  return `Истекает в ${names.join('/')}`
+  const y = now.getFullYear()
+  const m = now.getMonth() + offset          // 0-based month + offset
+  const absYear = y + Math.floor(m / 12)
+  const absMon  = ((m % 12) + 12) % 12      // нормализуем в [0..11]
+  const from = new Date(absYear, absMon, 1)
+  const to   = new Date(absYear, absMon + 1, 0) // последний день месяца
+  const fmt  = (d) => d.toISOString().split('T')[0]
+  return {
+    label: `Истекает в ${MONTHS_RU_PREP[absMon]}`,
+    value: fmt(from),                        // храним как "YYYY-MM-01"
+    date_end_from: fmt(from),
+    date_end_to:   fmt(to),
+  }
+}
+
+// Форматирование числа с пробелами: 1000000 → "1 000 000"
+const fmtNumber = (v, decimals = 0) => {
+  if (v == null || v === '') return ''
+  return Number(v).toLocaleString('ru-RU', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
 }
 
 // ─── Компонент поля с автодополнением ────────────────────────────────────────
 const SuggestInput = ({ field, value, onChange, placeholder }) => {
+  // Локальный state чтобы input не сбрасывался при ре-рендере родителя
+  const [inputValue, setInputValue] = useState(value)
   const [suggestions, setSuggestions] = useState([])
   const [open, setOpen] = useState(false)
   const timer = useRef(null)
 
+  // Синхронизируем с родителем только когда родитель сбрасывает значение (сброс фильтров)
+  useEffect(() => {
+    if (value === '') setInputValue('')
+  }, [value])
+
   const handleChange = (e) => {
     const v = e.target.value
-    onChange(v)
+    setInputValue(v)   // немедленно обновляем локальный state
+    onChange(v)        // уведомляем родителя
     clearTimeout(timer.current)
     if (v.length >= 1) {
       timer.current = setTimeout(async () => {
@@ -54,11 +83,17 @@ const SuggestInput = ({ field, value, onChange, placeholder }) => {
     }
   }
 
+  const selectSuggestion = (s) => {
+    setInputValue(s)
+    onChange(s)
+    setOpen(false)
+  }
+
   return (
     <div style={{ position: 'relative' }}>
       <input
         type="text"
-        value={value}
+        value={inputValue}
         onChange={handleChange}
         placeholder={placeholder}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -68,11 +103,7 @@ const SuggestInput = ({ field, value, onChange, placeholder }) => {
       {open && suggestions.length > 0 && (
         <div className="suggestions-dropdown">
           {suggestions.map((s, i) => (
-            <div
-              key={i}
-              className="suggestion-item"
-              onMouseDown={() => { onChange(s); setOpen(false) }}
-            >
+            <div key={i} className="suggestion-item" onMouseDown={() => selectSuggestion(s)}>
               {s}
             </div>
           ))}
@@ -95,22 +126,20 @@ const Dashboard = () => {
 
   const [metrics, setMetrics] = useState({ total: 0, insured: 0, not_insured: 0 })
 
-  const [filters, setFilters] = useState({
-    bin: '',
-    bin_name: '',
-    system_delimiter_bin: '',
-    system_delimiter_bin_name: '',
-    contract_number: '',
-    contract_date_from: null,
-    contract_date_to: null,
-    date_end_from: null,
-    date_end_to: null,
-    obl_name: '',
-    rai_name: '',
-    opf_name: '',
-    is_insured: '',
-    expires_in_months: '',
-  })
+  const EMPTY_FILTERS = {
+    bin: '', bin_name: '', system_delimiter_bin: '', system_delimiter_bin_name: '',
+    contract_number: '', contract_date_from: null, contract_date_to: null,
+    date_end_from: null, date_end_to: null,
+    obl_name: '', rai_name: '', opf_name: '', is_insured: '',
+    // Срок истечения — конкретный месяц (date_end_from/to считаем отдельно)
+    expires_month: '',   // хранит date_end_from первого дня выбранного месяца
+    expires_month_to: '', // хранит date_end_to последнего дня выбранного месяца
+  }
+
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+
+  // Опции дропдауна "истекает в ..."  (текущий + следующие 2 месяца)
+  const expiryOptions = [getMonthOption(0), getMonthOption(1), getMonthOption(2)]
 
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
@@ -169,7 +198,7 @@ const Dashboard = () => {
       headerName: 'Сумма',
       sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true,
       minWidth: 140,
-      valueFormatter: (p) => p.value != null ? Number(p.value).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '',
+      valueFormatter: (p) => fmtNumber(p.value, 2),
     },
     { field: 'count_employees', headerName: 'Застрахованных', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'total_employees_count', headerName: 'Всего сотр.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 130 },
@@ -239,7 +268,11 @@ const Dashboard = () => {
     if (filters.rai_name) params.rai_name = filters.rai_name
     if (filters.opf_name) params.opf_name = filters.opf_name
     if (filters.is_insured !== '') params.is_insured = parseInt(filters.is_insured)
-    if (filters.expires_in_months) params.expires_in_months = parseInt(filters.expires_in_months)
+    // Фильтр по конкретному месяцу истечения (перекрывает date_end_from/to если заданы)
+    if (filters.expires_month) {
+      params.date_end_from = filters.expires_month
+      params.date_end_to   = filters.expires_month_to
+    }
 
     // Добавляем фильтры из колонок AG Grid (чтобы скачивание тоже их учитывало)
     if (gridRef.current?.api) {
@@ -318,12 +351,7 @@ const Dashboard = () => {
 
   const resetFilters = () => {
     if (gridRef.current?.api) gridRef.current.api.setFilterModel(null)
-    setFilters({
-      bin: '', bin_name: '', system_delimiter_bin: '', system_delimiter_bin_name: '',
-      contract_number: '', contract_date_from: null, contract_date_to: null,
-      date_end_from: null, date_end_to: null, obl_name: '', rai_name: '',
-      opf_name: '', is_insured: '', expires_in_months: '',
-    })
+    setFilters(EMPTY_FILTERS)
     setTimeout(() => fetchAll(1), 0)
   }
 
@@ -495,13 +523,20 @@ const Dashboard = () => {
           <div className="filter-group">
             <label>Срок истечения</label>
             <select
-              value={filters.expires_in_months}
-              onChange={(e) => setFilters({ ...filters, expires_in_months: e.target.value })}
+              value={filters.expires_month}
+              onChange={(e) => {
+                const opt = expiryOptions.find(o => o.value === e.target.value)
+                setFilters({
+                  ...filters,
+                  expires_month:    opt ? opt.date_end_from : '',
+                  expires_month_to: opt ? opt.date_end_to   : '',
+                })
+              }}
             >
               <option value="">Все</option>
-              <option value="1">{getExpiryLabel(1)}</option>
-              <option value="3">{getExpiryLabel(3)}</option>
-              <option value="6">{getExpiryLabel(6)}</option>
+              {expiryOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
 
