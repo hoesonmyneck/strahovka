@@ -449,6 +449,46 @@ body {
   }
 }
 
+/* Автодополнение */
+.suggestions-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 9999;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.suggestion-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover {
+  background: #f0f4ff;
+  color: #4a6fa5;
+}
+
+/* filter-group с относительным позиционированием для дропдауна */
+.filter-group {
+  position: relative;
+}
+
 @media (max-width: 768px) {
   .filters-grid {
     grid-template-columns: 1fr;

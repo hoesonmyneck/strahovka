@@ -29,7 +29,7 @@ const Login = () => {
   return (
     <div className="login-container">
       <div className="login-box">
-        <h1>Страховка - Система учета</h1>
+        <h1>Государственная компания по страхованию жизни</h1>
         <form onSubmit={handleSubmit}>
           <div className="input-group">
             <User className="input-icon" size={20} />

@@ -372,6 +372,31 @@ def upload_file(
         raise HTTPException(500, f"Error processing file: {str(e)}")
 
 
+@app.get("/api/suggestions")
+def get_suggestions(
+    field: str,
+    query: str = "",
+    limit: int = Query(10, le=20),
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    allowed = {
+        'bin': models.InsuranceRecord.bin,
+        'bin_name': models.InsuranceRecord.bin_name,
+        'system_delimiter_bin': models.InsuranceRecord.system_delimiter_bin,
+        'system_delimiter_bin_name': models.InsuranceRecord.system_delimiter_bin_name,
+    }
+    if field not in allowed:
+        raise HTTPException(400, "Invalid field")
+
+    col = allowed[field]
+    q = db.query(col).filter(col.isnot(None))
+    if query:
+        q = q.filter(col.cast(String).ilike(f"%{query}%"))
+    rows = q.distinct().limit(limit).all()
+    return [str(r[0]) for r in rows if r[0] is not None]
+
+
 @app.get("/api/health")
 def health_check():
     return {"status": "ok"}
