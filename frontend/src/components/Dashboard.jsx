@@ -710,18 +710,14 @@ const Dashboard = () => {
               <div className="user-create-form">
                 <select
                   value={newUser.region}
-                  onChange={(e) => {
-                    const r = e.target.value
-                    const slug = r.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
-                    setNewUser({ region: r, username: slug, password: slug + '2026' })
-                  }}
+                  onChange={(e) => setNewUser({ ...newUser, region: e.target.value })}
                 >
                   <option value="">— Выберите регион —</option>
                   {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
                 <input
                   type="text"
-                  placeholder="Логин"
+                  placeholder="Логин (латиница)"
                   value={newUser.username}
                   onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
                 />
