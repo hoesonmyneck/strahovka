@@ -12,6 +12,7 @@ class InsuranceRecord(Base):
     row_num = Column(BigInteger)  # номер строки из Excel
     bin = Column(BigInteger, index=True)  # BIN для поиска
     system_delimiter_bin = Column(Float)
+    system_delimiter_bin_name = Column(String(500), index=True)
     contract_number = Column(String(100), index=True)
     contract_date = Column(Date)
     date_beg = Column(Date)

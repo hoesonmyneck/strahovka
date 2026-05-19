@@ -51,6 +51,7 @@ const Dashboard = () => {
     { field: 'bin_name', headerName: 'Название компании', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 300 },
     // Страховая компания (кто дал страховку)
     { field: 'system_delimiter_bin', headerName: 'БИН страховой компании', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 190 },
+    { field: 'system_delimiter_bin_name', headerName: 'Страховая компания', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 250 },
     // Договор
     { field: 'contract_number', headerName: '№ Договора', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 150 },
     { field: 'contract_date', headerName: 'Дата договора', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, width: 150 },

@@ -48,6 +48,9 @@ def apply_filters(query, model, params: dict):
     if params.get("system_delimiter_bin"):
         query = query.filter(M.system_delimiter_bin.cast(String).like(f"%{params['system_delimiter_bin']}%"))
 
+    if params.get("system_delimiter_bin_name"):
+        query = query.filter(M.system_delimiter_bin_name.ilike(f"%{params['system_delimiter_bin_name']}%"))
+
     if params.get("contract_number"):
         query = query.filter(M.contract_number.ilike(f"%{params['contract_number']}%"))
 
@@ -127,6 +130,7 @@ def get_metrics(
     bin: Optional[str] = None,
     bin_name: Optional[str] = None,
     system_delimiter_bin: Optional[str] = None,
+    system_delimiter_bin_name: Optional[str] = None,
     contract_number: Optional[str] = None,
     contract_date_from: Optional[date] = None,
     contract_date_to: Optional[date] = None,
@@ -167,6 +171,7 @@ def get_records(
     bin: Optional[str] = None,
     bin_name: Optional[str] = None,
     system_delimiter_bin: Optional[str] = None,
+    system_delimiter_bin_name: Optional[str] = None,
     contract_number: Optional[str] = None,
     contract_date_from: Optional[date] = None,
     contract_date_to: Optional[date] = None,
@@ -205,6 +210,7 @@ def download_records(
     bin: Optional[str] = None,
     bin_name: Optional[str] = None,
     system_delimiter_bin: Optional[str] = None,
+    system_delimiter_bin_name: Optional[str] = None,
     contract_number: Optional[str] = None,
     contract_date_from: Optional[date] = None,
     contract_date_to: Optional[date] = None,
@@ -235,6 +241,7 @@ def download_records(
             'БИН': r.bin,
             'Название компании': r.bin_name,
             'БИН страховой компании': r.system_delimiter_bin,
+            'Страховая компания': r.system_delimiter_bin_name,
             'Номер договора': r.contract_number,
             'Дата договора': r.contract_date,
             'Дата начала': r.date_beg,
@@ -315,6 +322,7 @@ def upload_file(
                     row_num=safe_int(row.get('   ', idx + 1)),
                     bin=safe_int(row.get('BIN')),
                     system_delimiter_bin=safe_float(row.get('SYSTEM_DELIMITER_BIN')),
+                    system_delimiter_bin_name=safe_str(row.get('SYSTEM_DELIMITER_BIN_NAME')),
                     contract_number=safe_str(row.get('CONTRACT_NUMBER')),
                     contract_date=safe_date(row.get('CONTRACT_DATE')),
                     date_beg=safe_date(row.get('DATE_BEG')),

@@ -6,6 +6,7 @@ class InsuranceRecordBase(BaseModel):
     row_num: Optional[int] = None
     bin: Optional[int] = None
     system_delimiter_bin: Optional[float] = None
+    system_delimiter_bin_name: Optional[str] = None
     contract_number: Optional[str] = None
     contract_date: Optional[date] = None
     date_beg: Optional[date] = None
@@ -51,6 +52,7 @@ class FilterParams(BaseModel):
     bin: Optional[str] = None
     bin_name: Optional[str] = None
     system_delimiter_bin: Optional[str] = None
+    system_delimiter_bin_name: Optional[str] = None
     contract_number: Optional[str] = None
     contract_date_from: Optional[date] = None
     contract_date_to: Optional[date] = None
