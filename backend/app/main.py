@@ -15,15 +15,21 @@ from .database import SessionLocal, engine
 
 models.Base.metadata.create_all(bind=engine)
 
-# Автоматическая миграция: добавляем колонку region если её нет
-with engine.connect() as conn:
-    try:
-        conn.execute(__import__('sqlalchemy').text(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)"
-        ))
-        conn.commit()
-    except Exception:
-        conn.rollback()
+# Автомиграции
+with engine.connect() as _conn:
+    for _sql in [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)",
+        """CREATE TABLE IF NOT EXISTS app_settings (
+               key   VARCHAR(100) PRIMARY KEY,
+               value VARCHAR(500)
+           )""",
+        "INSERT INTO app_settings (key, value) VALUES ('last_update', NULL) ON CONFLICT DO NOTHING",
+    ]:
+        try:
+            _conn.execute(__import__('sqlalchemy').text(_sql))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
 
 app = FastAPI(title="Strahovka Insurance API")
 
@@ -298,8 +304,15 @@ def download_records(
 
     df = pd.DataFrame(data)
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output, engine='openpyxl', datetime_format='DD.MM.YYYY', date_format='DD.MM.YYYY') as writer:
         df.to_excel(writer, index=False, sheet_name='Insurance Records')
+        ws = writer.sheets['Insurance Records']
+        for col_cells in ws.columns:
+            max_len = max(
+                (len(str(cell.value)) if cell.value is not None else 0)
+                for cell in col_cells
+            )
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 3, 50)
     output.seek(0)
 
     return StreamingResponse(
@@ -394,6 +407,14 @@ def upload_file(
 
         db.commit()
         count = db.query(models.InsuranceRecord).count()
+        # Обновляем дату загрузки
+        today = date.today().strftime("%d.%m.%Y")
+        setting = db.query(models.AppSetting).filter(models.AppSetting.key == "last_update").first()
+        if setting:
+            setting.value = today
+        else:
+            db.add(models.AppSetting(key="last_update", value=today))
+        db.commit()
         return {"message": f"Successfully uploaded {count} records"}
 
     except Exception as e:
@@ -486,6 +507,33 @@ def delete_user(
     return {"message": "Удалён"}
 
 
+# ============ LAST UPDATE DATE ============
+
+@app.get("/api/settings/last_update")
+def get_last_update(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "last_update").first()
+    return {"last_update": row.value if row else None}
+
+
+@app.put("/api/settings/last_update")
+def set_last_update(
+    body: dict,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    value = body.get("last_update", "")
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "last_update").first()
+    if row:
+        row.value = value
+    else:
+        db.add(models.AppSetting(key="last_update", value=value))
+    db.commit()
+    return {"last_update": value}
+
+
 @app.get("/api/suggestions")
 def get_suggestions(
     field: str,
@@ -503,11 +551,17 @@ def get_suggestions(
     if field not in allowed:
         raise HTTPException(400, "Invalid field")
 
+    bin_fields = {'bin', 'system_delimiter_bin'}
     col = allowed[field]
     q = db.query(col).filter(col.isnot(None))
     if query:
-        q = q.filter(col.cast(String).ilike(f"%{query}%"))
+        # Для БИН-полей убираем ведущие нули перед сравнением
+        search = (query.lstrip('0') or query) if field in bin_fields else query
+        q = q.filter(col.cast(String).ilike(f"%{search}%"))
     rows = q.distinct().limit(limit).all()
+    # Для БИН-полей форматируем с нулями в ответе
+    if field in bin_fields:
+        return [str(int(float(r[0]))).zfill(12) for r in rows if r[0] is not None]
     return [str(r[0]) for r in rows if r[0] is not None]
 
 

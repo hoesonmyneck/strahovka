@@ -55,6 +55,13 @@ class InsuranceRecord(Base):
         Index('idx_date_end', 'date_end'),  # для фильтра по дате окончания
     )
 
+class AppSetting(Base):
+    """Общие настройки приложения (ключ-значение)"""
+    __tablename__ = "app_settings"
+    key   = Column(String(100), primary_key=True)
+    value = Column(String(500))
+
+
 class User(Base):
     __tablename__ = "users"
     

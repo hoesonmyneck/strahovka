@@ -96,4 +96,15 @@ def init_default_users(db: Session):
         )
         db.add(regular_user)
     
+    # gak — просмотр всех регионов, без загрузки файлов
+    gak = get_user(db, "gak")
+    if not gak:
+        db.add(models.User(
+            username="gak",
+            hashed_password=get_password_hash("gak2026"),
+            role="user",
+            region=None,
+            is_active=1
+        ))
+
     db.commit()

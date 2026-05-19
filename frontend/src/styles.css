@@ -449,6 +449,16 @@ body {
   }
 }
 
+/* Дата обновления в шапке */
+.last-update-line {
+  font-size: 13px;
+  color: #666;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* Управление пользователями */
 .user-create-form {
   display: flex;

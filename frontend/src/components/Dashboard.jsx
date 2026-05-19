@@ -138,8 +138,8 @@ const Dashboard = () => {
 
   const [filters, setFilters] = useState(EMPTY_FILTERS)
 
-  // Опции дропдауна "истекает в ..."  (текущий + следующие 2 месяца)
-  const expiryOptions = [getMonthOption(0), getMonthOption(1), getMonthOption(2)]
+  // Все 12 месяцев начиная с текущего
+  const expiryOptions = Array.from({ length: 12 }, (_, i) => getMonthOption(i))
 
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
@@ -149,6 +149,9 @@ const Dashboard = () => {
   const [uploadFile, setUploadFile] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [lastUpdate, setLastUpdate] = useState(null)
+  const [editingDate, setEditingDate] = useState(false)
+  const [dateInput, setDateInput] = useState('')
 
   // ─── Регионы / районы ─────────────────────────────────────────────────────
   const [availableRegions, setAvailableRegions] = useState([])
@@ -200,11 +203,11 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       minWidth: 150,
     },
-    // Даты — скрыты в таблице, только в Excel
-    { field: 'contract_date', headerName: 'Дата договора', hide: true },
-    { field: 'date_beg', headerName: 'Дата начала', hide: true },
-    { field: 'date_end', headerName: 'Дата окончания', hide: true },
-    { field: 'rescinding_date', headerName: 'Дата расторжения', hide: true },
+    // Даты
+    { field: 'contract_date', headerName: 'Дата договора', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'date_beg', headerName: 'Дата начала', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 140 },
+    { field: 'date_end', headerName: 'Дата окончания', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'rescinding_date', headerName: 'Дата расторжения', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 160 },
     // Финансы и сотрудники
     {
       field: 'calculated_amount',
@@ -241,8 +244,9 @@ const Dashboard = () => {
     { field: 'name_oked', headerName: 'Вид деятельности (ОКЭД)', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 280 },
     // Доп. поля
     { field: 'ip', headerName: 'ИП', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 90 },
-    { field: 'tip', headerName: 'ТИП', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 90 },
-    { field: 'flag_head', headerName: 'Флаг', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 90 },
+    // ТИП и Флаг скрыты в таблице, но экспортируются в Excel
+    { field: 'tip', headerName: 'ТИП', hide: true },
+    { field: 'flag_head', headerName: 'Флаг', hide: true },
     {
       field: 'is_insured',
       headerName: 'Застрахован',
@@ -347,6 +351,22 @@ const Dashboard = () => {
 
   const fetchDataRef = useRef(fetchAll)
   useEffect(() => { fetchDataRef.current = fetchAll }, [fetchAll])
+
+  // ─── Дата обновления ──────────────────────────────────────────────────────
+  const fetchLastUpdate = useCallback(async () => {
+    try {
+      const res = await api.get('/api/settings/last_update')
+      setLastUpdate(res.data.last_update)
+    } catch {}
+  }, [])
+
+  const saveLastUpdate = async () => {
+    try {
+      await api.put('/api/settings/last_update', { last_update: dateInput })
+      setLastUpdate(dateInput)
+      setEditingDate(false)
+    } catch { toast.error('Ошибка сохранения') }
+  }
 
   // ─── Загрузка регионов (для admin — все регионы) ──────────────────────────
   const fetchRegions = useCallback(async () => {
@@ -453,6 +473,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchAll(1)
+    fetchLastUpdate()
     if (isAdmin()) {
       fetchRegions()
       fetchUsers()
@@ -470,7 +491,32 @@ const Dashboard = () => {
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Государственная компания по страхованию жизни</h1>
+        <div>
+          <h1>Государственная компания по страхованию жизни</h1>
+          <div className="last-update-line">
+            {editingDate ? (
+              <>
+                <span>Дата обновления: </span>
+                <input
+                  type="text"
+                  value={dateInput}
+                  onChange={e => setDateInput(e.target.value)}
+                  placeholder="дд.мм.гггг"
+                  style={{ width: 110, fontSize: 13, padding: '2px 6px', borderRadius: 4, border: '1px solid #aaa' }}
+                />
+                <button onClick={saveLastUpdate} style={{ marginLeft: 6, fontSize: 12, padding: '2px 8px', background: '#4a6fa5', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Сохранить</button>
+                <button onClick={() => setEditingDate(false)} style={{ marginLeft: 4, fontSize: 12, padding: '2px 8px', background: '#eee', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Отмена</button>
+              </>
+            ) : (
+              <>
+                <span>Дата обновления данных: <b>{lastUpdate || 'не указана'}</b></span>
+                {isAdmin() && (
+                  <button onClick={() => { setDateInput(lastUpdate || ''); setEditingDate(true) }} style={{ marginLeft: 8, fontSize: 12, padding: '2px 8px', background: 'transparent', border: '1px solid #aaa', borderRadius: 4, cursor: 'pointer' }}>✏️ Изменить</button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
         <div className="user-info">
           <span>{user?.username} ({user?.role})</span>
           <button onClick={logout} className="logout-btn">
@@ -549,15 +595,6 @@ const Dashboard = () => {
             />
           </div>
 
-          <div className="filter-group">
-            <label>№ Договора</label>
-            <input
-              type="text"
-              placeholder="Номер договора..."
-              value={filters.contract_number}
-              onChange={(e) => setFilters({ ...filters, contract_number: e.target.value })}
-            />
-          </div>
 
           {/* Для admin — выбор области; для регионального пользователя — скрыто */}
           {isAdmin() && (
@@ -627,41 +664,6 @@ const Dashboard = () => {
             </select>
           </div>
 
-          <div className="filter-group date-range">
-            <label>Дата договора</label>
-            <div className="date-inputs">
-              <DatePicker
-                selected={filters.contract_date_from}
-                onChange={(date) => setFilters({ ...filters, contract_date_from: date })}
-                placeholderText="С"
-                dateFormat="dd.MM.yyyy"
-              />
-              <DatePicker
-                selected={filters.contract_date_to}
-                onChange={(date) => setFilters({ ...filters, contract_date_to: date })}
-                placeholderText="По"
-                dateFormat="dd.MM.yyyy"
-              />
-            </div>
-          </div>
-
-          <div className="filter-group date-range">
-            <label>Дата окончания</label>
-            <div className="date-inputs">
-              <DatePicker
-                selected={filters.date_end_from}
-                onChange={(date) => setFilters({ ...filters, date_end_from: date })}
-                placeholderText="С"
-                dateFormat="dd.MM.yyyy"
-              />
-              <DatePicker
-                selected={filters.date_end_to}
-                onChange={(date) => setFilters({ ...filters, date_end_to: date })}
-                placeholderText="По"
-                dateFormat="dd.MM.yyyy"
-              />
-            </div>
-          </div>
         </div>
 
         <div className="filter-actions">
