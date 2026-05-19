@@ -40,13 +40,16 @@ def apply_filters(query, model, params: dict):
 
     bin_ = params.get("bin")
     if bin_:
-        query = query.filter(M.bin.cast(String).like(f"%{bin_}%"))
+        # Убираем ведущие нули чтобы "000101651508" находил число 101651508
+        bin_stripped = bin_.lstrip('0') or bin_
+        query = query.filter(M.bin.cast(String).like(f"%{bin_stripped}%"))
 
     if params.get("bin_name"):
         query = query.filter(M.bin_name.ilike(f"%{params['bin_name']}%"))
 
     if params.get("system_delimiter_bin"):
-        query = query.filter(M.system_delimiter_bin.cast(String).like(f"%{params['system_delimiter_bin']}%"))
+        sdb = params['system_delimiter_bin'].lstrip('0') or params['system_delimiter_bin']
+        query = query.filter(M.system_delimiter_bin.cast(String).like(f"%{sdb}%"))
 
     if params.get("system_delimiter_bin_name"):
         query = query.filter(M.system_delimiter_bin_name.ilike(f"%{params['system_delimiter_bin_name']}%"))

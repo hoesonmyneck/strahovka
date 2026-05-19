@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import api from '../utils/api.js'
@@ -150,8 +150,8 @@ const Dashboard = () => {
   const [isUploading, setIsUploading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  // ─── Колонки ──────────────────────────────────────────────────────────────
-  const columnDefs = [
+  // ─── Колонки (useMemo чтобы AG Grid не сбрасывал фильтры при ре-рендере) ──
+  const columnDefs = useMemo(() => [
     // Закреплённые слева
     {
       field: 'bin',
@@ -240,9 +240,9 @@ const Dashboard = () => {
         return params.value ? '✅ Да' : '❌ Нет'
       },
     },
-  ]
+  ], [])  // useMemo — колонки не пересоздаются при ре-рендере
 
-  const defaultColDef = {
+  const defaultColDef = useMemo(() => ({
     resizable: true,
     sortable: true,
     filter: true,
@@ -250,7 +250,7 @@ const Dashboard = () => {
     suppressMenu: false,
     wrapHeaderText: true,
     autoHeaderHeight: true,
-  }
+  }), [])
 
   // ─── Сбор параметров фильтра (топ-панель + фильтры в колонках AG Grid) ────
   const buildFilterParams = useCallback(() => {
