@@ -62,5 +62,6 @@ class User(Base):
     username = Column(String(50), unique=True, index=True)
     hashed_password = Column(String(255))
     role = Column(String(20), default="user")  # admin или user
+    region = Column(String(200), nullable=True)  # None = без ограничений, иначе = значение obl_name
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)

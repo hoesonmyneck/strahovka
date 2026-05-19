@@ -34,9 +34,14 @@ def startup_event():
         db.close()
 
 
-def apply_filters(query, model, params: dict):
-    """Применяет все фильтры к запросу"""
+def apply_filters(query, model, params: dict, force_region: str = None):
+    """Применяет все фильтры к запросу. force_region — обязательный регион для региональных пользователей."""
     M = model
+
+    # Региональный пользователь — жёстко фиксируем регион, obl_name из params игнорируем
+    if force_region:
+        query = query.filter(M.obl_name == force_region)
+        params = {k: v for k, v in params.items() if k != 'obl_name'}
 
     bin_ = params.get("bin")
     if bin_:
@@ -156,7 +161,6 @@ def get_metrics(
 ):
     params = locals()
     params.pop("current_user"); params.pop("db")
-    # Один SQL-запрос вместо трёх отдельных COUNT
     query = apply_filters(
         db.query(
             func.count().label("total"),
@@ -164,7 +168,8 @@ def get_metrics(
             func.sum(case((models.InsuranceRecord.is_insured == 0, 1), else_=0)).label("not_insured"),
         ),
         models.InsuranceRecord,
-        params
+        params,
+        force_region=current_user.region,
     )
     row = query.one()
     return schemas.MetricsResponse(
@@ -207,7 +212,7 @@ def get_records(
     db: Session = Depends(database.get_db)
 ):
     params = {k: v for k, v in locals().items() if k not in ("page", "page_size", "sort_by", "sort_order", "current_user", "db")}
-    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params)
+    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params, force_region=current_user.region)
 
     total = query.count()
 
@@ -246,7 +251,7 @@ def download_records(
     db: Session = Depends(database.get_db)
 ):
     params = {k: v for k, v in locals().items() if k not in ("current_user", "db")}
-    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params)
+    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params, force_region=current_user.region)
     records = query.all()
 
     data = []
@@ -384,6 +389,91 @@ def upload_file(
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"Error processing file: {str(e)}")
+
+
+# ============ REGIONS & DISTRICTS ============
+
+@app.get("/api/regions")
+def get_regions(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    """Список уникальных областей из таблицы (для фильтра)"""
+    rows = (
+        db.query(models.InsuranceRecord.obl_name)
+        .filter(models.InsuranceRecord.obl_name.isnot(None))
+        .distinct()
+        .order_by(models.InsuranceRecord.obl_name)
+        .all()
+    )
+    return [r[0] for r in rows if r[0]]
+
+
+@app.get("/api/districts")
+def get_districts(
+    region: str,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    """Список уникальных районов для заданной области"""
+    rows = (
+        db.query(models.InsuranceRecord.rai_name)
+        .filter(
+            models.InsuranceRecord.obl_name == region,
+            models.InsuranceRecord.rai_name.isnot(None),
+        )
+        .distinct()
+        .order_by(models.InsuranceRecord.rai_name)
+        .all()
+    )
+    return [r[0] for r in rows if r[0]]
+
+
+# ============ USER MANAGEMENT (ADMIN) ============
+
+@app.get("/api/users", response_model=List[schemas.UserResponse])
+def list_users(
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    return db.query(models.User).order_by(models.User.id).all()
+
+
+@app.post("/api/users", response_model=schemas.UserResponse)
+def create_user(
+    data: schemas.UserCreate,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    if db.query(models.User).filter(models.User.username == data.username).first():
+        raise HTTPException(400, "Пользователь с таким логином уже существует")
+    user = models.User(
+        username=data.username,
+        hashed_password=auth.get_password_hash(data.password),
+        role=data.role,
+        region=data.region,
+        is_active=1,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user(
+    user_id: int,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    if user.username in ("admin", "user"):
+        raise HTTPException(400, "Нельзя удалить системных пользователей")
+    db.delete(user)
+    db.commit()
+    return {"message": "Удалён"}
 
 
 @app.get("/api/suggestions")

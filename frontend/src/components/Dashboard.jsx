@@ -150,6 +150,16 @@ const Dashboard = () => {
   const [isUploading, setIsUploading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
+  // ─── Регионы / районы ─────────────────────────────────────────────────────
+  const [availableRegions, setAvailableRegions] = useState([])
+  const [availableDistricts, setAvailableDistricts] = useState([])
+
+  // ─── Управление пользователями (только admin) ─────────────────────────────
+  const [usersList, setUsersList] = useState([])
+  const [showUserMgmt, setShowUserMgmt] = useState(false)
+  const [newUser, setNewUser] = useState({ username: '', password: '', region: '' })
+  const [userMgmtMsg, setUserMgmtMsg] = useState('')
+
   // ─── Колонки (useMemo чтобы AG Grid не сбрасывал фильтры при ре-рендере) ──
   const columnDefs = useMemo(() => [
     // Закреплённые слева
@@ -338,6 +348,56 @@ const Dashboard = () => {
   const fetchDataRef = useRef(fetchAll)
   useEffect(() => { fetchDataRef.current = fetchAll }, [fetchAll])
 
+  // ─── Загрузка регионов (для admin — все регионы) ──────────────────────────
+  const fetchRegions = useCallback(async () => {
+    try {
+      const res = await api.get('/api/regions')
+      setAvailableRegions(res.data)
+    } catch {}
+  }, [])
+
+  // ─── Загрузка районов для выбранного региона ──────────────────────────────
+  const fetchDistricts = useCallback(async (region) => {
+    if (!region) { setAvailableDistricts([]); return }
+    try {
+      const res = await api.get('/api/districts', { params: { region } })
+      setAvailableDistricts(res.data)
+    } catch {}
+  }, [])
+
+  // ─── Управление пользователями ────────────────────────────────────────────
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await api.get('/api/users')
+      setUsersList(res.data)
+    } catch {}
+  }, [])
+
+  const createRegionalUser = async () => {
+    if (!newUser.username || !newUser.password || !newUser.region) {
+      setUserMgmtMsg('Заполните все поля')
+      return
+    }
+    try {
+      await api.post('/api/users', { ...newUser, role: 'user' })
+      setNewUser({ username: '', password: '', region: '' })
+      setUserMgmtMsg('Пользователь создан')
+      fetchUsers()
+    } catch (e) {
+      setUserMgmtMsg(e.response?.data?.detail || 'Ошибка')
+    }
+  }
+
+  const deleteUser = async (id) => {
+    if (!window.confirm('Удалить пользователя?')) return
+    try {
+      await api.delete(`/api/users/${id}`)
+      fetchUsers()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Ошибка удаления')
+    }
+  }
+
   const applyFilters = () => {
     setCurrentPage(1)
     fetchAll(1)
@@ -393,6 +453,13 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchAll(1)
+    if (isAdmin()) {
+      fetchRegions()
+      fetchUsers()
+    } else if (user?.region) {
+      // Региональный пользователь — загружаем только его районы
+      fetchDistricts(user.region)
+    }
   }, [])
 
   // Авто-ширина колонок после загрузки данных
@@ -492,15 +559,41 @@ const Dashboard = () => {
             />
           </div>
 
-          <div className="filter-group">
-            <label>Область</label>
-            <input
-              type="text"
-              placeholder="Область..."
-              value={filters.obl_name}
-              onChange={(e) => setFilters({ ...filters, obl_name: e.target.value })}
-            />
-          </div>
+          {/* Для admin — выбор области; для регионального пользователя — скрыто */}
+          {isAdmin() && (
+            <div className="filter-group">
+              <label>Область</label>
+              <select
+                value={filters.obl_name}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setFilters({ ...filters, obl_name: val, rai_name: '' })
+                  fetchDistricts(val)
+                }}
+              >
+                <option value="">Все области</option>
+                {availableRegions.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Район — для admin зависит от выбранной области, для регионального — все его районы */}
+          {(isAdmin() ? filters.obl_name : user?.region) && (
+            <div className="filter-group">
+              <label>Район</label>
+              <select
+                value={filters.rai_name}
+                onChange={(e) => setFilters({ ...filters, rai_name: e.target.value })}
+              >
+                <option value="">Все районы</option>
+                {availableDistricts.map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="filter-group">
             <label>Статус</label>
@@ -598,6 +691,76 @@ const Dashboard = () => {
               {isUploading ? 'Загрузка...' : 'Загрузить Excel'}
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Управление пользователями (только admin) */}
+      {isAdmin() && (
+        <div className="upload-section">
+          <h3
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => { setShowUserMgmt(v => !v); if (!showUserMgmt) fetchUsers() }}
+          >
+            👥 Управление региональными пользователями {showUserMgmt ? '▲' : '▼'}
+          </h3>
+
+          {showUserMgmt && (
+            <div style={{ marginTop: 12 }}>
+              {/* Создание нового пользователя */}
+              <div className="user-create-form">
+                <select
+                  value={newUser.region}
+                  onChange={(e) => {
+                    const r = e.target.value
+                    const slug = r.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+                    setNewUser({ region: r, username: slug, password: slug + '2026' })
+                  }}
+                >
+                  <option value="">— Выберите регион —</option>
+                  {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input
+                  type="text"
+                  placeholder="Логин"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                />
+                <input
+                  type="text"
+                  placeholder="Пароль"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                />
+                <button onClick={createRegionalUser} className="apply-btn" style={{ padding: '8px 16px' }}>
+                  Создать
+                </button>
+                {userMgmtMsg && <span style={{ marginLeft: 8, color: userMgmtMsg.includes('создан') ? 'green' : 'red' }}>{userMgmtMsg}</span>}
+              </div>
+
+              {/* Список пользователей */}
+              <table className="users-table">
+                <thead>
+                  <tr><th>Логин</th><th>Роль</th><th>Регион</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {usersList.map(u => (
+                    <tr key={u.id}>
+                      <td>{u.username}</td>
+                      <td>{u.role}</td>
+                      <td>{u.region || '— все регионы —'}</td>
+                      <td>
+                        {!['admin', 'user'].includes(u.username) && (
+                          <button onClick={() => deleteUser(u.id)} className="reset-btn" style={{ padding: '4px 10px', fontSize: 12 }}>
+                            Удалить
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

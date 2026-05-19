@@ -449,6 +449,45 @@ body {
   }
 }
 
+/* Управление пользователями */
+.user-create-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.user-create-form input,
+.user-create-form select {
+  padding: 8px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 160px;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.users-table th, .users-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8ecff;
+  text-align: left;
+}
+
+.users-table th {
+  background: #f0f4ff;
+  font-weight: 600;
+}
+
+.users-table tr:hover td {
+  background: #f8f9ff;
+}
+
 /* Полоска загрузки */
 .loading-bar {
   height: 3px;

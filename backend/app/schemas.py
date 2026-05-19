@@ -79,6 +79,7 @@ class MetricsResponse(BaseModel):
 class UserBase(BaseModel):
     username: str
     role: str = "user"
+    region: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str
@@ -86,7 +87,8 @@ class UserCreate(UserBase):
 class UserResponse(UserBase):
     id: int
     is_active: int
-    
+    region: Optional[str] = None
+
     class Config:
         from_attributes = True
 
