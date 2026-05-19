@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, String
+from sqlalchemy import func, and_, or_, String, case
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -153,11 +153,22 @@ def get_metrics(
 ):
     params = locals()
     params.pop("current_user"); params.pop("db")
-    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params)
-    total = query.count()
-    insured = query.filter(models.InsuranceRecord.is_insured == 1).count()
-    not_insured = query.filter(models.InsuranceRecord.is_insured == 0).count()
-    return schemas.MetricsResponse(total=total, insured=insured, not_insured=not_insured)
+    # Один SQL-запрос вместо трёх отдельных COUNT
+    query = apply_filters(
+        db.query(
+            func.count().label("total"),
+            func.sum(case((models.InsuranceRecord.is_insured == 1, 1), else_=0)).label("insured"),
+            func.sum(case((models.InsuranceRecord.is_insured == 0, 1), else_=0)).label("not_insured"),
+        ),
+        models.InsuranceRecord,
+        params
+    )
+    row = query.one()
+    return schemas.MetricsResponse(
+        total=row.total or 0,
+        insured=row.insured or 0,
+        not_insured=row.not_insured or 0
+    )
 
 
 # ============ RECORDS ============

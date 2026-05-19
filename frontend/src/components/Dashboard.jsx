@@ -119,6 +119,7 @@ const Dashboard = () => {
 
   const [uploadFile, setUploadFile] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
 
   // ─── Колонки ──────────────────────────────────────────────────────────────
   const columnDefs = [
@@ -269,9 +270,9 @@ const Dashboard = () => {
     }, 400)
   }, [])
 
-  const fetchMetrics = useCallback(async () => {
+  const fetchMetrics = useCallback(async (overrideParams) => {
     try {
-      const params = buildFilterParams()
+      const params = overrideParams ?? buildFilterParams()
       const response = await api.get('/api/metrics', { params })
       setMetrics(response.data)
     } catch (error) {
@@ -279,9 +280,10 @@ const Dashboard = () => {
     }
   }, [buildFilterParams])
 
-  const fetchData = useCallback(async (page = 1) => {
+  const fetchData = useCallback(async (page = 1, overrideParams) => {
     try {
-      const params = { ...buildFilterParams(), page, page_size: pageSize }
+      const base = overrideParams ?? buildFilterParams()
+      const params = { ...base, page, page_size: pageSize }
       const response = await api.get('/api/records', { params })
       setRowData(response.data.items)
       setTotalRecords(response.data.total)
@@ -291,14 +293,27 @@ const Dashboard = () => {
     }
   }, [buildFilterParams])
 
-  // Ref чтобы handleGridFilterChanged мог вызывать свежую версию fetchData
-  const fetchDataRef = useRef(fetchData)
-  useEffect(() => { fetchDataRef.current = fetchData }, [fetchData])
+  // Параллельная загрузка метрик и данных
+  const fetchAll = useCallback(async (page = 1) => {
+    setIsLoading(true)
+    try {
+      const filterParams = buildFilterParams()
+      await Promise.all([
+        fetchMetrics(filterParams),
+        fetchData(page, filterParams),
+      ])
+    } finally {
+      setIsLoading(false)
+    }
+  }, [buildFilterParams, fetchMetrics, fetchData])
+
+  // Ref чтобы handleGridFilterChanged мог вызывать свежую версию fetchAll
+  const fetchDataRef = useRef(fetchAll)
+  useEffect(() => { fetchDataRef.current = fetchAll }, [fetchAll])
 
   const applyFilters = () => {
     setCurrentPage(1)
-    fetchMetrics()
-    fetchData(1)
+    fetchAll(1)
   }
 
   const resetFilters = () => {
@@ -309,7 +324,7 @@ const Dashboard = () => {
       date_end_from: null, date_end_to: null, obl_name: '', rai_name: '',
       opf_name: '', is_insured: '', expires_in_months: '',
     })
-    setTimeout(() => { fetchMetrics(); fetchData(1) }, 0)
+    setTimeout(() => fetchAll(1), 0)
   }
 
   const downloadExcel = async () => {
@@ -352,11 +367,10 @@ const Dashboard = () => {
   }
 
   const totalPages = Math.ceil(totalRecords / pageSize)
-  const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchData(page) }
+  const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchAll(page) }
 
   useEffect(() => {
-    fetchMetrics()
-    fetchData(1)
+    fetchAll(1)
   }, [])
 
   // Авто-ширина колонок после загрузки данных
@@ -560,6 +574,11 @@ const Dashboard = () => {
 
       {/* Таблица */}
       <div className="table-section">
+        {isLoading && (
+          <div className="loading-bar">
+            <div className="loading-bar-inner" />
+          </div>
+        )}
         <div className="table-header">
           <span>Всего: {totalRecords.toLocaleString()} записей</span>
           <div className="pagination">

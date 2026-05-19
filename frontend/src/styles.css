@@ -449,6 +449,28 @@ body {
   }
 }
 
+/* Полоска загрузки */
+.loading-bar {
+  height: 3px;
+  background: #e8ecff;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.loading-bar-inner {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, #4a6fa5, #667eea);
+  border-radius: 2px;
+  animation: loading-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes loading-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
 /* Автодополнение */
 .suggestions-dropdown {
   position: absolute;
