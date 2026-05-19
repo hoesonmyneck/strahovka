@@ -198,7 +198,7 @@ const Dashboard = () => {
       headerName: 'Сумма',
       sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true,
       minWidth: 140,
-      valueFormatter: (p) => fmtNumber(p.value, 2),
+      valueFormatter: (p) => fmtNumber(p.value, 0),
     },
     { field: 'count_employees', headerName: 'Застрахованных', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'total_employees_count', headerName: 'Всего сотр.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 130 },
