@@ -15,6 +15,16 @@ from .database import SessionLocal, engine
 
 models.Base.metadata.create_all(bind=engine)
 
+# Автоматическая миграция: добавляем колонку region если её нет
+with engine.connect() as conn:
+    try:
+        conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)"
+        ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
 app = FastAPI(title="Strahovka Insurance API")
 
 app.add_middleware(
