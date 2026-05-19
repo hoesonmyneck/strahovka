@@ -159,6 +159,8 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       width: 150, pinned: 'left',
       valueFormatter: binFormatter,
+      // filterValueGetter позволяет AG Grid искать по строке с нулями
+      filterValueGetter: (p) => p.data?.bin != null ? String(p.data.bin).padStart(12, '0') : '',
     },
     {
       field: 'bin_name',
@@ -173,6 +175,7 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       width: 200,
       valueFormatter: binFormatter,
+      filterValueGetter: (p) => p.data?.system_delimiter_bin != null ? String(p.data.system_delimiter_bin).padStart(12, '0') : '',
     },
     {
       field: 'system_delimiter_bin_name',
@@ -292,16 +295,8 @@ const Dashboard = () => {
     return params
   }, [filters])
 
-  // При изменении фильтра в колонке — делаем серверный запрос
-  const handleGridFilterChanged = useCallback(() => {
-    if (!gridRef.current?.api) return
-    setCurrentPage(1)
-    // Небольшая задержка чтобы пользователь мог дописать
-    clearTimeout(handleGridFilterChanged._timer)
-    handleGridFilterChanged._timer = setTimeout(() => {
-      fetchDataRef.current(1)
-    }, 400)
-  }, [])
+  // Фильтры в колонках AG Grid работают клиентски на текущей странице.
+  // При скачивании Excel buildFilterParams() читает их и передаёт на сервер.
 
   const fetchMetrics = useCallback(async (overrideParams) => {
     try {
@@ -340,7 +335,6 @@ const Dashboard = () => {
     }
   }, [buildFilterParams, fetchMetrics, fetchData])
 
-  // Ref чтобы handleGridFilterChanged мог вызывать свежую версию fetchAll
   const fetchDataRef = useRef(fetchAll)
   useEffect(() => { fetchDataRef.current = fetchAll }, [fetchAll])
 
@@ -635,7 +629,6 @@ const Dashboard = () => {
             suppressClipboard={false}
             floatingFiltersHeight={40}
             onFirstDataRendered={onFirstDataRendered}
-            onFilterChanged={handleGridFilterChanged}
           />
         </div>
 
