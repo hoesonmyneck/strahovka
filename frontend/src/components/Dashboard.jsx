@@ -335,23 +335,25 @@ const Dashboard = () => {
     }
   }, [buildFilterParams])
 
-  // Флаг — true пока мы сами обновляем rowData, чтобы не зациклиться
-  const suppressFilterRef = useRef(false)
+  // Запоминаем модель фильтра с которой делали последний запрос.
+  // Если AG Grid вызывает onFilterChanged после setRowData — модель та же → пропускаем.
+  const lastFetchedFilterModelRef = useRef('')
 
   // Параллельная загрузка метрик и данных
   const fetchAll = useCallback(async (page = 1) => {
     setIsLoading(true)
-    suppressFilterRef.current = true   // блокируем onFilterChanged во время загрузки
     try {
       const filterParams = buildFilterParams()
+      // Фиксируем текущую модель фильтров AG Grid до начала запроса
+      lastFetchedFilterModelRef.current = JSON.stringify(
+        gridRef.current?.api?.getFilterModel() || {}
+      )
       await Promise.all([
         fetchMetrics(filterParams),
         fetchData(page, filterParams),
       ])
     } finally {
       setIsLoading(false)
-      // Снимаем блокировку после того как AG Grid обработает новые данные
-      setTimeout(() => { suppressFilterRef.current = false }, 100)
     }
   }, [buildFilterParams, fetchMetrics, fetchData])
 
@@ -361,12 +363,13 @@ const Dashboard = () => {
   // Debounce-таймер для фильтров в заголовках столбцов AG Grid
   const filterChangeTimer = useRef(null)
   const onAgGridFilterChanged = useCallback(() => {
-    // Игнорируем событие если оно вызвано нашим же обновлением данных
-    if (suppressFilterRef.current) return
+    const currentModel = JSON.stringify(gridRef.current?.api?.getFilterModel() || {})
+    // Если модель фильтра не изменилась — событие вызвано обновлением rowData, игнорируем
+    if (currentModel === lastFetchedFilterModelRef.current) return
     clearTimeout(filterChangeTimer.current)
     filterChangeTimer.current = setTimeout(() => {
       fetchDataRef.current(1)
-    }, 1000)
+    }, 600)
   }, [])
 
   // ─── Дата обновления ──────────────────────────────────────────────────────
