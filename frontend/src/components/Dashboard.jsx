@@ -352,6 +352,15 @@ const Dashboard = () => {
   const fetchDataRef = useRef(fetchAll)
   useEffect(() => { fetchDataRef.current = fetchAll }, [fetchAll])
 
+  // Debounce-таймер для фильтров в заголовках столбцов AG Grid
+  const filterChangeTimer = useRef(null)
+  const onAgGridFilterChanged = useCallback(() => {
+    clearTimeout(filterChangeTimer.current)
+    filterChangeTimer.current = setTimeout(() => {
+      fetchDataRef.current(1)
+    }, 400)
+  }, [])
+
   // ─── Дата обновления ──────────────────────────────────────────────────────
   const fetchLastUpdate = useCallback(async () => {
     try {
@@ -790,6 +799,7 @@ const Dashboard = () => {
             suppressClipboard={false}
             floatingFiltersHeight={40}
             onFirstDataRendered={onFirstDataRendered}
+            onFilterChanged={onAgGridFilterChanged}
           />
         </div>
 
