@@ -366,7 +366,7 @@ const Dashboard = () => {
     clearTimeout(filterChangeTimer.current)
     filterChangeTimer.current = setTimeout(() => {
       fetchDataRef.current(1)
-    }, 600)
+    }, 1000)
   }, [])
 
   // ─── Дата обновления ──────────────────────────────────────────────────────
