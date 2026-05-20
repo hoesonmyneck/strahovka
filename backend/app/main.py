@@ -297,7 +297,6 @@ def download_records(
             'Код ОКЭД': r.id_oked,
             'Вид деятельности (ОКЭД)': r.name_oked,
             'ИП': r.ip,
-            'ТИП': r.tip,
             'Флаг': r.flag_head,
             'Застрахован': 'Да' if r.is_insured else 'Нет',
         })
