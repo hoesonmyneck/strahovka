@@ -357,54 +357,59 @@ def upload_file(
         def safe_date(val):
             return val if pd.notna(val) else None
 
+        now = datetime.now()
+        records = []
         for idx, row in df.iterrows():
             try:
-                record = models.InsuranceRecord(
-                    row_num=safe_int(row.get('   ', idx + 1)),
-                    bin=safe_int(row.get('BIN')),
-                    system_delimiter_bin=safe_float(row.get('SYSTEM_DELIMITER_BIN')),
-                    system_delimiter_bin_name=safe_str(row.get('SYSTEM_DELIMITER_BIN_NAME')),
-                    contract_number=safe_str(row.get('CONTRACT_NUMBER')),
-                    contract_date=safe_date(row.get('CONTRACT_DATE')),
-                    date_beg=safe_date(row.get('DATE_BEG')),
-                    date_end=safe_date(row.get('DATE_END')),
-                    rescinding_date=safe_float(row.get('RESCINDING_DATE')),
-                    calculated_amount=safe_float(row.get('CALCULATED_AMOUNT')),
-                    count_employees=safe_float(row.get('COUNT_EMPLOYEES')),
-                    total_employees_count=safe_float(row.get('TOTAL_EMPLOYEES_COUNT')),
-                    id_system=safe_float(row.get('ID')),
-                    flag_head=safe_float(row.get('FLAG_HEAD')),
-                    sys_date=safe_date(row.get('SYS_DATE')),
-                    bin_name=safe_str(row.get('BIN_NAME')),
-                    id_reg=safe_int(row.get('ID_REG')),
-                    obl_name=safe_str(row.get('OBL_NAME')),
-                    idrai=safe_int(row.get('IDRAI')),
-                    rai_name=safe_str(row.get('RAI_NAME')),
-                    address=safe_str(row.get('ADDRESS')),
-                    phone=safe_str(row.get('PHONE')),
-                    mail=safe_float(row.get('MAIL')),
-                    leader_surname=safe_str(row.get('LEADER_SURNAME')),
-                    leader_name=safe_str(row.get('LEADER_NAME')),
-                    leader_middlename=safe_str(row.get('LEADER_MIDDLENAME')),
-                    opf=safe_float(row.get('OPF')),
-                    opf_name=safe_str(row.get('OPF_NAME')),
-                    id_oked=safe_str(row.get('ID_OKED')),
-                    name_oked=safe_str(row.get('NAME_OKED')),
-                    kol_12mes=safe_int(row.get('KOL_12MES')),
-                    fot_12mes=safe_int(row.get('FOT_12MES')),
-                    esutd_akt_td=safe_int(row.get('ESUTD_AKT_TD')),
-                    ip=safe_int(row.get('IP')),
-                    tip=safe_int(row.get('TIP')),
-                    is_insured=1 if (safe_date(row.get('DATE_END')) and row.get('DATE_END') > datetime.now()) else 0
-                )
-                db.add(record)
-                if (idx + 1) % 1000 == 0:
-                    db.commit()
+                date_end_val = safe_date(row.get('DATE_END'))
+                records.append({
+                    'row_num': safe_int(row.get('   ', idx + 1)),
+                    'bin': safe_int(row.get('BIN')),
+                    'system_delimiter_bin': safe_float(row.get('SYSTEM_DELIMITER_BIN')),
+                    'system_delimiter_bin_name': safe_str(row.get('SYSTEM_DELIMITER_BIN_NAME')),
+                    'contract_number': safe_str(row.get('CONTRACT_NUMBER')),
+                    'contract_date': safe_date(row.get('CONTRACT_DATE')),
+                    'date_beg': safe_date(row.get('DATE_BEG')),
+                    'date_end': date_end_val,
+                    'rescinding_date': safe_float(row.get('RESCINDING_DATE')),
+                    'calculated_amount': safe_float(row.get('CALCULATED_AMOUNT')),
+                    'count_employees': safe_float(row.get('COUNT_EMPLOYEES')),
+                    'total_employees_count': safe_float(row.get('TOTAL_EMPLOYEES_COUNT')),
+                    'id_system': safe_float(row.get('ID')),
+                    'flag_head': safe_float(row.get('FLAG_HEAD')),
+                    'sys_date': safe_date(row.get('SYS_DATE')),
+                    'bin_name': safe_str(row.get('BIN_NAME')),
+                    'id_reg': safe_int(row.get('ID_REG')),
+                    'obl_name': safe_str(row.get('OBL_NAME')),
+                    'idrai': safe_int(row.get('IDRAI')),
+                    'rai_name': safe_str(row.get('RAI_NAME')),
+                    'address': safe_str(row.get('ADDRESS')),
+                    'phone': safe_str(row.get('PHONE')),
+                    'mail': safe_float(row.get('MAIL')),
+                    'leader_surname': safe_str(row.get('LEADER_SURNAME')),
+                    'leader_name': safe_str(row.get('LEADER_NAME')),
+                    'leader_middlename': safe_str(row.get('LEADER_MIDDLENAME')),
+                    'opf': safe_float(row.get('OPF')),
+                    'opf_name': safe_str(row.get('OPF_NAME')),
+                    'id_oked': safe_str(row.get('ID_OKED')),
+                    'name_oked': safe_str(row.get('NAME_OKED')),
+                    'kol_12mes': safe_int(row.get('KOL_12MES')),
+                    'fot_12mes': safe_int(row.get('FOT_12MES')),
+                    'esutd_akt_td': safe_int(row.get('ESUTD_AKT_TD')),
+                    'ip': safe_int(row.get('IP')),
+                    'tip': safe_int(row.get('TIP')),
+                    'is_insured': 1 if (date_end_val and date_end_val > now) else 0,
+                    'created_at': now,
+                    'updated_at': now,
+                })
             except Exception as e:
                 print(f"Error processing row {idx}: {e}")
                 continue
 
-        db.commit()
+        BATCH = 5000
+        for i in range(0, len(records), BATCH):
+            db.bulk_insert_mappings(models.InsuranceRecord, records[i:i + BATCH])
+            db.commit()
         count = db.query(models.InsuranceRecord).count()
         # Обновляем дату загрузки
         today = date.today().strftime("%d.%m.%Y")
