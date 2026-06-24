@@ -9,6 +9,9 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import io
 import os
+import tempfile
+import shutil
+import openpyxl
 
 from . import models, schemas, database, auth
 from .database import SessionLocal, engine
@@ -332,35 +335,52 @@ def upload_file(
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(400, "Only Excel files are allowed")
 
+    tmp_path = None
     try:
-        contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        # Stream to disk — не грузим 145MB целиком в RAM
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
 
-        db.query(models.InsuranceRecord).delete()
-        db.commit()
+        # read_only=True — потоковое чтение, память ~200MB вместо 12GB
+        wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        headers = list(next(rows_iter))
 
         def safe_int(val):
+            if val is None:
+                return None
             try:
-                return int(val) if pd.notna(val) else None
+                return int(val)
             except Exception:
                 return None
 
         def safe_float(val):
+            if val is None:
+                return None
             try:
-                return float(val) if pd.notna(val) else None
+                f = float(val)
+                return None if f != f else f
             except Exception:
                 return None
 
         def safe_str(val):
-            return str(val) if pd.notna(val) else None
+            return str(val) if val is not None else None
 
         def safe_date(val):
-            return val if pd.notna(val) else None
+            return val if val is not None else None
+
+        db.query(models.InsuranceRecord).delete()
+        db.commit()
 
         now = datetime.now()
         records = []
-        for idx, row in df.iterrows():
+        BATCH = 5000
+
+        for idx, row_vals in enumerate(rows_iter):
             try:
+                row = dict(zip(headers, row_vals))
                 date_end_val = safe_date(row.get('DATE_END'))
                 records.append({
                     'row_num': safe_int(row.get('   ', idx + 1)),
@@ -402,16 +422,23 @@ def upload_file(
                     'created_at': now,
                     'updated_at': now,
                 })
+
+                if len(records) >= BATCH:
+                    db.bulk_insert_mappings(models.InsuranceRecord, records)
+                    db.commit()
+                    records = []
+
             except Exception as e:
                 print(f"Error processing row {idx}: {e}")
                 continue
 
-        BATCH = 5000
-        for i in range(0, len(records), BATCH):
-            db.bulk_insert_mappings(models.InsuranceRecord, records[i:i + BATCH])
+        if records:
+            db.bulk_insert_mappings(models.InsuranceRecord, records)
             db.commit()
+
+        wb.close()
+
         count = db.query(models.InsuranceRecord).count()
-        # Обновляем дату загрузки
         today = date.today().strftime("%d.%m.%Y")
         setting = db.query(models.AppSetting).filter(models.AppSetting.key == "last_update").first()
         if setting:
@@ -424,6 +451,9 @@ def upload_file(
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"Error processing file: {str(e)}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ============ REGIONS & DISTRICTS ============
