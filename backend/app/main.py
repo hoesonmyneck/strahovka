@@ -91,10 +91,16 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     if params.get("date_beg_to"):
         query = query.filter(M.date_beg <= params["date_beg_to"])
 
-    if params.get("date_end_from"):
-        query = query.filter(M.date_end >= params["date_end_from"])
-    if params.get("date_end_to"):
-        query = query.filter(M.date_end <= params["date_end_to"])
+    if params.get("date_end_from") or params.get("date_end_to"):
+        # Если дата расторжения есть и раньше даты окончания — фильтруем по ней
+        effective_end = case(
+            [(and_(M.rescinding_date != None, M.rescinding_date < M.date_end), M.rescinding_date)],
+            else_=M.date_end
+        )
+        if params.get("date_end_from"):
+            query = query.filter(effective_end >= params["date_end_from"])
+        if params.get("date_end_to"):
+            query = query.filter(effective_end <= params["date_end_to"])
 
     if params.get("obl_name"):
         query = query.filter(M.obl_name.ilike(f"%{params['obl_name']}%"))
@@ -391,7 +397,7 @@ def upload_file(
                     'contract_date': safe_date(row.get('CONTRACT_DATE')),
                     'date_beg': safe_date(row.get('DATE_BEG')),
                     'date_end': date_end_val,
-                    'rescinding_date': safe_float(row.get('RESCINDING_DATE')),
+                    'rescinding_date': safe_date(row.get('RESCINDING_DATE')),
                     'calculated_amount': safe_float(row.get('CALCULATED_AMOUNT')),
                     'count_employees': safe_float(row.get('COUNT_EMPLOYEES')),
                     'total_employees_count': safe_float(row.get('TOTAL_EMPLOYEES_COUNT')),

@@ -17,7 +17,7 @@ class InsuranceRecord(Base):
     contract_date = Column(Date)
     date_beg = Column(Date)
     date_end = Column(Date, index=True)  # для фильтра "истекает через N месяцев"
-    rescinding_date = Column(Float)
+    rescinding_date = Column(Date)
     calculated_amount = Column(Float)
     count_employees = Column(Float)
     total_employees_count = Column(Float)
