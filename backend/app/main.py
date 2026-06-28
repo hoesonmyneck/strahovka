@@ -374,7 +374,11 @@ def upload_file(
             return str(val) if val is not None else None
 
         def safe_date(val):
-            return val if val is not None else None
+            if val is None:
+                return None
+            if isinstance(val, str):
+                return None  # malformed string dates (e.g. '16.04.0212') → NULL
+            return val
 
         db.query(models.InsuranceRecord).delete()
         db.commit()
@@ -396,7 +400,7 @@ def upload_file(
                     'contract_date': safe_date(row.get('CONTRACT_DATE')),
                     'date_beg': safe_date(row.get('DATE_BEG')),
                     'date_end': date_end_val,
-                    'rescinding_date': safe_float(row.get('RESCINDING_DATE')),
+                    'rescinding_date': safe_date(row.get('RESCINDING_DATE')),
                     'calculated_amount': safe_float(row.get('CALCULATED_AMOUNT')),
                     'count_employees': safe_float(row.get('COUNT_EMPLOYEES')),
                     'total_employees_count': safe_float(row.get('TOTAL_EMPLOYEES_COUNT')),
@@ -429,8 +433,12 @@ def upload_file(
                 })
 
                 if len(records) >= BATCH:
-                    db.bulk_insert_mappings(models.InsuranceRecord, records)
-                    db.commit()
+                    try:
+                        db.bulk_insert_mappings(models.InsuranceRecord, records)
+                        db.commit()
+                    except Exception as batch_err:
+                        db.rollback()
+                        print(f"Batch insert failed: {batch_err}")
                     records = []
 
             except Exception as e:
@@ -438,8 +446,12 @@ def upload_file(
                 continue
 
         if records:
-            db.bulk_insert_mappings(models.InsuranceRecord, records)
-            db.commit()
+            try:
+                db.bulk_insert_mappings(models.InsuranceRecord, records)
+                db.commit()
+            except Exception as batch_err:
+                db.rollback()
+                print(f"Final batch insert failed: {batch_err}")
 
         wb.close()
 
