@@ -11,7 +11,7 @@ class InsuranceRecordBase(BaseModel):
     contract_date: Optional[date] = None
     date_beg: Optional[date] = None
     date_end: Optional[date] = None
-    rescinding_date: Optional[float] = None
+    rescinding_date: Optional[date] = None
     calculated_amount: Optional[float] = None
     count_employees: Optional[float] = None
     total_employees_count: Optional[float] = None
