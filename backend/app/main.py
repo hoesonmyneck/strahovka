@@ -91,10 +91,15 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     if params.get("date_beg_to"):
         query = query.filter(M.date_beg <= params["date_beg_to"])
 
-    if params.get("date_end_from"):
-        query = query.filter(M.date_end >= params["date_end_from"])
-    if params.get("date_end_to"):
-        query = query.filter(M.date_end <= params["date_end_to"])
+    if params.get("date_end_from") or params.get("date_end_to"):
+        effective_end = case(
+            [(and_(M.rescinding_date != None, M.rescinding_date < M.date_end), M.rescinding_date)],
+            else_=M.date_end
+        )
+        if params.get("date_end_from"):
+            query = query.filter(effective_end >= params["date_end_from"])
+        if params.get("date_end_to"):
+            query = query.filter(effective_end <= params["date_end_to"])
 
     if params.get("obl_name"):
         query = query.filter(M.obl_name.ilike(f"%{params['obl_name']}%"))
