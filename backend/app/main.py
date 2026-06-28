@@ -93,7 +93,7 @@ def apply_filters(query, model, params: dict, force_region: str = None):
 
     if params.get("date_end_from") or params.get("date_end_to"):
         effective_end = case(
-            [(and_(M.rescinding_date != None, M.rescinding_date < M.date_end), M.rescinding_date)],
+            (and_(M.rescinding_date != None, M.rescinding_date < M.date_end), M.rescinding_date),
             else_=M.date_end
         )
         if params.get("date_end_from"):
