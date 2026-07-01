@@ -414,12 +414,12 @@ const Dashboard = () => {
   }, [])
 
   const createRegionalUser = async () => {
-    if (!newUser.username || !newUser.password || !newUser.region) {
+    if (!newUser.username || !newUser.password) {
       setUserMgmtMsg('Заполните все поля')
       return
     }
     try {
-      await api.post('/api/users', { ...newUser, role: 'user' })
+      await api.post('/api/users', { ...newUser, role: 'user', region: newUser.region || null })
       setNewUser({ username: '', password: '', region: '' })
       setUserMgmtMsg('Пользователь создан')
       fetchUsers()
@@ -734,7 +734,7 @@ const Dashboard = () => {
                   value={newUser.region}
                   onChange={(e) => setNewUser({ ...newUser, region: e.target.value })}
                 >
-                  <option value="">— Выберите регион —</option>
+                  <option value="">— Весь Казахстан —</option>
                   {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
                 <input
