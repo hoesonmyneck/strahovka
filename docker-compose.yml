@@ -23,6 +23,7 @@ services:
     container_name: strahovka-backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/strahovka
+      TZ: Asia/Almaty
     ports:
       - "8001:8000"
     depends_on:
