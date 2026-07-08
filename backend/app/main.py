@@ -27,6 +27,16 @@ with engine.connect() as _conn:
                value VARCHAR(500)
            )""",
         "INSERT INTO app_settings (key, value) VALUES ('last_update', NULL) ON CONFLICT DO NOTHING",
+        """CREATE TABLE IF NOT EXISTS login_logs (
+               id         SERIAL PRIMARY KEY,
+               username   VARCHAR(50),
+               role       VARCHAR(20),
+               region     VARCHAR(200),
+               ip_address VARCHAR(64),
+               user_agent VARCHAR(500),
+               logged_at  TIMESTAMP DEFAULT NOW()
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_login_logs_logged_at ON login_logs (logged_at)",
     ]:
         try:
             _conn.execute(__import__('sqlalchemy').text(_sql))
@@ -136,7 +146,7 @@ def apply_filters(query, model, params: dict, force_region: str = None):
 # ============ AUTH ============
 
 @app.post("/api/auth/login", response_model=schemas.Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     user = auth.authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -144,6 +154,24 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Журналируем вход. Ошибка логирования не должна блокировать вход.
+    try:
+        fwd = request.headers.get("x-forwarded-for")
+        ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
+        db.add(models.LoginLog(
+            username=user.username,
+            role=user.role,
+            region=user.region,
+            ip_address=ip,
+            user_agent=(request.headers.get("user-agent") or "")[:500] or None,
+            logged_at=datetime.now(),
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Failed to write login log: {e}")
+
     access_token = auth.create_access_token(
         data={"sub": user.username, "role": user.role}
     )
@@ -556,6 +584,38 @@ def delete_user(
     db.delete(user)
     db.commit()
     return {"message": "Удалён"}
+
+
+# ============ LOGIN LOGS ============
+
+@app.get("/api/logs", response_model=schemas.LoginLogList)
+def get_login_logs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    username: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    query = db.query(models.LoginLog)
+
+    if username:
+        query = query.filter(models.LoginLog.username.ilike(f"%{username}%"))
+    if date_from:
+        query = query.filter(models.LoginLog.logged_at >= date_from)
+    if date_to:
+        # включаем весь день date_to
+        query = query.filter(models.LoginLog.logged_at < date_to + timedelta(days=1))
+
+    total = query.count()
+    items = (
+        query.order_by(models.LoginLog.logged_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return schemas.LoginLogList(items=items, total=total, page=page, page_size=page_size)
 
 
 # ============ LAST UPDATE DATE ============

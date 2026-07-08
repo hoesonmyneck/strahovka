@@ -72,3 +72,20 @@ class User(Base):
     region = Column(String(200), nullable=True)  # None = без ограничений, иначе = значение obl_name
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LoginLog(Base):
+    """Журнал входов в систему"""
+    __tablename__ = "login_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), index=True)
+    role = Column(String(20))
+    region = Column(String(200), nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    logged_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index('idx_login_logs_logged_at', 'logged_at'),
+    )

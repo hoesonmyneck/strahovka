@@ -12,7 +12,9 @@ import {
   Filter,
   Users,
   Shield,
-  ShieldOff
+  ShieldOff,
+  ScrollText,
+  X
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 
@@ -162,6 +164,15 @@ const Dashboard = () => {
   const [showUserMgmt, setShowUserMgmt] = useState(false)
   const [newUser, setNewUser] = useState({ username: '', password: '', region: '' })
   const [userMgmtMsg, setUserMgmtMsg] = useState('')
+
+  // ─── Логи входов (только admin) ───────────────────────────────────────────
+  const [showLogs, setShowLogs] = useState(false)
+  const [logs, setLogs] = useState([])
+  const [logsTotal, setLogsTotal] = useState(0)
+  const [logsPage, setLogsPage] = useState(1)
+  const [logsUserFilter, setLogsUserFilter] = useState('')
+  const [logsLoading, setLogsLoading] = useState(false)
+  const LOGS_PAGE_SIZE = 50
 
   // ─── Колонки (useMemo чтобы AG Grid не сбрасывал фильтры при ре-рендере) ──
   const columnDefs = useMemo(() => [
@@ -438,6 +449,28 @@ const Dashboard = () => {
     }
   }
 
+  // ─── Логи входов ──────────────────────────────────────────────────────────
+  const fetchLogs = useCallback(async (page = 1, username = '') => {
+    setLogsLoading(true)
+    try {
+      const res = await api.get('/api/logs', {
+        params: { page, page_size: LOGS_PAGE_SIZE, username: username || undefined }
+      })
+      setLogs(res.data.items)
+      setLogsTotal(res.data.total)
+      setLogsPage(res.data.page)
+    } catch (e) {
+      toast.error('Ошибка загрузки логов')
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [])
+
+  const openLogs = () => {
+    setShowLogs(true)
+    fetchLogs(1, logsUserFilter)
+  }
+
   const applyFilters = () => {
     setCurrentPage(1)
     fetchAll(1)
@@ -539,11 +572,97 @@ const Dashboard = () => {
         </div>
         <div className="user-info">
           <span>{user?.username} ({user?.role})</span>
+          {isAdmin() && (
+            <button onClick={openLogs} className="logs-btn">
+              <ScrollText size={18} /> Логи
+            </button>
+          )}
           <button onClick={logout} className="logout-btn">
             <LogOut size={18} /> Выйти
           </button>
         </div>
       </header>
+
+      {/* Модалка с логами входов (только admin) */}
+      {showLogs && (
+        <div className="logs-overlay" onClick={() => setShowLogs(false)}>
+          <div className="logs-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="logs-modal-header">
+              <h3><ScrollText size={20} /> Логи входов в систему</h3>
+              <button onClick={() => setShowLogs(false)} className="logs-close-btn">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="logs-toolbar">
+              <input
+                type="text"
+                placeholder="Фильтр по логину..."
+                value={logsUserFilter}
+                onChange={(e) => setLogsUserFilter(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(1, logsUserFilter) }}
+              />
+              <button onClick={() => fetchLogs(1, logsUserFilter)} className="apply-btn" style={{ padding: '8px 16px' }}>
+                <Search size={16} /> Найти
+              </button>
+              <span style={{ marginLeft: 'auto', color: '#666', fontSize: 13 }}>
+                Всего записей: <b>{logsTotal.toLocaleString()}</b>
+              </span>
+            </div>
+
+            <div className="logs-table-wrap">
+              {logsLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
+              ) : logs.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Записей нет</div>
+              ) : (
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Дата и время</th>
+                      <th>Логин</th>
+                      <th>Роль</th>
+                      <th>Регион</th>
+                      <th>IP-адрес</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(l => (
+                      <tr key={l.id}>
+                        <td>{new Date(l.logged_at).toLocaleString('ru-RU')}</td>
+                        <td><b>{l.username}</b></td>
+                        <td>{l.role}</td>
+                        <td>{l.region || '— все регионы —'}</td>
+                        <td>{l.ip_address || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {logsTotal > LOGS_PAGE_SIZE && (
+              <div className="logs-pagination">
+                <button
+                  disabled={logsPage <= 1}
+                  onClick={() => fetchLogs(logsPage - 1, logsUserFilter)}
+                >
+                  ← Назад
+                </button>
+                <span>
+                  Стр. {logsPage} из {Math.ceil(logsTotal / LOGS_PAGE_SIZE)}
+                </span>
+                <button
+                  disabled={logsPage >= Math.ceil(logsTotal / LOGS_PAGE_SIZE)}
+                  onClick={() => fetchLogs(logsPage + 1, logsUserFilter)}
+                >
+                  Вперёд →
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Метрики */}
       <div className="metrics">

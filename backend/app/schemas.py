@@ -99,3 +99,23 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
+
+
+class LoginLogResponse(BaseModel):
+    id: int
+    username: str
+    role: Optional[str] = None
+    region: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    logged_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LoginLogList(BaseModel):
+    items: List[LoginLogResponse]
+    total: int
+    page: int
+    page_size: int
