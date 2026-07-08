@@ -2,11 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Установка зависимостей системы
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Системные пакеты не нужны: все зависимости ставятся из готовых wheel'ов.
+# psycopg2-binary несёт libpq внутри себя. Если заменить его на psycopg2,
+# придётся вернуть: apt-get update && apt-get install -y gcc libpq-dev
 
 # Копируем requirements
 COPY requirements.txt .
