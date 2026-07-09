@@ -39,3 +39,6 @@ coverage/
 # Misc
 *.tmp
 *.temp
+
+# Рабочие документы в корне
+*.docx
