@@ -161,6 +161,23 @@ body {
   background: #5568d3;
 }
 
+.files-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #2ed573;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.files-btn:hover {
+  background: #26bb63;
+}
+
 /* Модалка логов */
 .logs-overlay {
   position: fixed;

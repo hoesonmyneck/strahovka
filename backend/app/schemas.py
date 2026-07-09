@@ -119,3 +119,15 @@ class LoginLogList(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class StoredFileResponse(BaseModel):
+    id: int
+    original_name: str
+    size_bytes: Optional[int] = None
+    content_type: Optional[str] = None
+    uploaded_by: Optional[str] = None
+    uploaded_at: datetime
+
+    class Config:
+        from_attributes = True

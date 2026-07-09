@@ -74,6 +74,19 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class StoredFile(Base):
+    """Файлы, доступные пользователям для скачивания"""
+    __tablename__ = "stored_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    original_name = Column(String(300))        # имя, которое видит пользователь
+    stored_name = Column(String(300))          # имя на диске (uuid + расширение)
+    size_bytes = Column(BigInteger)
+    content_type = Column(String(200), nullable=True)
+    uploaded_by = Column(String(50), nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class LoginLog(Base):
     """Журнал входов в систему"""
     __tablename__ = "login_logs"

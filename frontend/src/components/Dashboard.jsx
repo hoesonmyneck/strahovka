@@ -14,6 +14,8 @@ import {
   Shield,
   ShieldOff,
   ScrollText,
+  FolderOpen,
+  Trash2,
   X
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -173,6 +175,13 @@ const Dashboard = () => {
   const [logsUserFilter, setLogsUserFilter] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
   const LOGS_PAGE_SIZE = 50
+
+  // ─── Общие файлы ──────────────────────────────────────────────────────────
+  const [showFiles, setShowFiles] = useState(false)
+  const [filesList, setFilesList] = useState([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [fileUploading, setFileUploading] = useState(false)
+  const fileInputRef = useRef()
 
   // ─── Колонки (useMemo чтобы AG Grid не сбрасывал фильтры при ре-рендере) ──
   const columnDefs = useMemo(() => [
@@ -471,6 +480,77 @@ const Dashboard = () => {
     fetchLogs(1, logsUserFilter)
   }
 
+  // ─── Общие файлы ──────────────────────────────────────────────────────────
+  const formatBytes = (bytes) => {
+    if (!bytes) return '—'
+    const units = ['Б', 'КБ', 'МБ', 'ГБ']
+    let i = 0
+    let v = bytes
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+    return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+  }
+
+  const fetchFiles = useCallback(async () => {
+    setFilesLoading(true)
+    try {
+      const res = await api.get('/api/files')
+      setFilesList(res.data)
+    } catch {
+      toast.error('Ошибка загрузки списка файлов')
+    } finally {
+      setFilesLoading(false)
+    }
+  }, [])
+
+  const openFiles = () => {
+    setShowFiles(true)
+    fetchFiles()
+  }
+
+  const downloadFile = async (f) => {
+    try {
+      const res = await api.get(`/api/files/${f.id}/download`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', f.original_name)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Ошибка при скачивании')
+    }
+  }
+
+  const uploadSharedFile = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setFileUploading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      await api.post('/api/files', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      toast.success('Файл загружен')
+      fetchFiles()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Ошибка загрузки')
+    } finally {
+      setFileUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const deleteSharedFile = async (f) => {
+    if (!window.confirm(`Удалить файл «${f.original_name}»?`)) return
+    try {
+      await api.delete(`/api/files/${f.id}`)
+      fetchFiles()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Ошибка удаления')
+    }
+  }
+
   const applyFilters = () => {
     setCurrentPage(1)
     fetchAll(1)
@@ -572,6 +652,9 @@ const Dashboard = () => {
         </div>
         <div className="user-info">
           <span>{user?.username} ({user?.role})</span>
+          <button onClick={openFiles} className="files-btn">
+            <FolderOpen size={18} /> Файлы
+          </button>
           {isAdmin() && (
             <button onClick={openLogs} className="logs-btn">
               <ScrollText size={18} /> Логи
@@ -582,6 +665,80 @@ const Dashboard = () => {
           </button>
         </div>
       </header>
+
+      {/* Модалка с общими файлами */}
+      {showFiles && (
+        <div className="logs-overlay" onClick={() => setShowFiles(false)}>
+          <div className="logs-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="logs-modal-header">
+              <h3><FolderOpen size={20} /> Файлы</h3>
+              <button onClick={() => setShowFiles(false)} className="logs-close-btn">
+                <X size={20} />
+              </button>
+            </div>
+
+            {isAdmin() && (
+              <div className="logs-toolbar">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={uploadSharedFile}
+                  disabled={fileUploading}
+                />
+                {fileUploading && <span style={{ color: '#666', fontSize: 13 }}>Загрузка...</span>}
+              </div>
+            )}
+
+            <div className="logs-table-wrap">
+              {filesLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
+              ) : filesList.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Файлов нет</div>
+              ) : (
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Название</th>
+                      <th>Размер</th>
+                      <th>Загрузил</th>
+                      <th>Дата</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filesList.map(f => (
+                      <tr key={f.id}>
+                        <td>{f.original_name}</td>
+                        <td>{formatBytes(f.size_bytes)}</td>
+                        <td>{f.uploaded_by || '—'}</td>
+                        <td>{new Date(f.uploaded_at).toLocaleString('ru-RU')}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button
+                            onClick={() => downloadFile(f)}
+                            className="download-btn"
+                            style={{ padding: '4px 10px', fontSize: 12 }}
+                          >
+                            <Download size={14} /> Скачать
+                          </button>
+                          {isAdmin() && (
+                            <button
+                              onClick={() => deleteSharedFile(f)}
+                              className="reset-btn"
+                              style={{ padding: '4px 10px', fontSize: 12, marginLeft: 6 }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Модалка с логами входов (только admin) */}
       {showLogs && (

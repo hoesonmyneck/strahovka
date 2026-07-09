@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, String, case
@@ -11,6 +11,7 @@ import io
 import os
 import tempfile
 import shutil
+import uuid
 import openpyxl
 
 from . import models, schemas, database, auth
@@ -37,6 +38,15 @@ with engine.connect() as _conn:
                logged_at  TIMESTAMP DEFAULT NOW()
            )""",
         "CREATE INDEX IF NOT EXISTS idx_login_logs_logged_at ON login_logs (logged_at)",
+        """CREATE TABLE IF NOT EXISTS stored_files (
+               id            SERIAL PRIMARY KEY,
+               original_name VARCHAR(300),
+               stored_name   VARCHAR(300),
+               size_bytes    BIGINT,
+               content_type  VARCHAR(200),
+               uploaded_by   VARCHAR(50),
+               uploaded_at   TIMESTAMP DEFAULT NOW()
+           )""",
     ]:
         try:
             _conn.execute(__import__('sqlalchemy').text(_sql))
@@ -616,6 +626,101 @@ def get_login_logs(
         .all()
     )
     return schemas.LoginLogList(items=items, total=total, page=page, page_size=page_size)
+
+
+# ============ SHARED FILES ============
+
+FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "files")
+os.makedirs(FILES_DIR, exist_ok=True)
+
+MAX_FILE_SIZE = 200 * 1024 * 1024  # 200 МБ — столько же пропускает nginx
+
+
+@app.get("/api/files", response_model=List[schemas.StoredFileResponse])
+def list_files(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    return db.query(models.StoredFile).order_by(models.StoredFile.uploaded_at.desc()).all()
+
+
+@app.post("/api/files", response_model=schemas.StoredFileResponse)
+def upload_shared_file(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    if not file.filename:
+        raise HTTPException(400, "Файл без имени")
+
+    ext = os.path.splitext(file.filename)[1][:20]
+    stored_name = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(FILES_DIR, stored_name)
+
+    size = 0
+    try:
+        with open(dest, "wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_SIZE:
+                    raise HTTPException(413, "Файл больше 200 МБ")
+                out.write(chunk)
+    except Exception:
+        if os.path.exists(dest):
+            os.unlink(dest)
+        raise
+
+    record = models.StoredFile(
+        original_name=os.path.basename(file.filename)[:300],
+        stored_name=stored_name,
+        size_bytes=size,
+        content_type=file.content_type,
+        uploaded_by=current_user.username,
+        uploaded_at=datetime.now(),
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@app.get("/api/files/{file_id}/download")
+def download_shared_file(
+    file_id: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    record = db.query(models.StoredFile).filter(models.StoredFile.id == file_id).first()
+    if not record:
+        raise HTTPException(404, "Файл не найден")
+
+    path = os.path.join(FILES_DIR, record.stored_name)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Файл отсутствует на диске")
+
+    return FileResponse(
+        path,
+        filename=record.original_name,
+        media_type=record.content_type or "application/octet-stream",
+    )
+
+
+@app.delete("/api/files/{file_id}")
+def delete_shared_file(
+    file_id: int,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    record = db.query(models.StoredFile).filter(models.StoredFile.id == file_id).first()
+    if not record:
+        raise HTTPException(404, "Файл не найден")
+
+    path = os.path.join(FILES_DIR, record.stored_name)
+    if os.path.exists(path):
+        os.unlink(path)
+    db.delete(record)
+    db.commit()
+    return {"message": "Удалён"}
 
 
 # ============ LAST UPDATE DATE ============
