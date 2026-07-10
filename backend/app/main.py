@@ -429,6 +429,13 @@ def upload_file(
             try:
                 row = dict(zip(headers, row_vals))
                 date_end_val = safe_date(row.get('DATE_END'))
+                rescinding_val = safe_date(row.get('RESCINDING_DATE'))
+
+                # Договор действует до даты окончания, но расторжение обрывает его раньше
+                effective_end = date_end_val
+                if rescinding_val and (not date_end_val or rescinding_val < date_end_val):
+                    effective_end = rescinding_val
+
                 records.append({
                     'row_num': safe_int(row.get('   ', idx + 1)),
                     'bin': safe_int(row.get('BIN')),
@@ -438,7 +445,7 @@ def upload_file(
                     'contract_date': safe_date(row.get('CONTRACT_DATE')),
                     'date_beg': safe_date(row.get('DATE_BEG')),
                     'date_end': date_end_val,
-                    'rescinding_date': safe_date(row.get('RESCINDING_DATE')),
+                    'rescinding_date': rescinding_val,
                     'calculated_amount': safe_float(row.get('CALCULATED_AMOUNT')),
                     'count_employees': safe_float(row.get('COUNT_EMPLOYEES')),
                     'total_employees_count': safe_float(row.get('TOTAL_EMPLOYEES_COUNT')),
@@ -465,7 +472,7 @@ def upload_file(
                     'esutd_akt_td': safe_int(row.get('ESUTD_AKT_TD')),
                     'ip': safe_int(row.get('IP')),
                     'tip': safe_int(row.get('TIP')),
-                    'is_insured': 1 if (date_end_val and date_end_val > now) else 0,
+                    'is_insured': 1 if (effective_end and effective_end > now) else 0,
                     'created_at': now,
                     'updated_at': now,
                 })
