@@ -155,6 +155,10 @@ def apply_filters(query, model, params: dict, force_region: str = None):
 
 # ============ AUTH ============
 
+# Системные учётки — не журналируем и не показываем в статистике входов
+SYSTEM_ACCOUNTS = ("admin", "user")
+
+
 @app.post("/api/auth/login", response_model=schemas.Token)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     user = auth.authenticate_user(db, form_data.username, form_data.password)
@@ -166,21 +170,22 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         )
 
     # Журналируем вход. Ошибка логирования не должна блокировать вход.
-    try:
-        fwd = request.headers.get("x-forwarded-for")
-        ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
-        db.add(models.LoginLog(
-            username=user.username,
-            role=user.role,
-            region=user.region,
-            ip_address=ip,
-            user_agent=(request.headers.get("user-agent") or "")[:500] or None,
-            logged_at=datetime.now(),
-        ))
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        print(f"Failed to write login log: {e}")
+    if user.username not in SYSTEM_ACCOUNTS:
+        try:
+            fwd = request.headers.get("x-forwarded-for")
+            ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
+            db.add(models.LoginLog(
+                username=user.username,
+                role=user.role,
+                region=user.region,
+                ip_address=ip,
+                user_agent=(request.headers.get("user-agent") or "")[:500] or None,
+                logged_at=datetime.now(),
+            ))
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"Failed to write login log: {e}")
 
     access_token = auth.create_access_token(
         data={"sub": user.username, "role": user.role}
@@ -615,7 +620,9 @@ def get_login_logs(
     current_user: models.User = Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    query = db.query(models.LoginLog)
+    query = db.query(models.LoginLog).filter(
+        models.LoginLog.username.notin_(SYSTEM_ACCOUNTS)
+    )
 
     if username:
         query = query.filter(models.LoginLog.username.ilike(f"%{username}%"))
@@ -649,7 +656,7 @@ def export_login_stats(
         func.count().label("logins"),
         func.min(L.logged_at).label("first_login"),
         func.max(L.logged_at).label("last_login"),
-    )
+    ).filter(L.username.notin_(SYSTEM_ACCOUNTS))
 
     if date_from:
         query = query.filter(L.logged_at >= date_from)
