@@ -642,6 +642,32 @@ def get_login_logs(
     return schemas.LoginLogList(items=items, total=total, page=page, page_size=page_size)
 
 
+NO_REGION_LABEL = "АО КСЖ ГАК"
+
+_MONTHS_GEN = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def _period_caption(date_from: Optional[date], date_to: Optional[date]) -> str:
+    """Подпись колонки: «за период с 8 – 9 июля 2026 года» и т.п."""
+    if not date_from and not date_to:
+        return "Кол-во авторизаций за весь период"
+
+    def full(d):
+        return f"{d.day} {_MONTHS_GEN[d.month - 1]} {d.year} года"
+
+    if date_from and date_to:
+        if (date_from.month, date_from.year) == (date_to.month, date_to.year):
+            return (f"Кол-во авторизаций за период с {date_from.day} – "
+                    f"{date_to.day} {_MONTHS_GEN[date_to.month - 1]} {date_to.year} года")
+        return f"Кол-во авторизаций за период с {full(date_from)} по {full(date_to)}"
+    if date_from:
+        return f"Кол-во авторизаций с {full(date_from)}"
+    return f"Кол-во авторизаций по {full(date_to)}"
+
+
 @app.get("/api/logs/export")
 def export_login_stats(
     date_from: Optional[date] = None,
@@ -649,53 +675,107 @@ def export_login_stats(
     current_user: models.User = Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    """Excel: сколько раз каждый аккаунт заходил. Без дат — за всё время."""
+    """Excel: статистика авторизаций по регионам. Без дат — за всё время."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, Side
+    from openpyxl.utils import get_column_letter
+
     L = models.LoginLog
-    query = db.query(
+
+    # Все учётные записи, включая тех, кто ни разу не заходил
+    users = (
+        db.query(models.User)
+        .filter(models.User.username.notin_(SYSTEM_ACCOUNTS))
+        .all()
+    )
+
+    stats_q = db.query(
         L.username,
         func.count().label("logins"),
-        func.min(L.logged_at).label("first_login"),
         func.max(L.logged_at).label("last_login"),
     ).filter(L.username.notin_(SYSTEM_ACCOUNTS))
 
     if date_from:
-        query = query.filter(L.logged_at >= date_from)
+        stats_q = stats_q.filter(L.logged_at >= date_from)
     if date_to:
-        query = query.filter(L.logged_at < date_to + timedelta(days=1))
+        stats_q = stats_q.filter(L.logged_at < date_to + timedelta(days=1))
 
-    rows = query.group_by(L.username).order_by(func.count().desc()).all()
+    stats = {r.username: r for r in stats_q.group_by(L.username).all()}
 
-    period = "за всё время"
-    if date_from and date_to:
-        period = f"с {date_from.strftime('%d.%m.%Y')} по {date_to.strftime('%d.%m.%Y')}"
-    elif date_from:
-        period = f"с {date_from.strftime('%d.%m.%Y')}"
-    elif date_to:
-        period = f"по {date_to.strftime('%d.%m.%Y')}"
+    # Группируем учётки по регионам
+    regions = {}
+    for u in users:
+        regions.setdefault(u.region or NO_REGION_LABEL, []).append(u)
 
-    data = [{
-        'Логин': r.username,
-        'Количество входов': r.logins,
-        'Первый вход': r.first_login,
-        'Последний вход': r.last_login,
-    } for r in rows]
+    # Регионы по алфавиту, «АО КСЖ ГАК» — в конец
+    ordered = sorted(regions, key=lambda r: (r == NO_REGION_LABEL, r.lower()))
 
-    if not data:
-        data = [{'Логин': '', 'Количество входов': '', 'Первый вход': '', 'Последний вход': ''}]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Статистика"
 
-    df = pd.DataFrame(data)
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    ws.merge_cells("A1:E1")
+    title = ws["A1"]
+    title.value = "Статистика входа пользователей АО «КСЖ «ГАК» в портал"
+    title.font = Font(bold=True, size=12)
+    title.alignment = center
+
+    headers = ["№", "Регион", "Кол-во учетных записей",
+               _period_caption(date_from, date_to),
+               "Дата и время авторизации последней авторизации"]
+    for col, name in enumerate(headers, start=1):
+        c = ws.cell(row=2, column=col, value=name)
+        c.font = Font(bold=True)
+        c.alignment = left if col == 2 else center
+        c.border = border
+
+    row = 3
+    for num, region in enumerate(ordered, start=1):
+        accounts = regions[region]
+        # Активные сверху, самый свежий вход первым
+        accounts.sort(
+            key=lambda u: (stats[u.username].last_login if u.username in stats else datetime.min),
+            reverse=True,
+        )
+        total_logins = sum(stats[u.username].logins for u in accounts if u.username in stats)
+        first_row, last_row = row, row + len(accounts) - 1
+
+        for u in accounts:
+            last_login = stats[u.username].last_login if u.username in stats else None
+            c = ws.cell(row=row, column=5)
+            if last_login:
+                c.value = last_login
+                c.number_format = "DD.MM.YYYY, HH:MM:SS"
+            c.alignment = left
+            c.border = border
+            for col in (1, 2, 3, 4):
+                ws.cell(row=row, column=col).border = border
+            row += 1
+
+        for col, value, align in (
+            (1, num, center),
+            (2, region, left),
+            (3, len(accounts), center),
+            (4, total_logins, center),
+        ):
+            if last_row > first_row:
+                ws.merge_cells(start_row=first_row, start_column=col,
+                               end_row=last_row, end_column=col)
+            cell = ws.cell(row=first_row, column=col, value=value)
+            cell.alignment = align
+            cell.border = border
+
+    for col, width in enumerate((6, 34, 20, 24, 30), start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.row_dimensions[2].height = 32
+
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl', datetime_format='DD.MM.YYYY HH:MM') as writer:
-        # Первая строка — период выгрузки, таблица начинается со второй
-        df.to_excel(writer, index=False, sheet_name='Входы', startrow=1)
-        ws = writer.sheets['Входы']
-        ws['A1'] = f"Статистика входов, {period}"
-        for col_cells in ws.columns:
-            max_len = max(
-                (len(str(cell.value)) if cell.value is not None else 0)
-                for cell in col_cells[1:]  # A1 длинная — не растягиваем по ней
-            )
-            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 3, 40)
+    wb.save(output)
     output.seek(0)
 
     fname = f"logins_{date_from or 'all'}_{date_to or 'all'}.xlsx"
