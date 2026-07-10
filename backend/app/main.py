@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, String, case, distinct
+from sqlalchemy import func, and_, or_, String, case
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -257,12 +257,10 @@ def get_metrics(
     params.pop("current_user"); params.pop("db")
     M = models.InsuranceRecord
 
-    # Считаем компании (БИН), а не строки договоров: у одной компании их несколько.
-    # case(...) без else_ даёт NULL, а count(distinct) пропускает NULL.
     query = apply_filters(
         db.query(
-            func.count(distinct(M.bin)).label("total"),
-            func.count(distinct(case((insured_expr(M), M.bin)))).label("insured"),
+            func.count().label("total"),
+            func.sum(case((insured_expr(M), 1), else_=0)).label("insured"),
         ),
         M,
         params,
