@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, String, case
+from sqlalchemy import func, and_, or_, String, case, distinct
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -73,6 +73,31 @@ def startup_event():
         db.close()
 
 
+def insured_expr(M):
+    """Застрахован: договор ещё не истёк и не расторгнут.
+
+    Совпадает с эталонным запросом заказчика:
+        date_end > <дата запроса> AND rescinding_date IS NULL
+    Считается на дату запроса, а не на дату загрузки файла.
+    """
+    return and_(M.date_end != None, M.date_end > date.today(), M.rescinding_date == None)
+
+
+def not_insured_expr(M):
+    """Обратное к insured_expr, с явной обработкой пустой date_end."""
+    return or_(M.date_end == None, M.date_end <= date.today(), M.rescinding_date != None)
+
+
+def is_insured_now(record) -> int:
+    """То же правило, но для уже загруженной строки — колонка is_insured в БД
+    хранит снимок на момент загрузки файла и для показа не годится."""
+    return 1 if (
+        record.date_end
+        and record.date_end > date.today()
+        and record.rescinding_date is None
+    ) else 0
+
+
 def apply_filters(query, model, params: dict, force_region: str = None):
     """Применяет все фильтры к запросу. force_region — обязательный регион для региональных пользователей."""
     M = model
@@ -139,7 +164,9 @@ def apply_filters(query, model, params: dict, force_region: str = None):
         query = query.filter(M.name_oked.ilike(f"%{params['name_oked']}%"))
 
     if params.get("is_insured") is not None:
-        query = query.filter(M.is_insured == params["is_insured"])
+        query = query.filter(
+            insured_expr(M) if params["is_insured"] == 1 else not_insured_expr(M)
+        )
 
     if params.get("expires_in_months"):
         target_date = date.today() + timedelta(days=30 * params["expires_in_months"])
@@ -228,21 +255,26 @@ def get_metrics(
 ):
     params = locals()
     params.pop("current_user"); params.pop("db")
+    M = models.InsuranceRecord
+
+    # Считаем компании (БИН), а не строки договоров: у одной компании их несколько.
+    # case(...) без else_ даёт NULL, а count(distinct) пропускает NULL.
     query = apply_filters(
         db.query(
-            func.count().label("total"),
-            func.sum(case((models.InsuranceRecord.is_insured == 1, 1), else_=0)).label("insured"),
-            func.sum(case((models.InsuranceRecord.is_insured == 0, 1), else_=0)).label("not_insured"),
+            func.count(distinct(M.bin)).label("total"),
+            func.count(distinct(case((insured_expr(M), M.bin)))).label("insured"),
         ),
-        models.InsuranceRecord,
+        M,
         params,
         force_region=current_user.region,
     )
     row = query.one()
+    total = row.total or 0
+    insured = row.insured or 0
     return schemas.MetricsResponse(
-        total=row.total or 0,
-        insured=row.insured or 0,
-        not_insured=row.not_insured or 0
+        total=total,
+        insured=insured,
+        not_insured=total - insured,
     )
 
 
@@ -288,7 +320,14 @@ def get_records(
         query = query.order_by(order_col.desc() if sort_order == "desc" else order_col.asc())
 
     records = query.offset((page - 1) * page_size).limit(page_size).all()
-    return schemas.InsuranceRecordList(items=records, total=total, page=page, page_size=page_size)
+
+    items = []
+    for r in records:
+        item = schemas.InsuranceRecordResponse.model_validate(r)
+        item.is_insured = is_insured_now(r)
+        items.append(item)
+
+    return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
 
 @app.get("/api/records/download")
@@ -349,7 +388,7 @@ def download_records(
             'Вид деятельности (ОКЭД)': r.name_oked,
             'ИП': r.ip,
             'Флаг': r.flag_head,
-            'Застрахован': 'Да' if r.is_insured else 'Нет',
+            'Застрахован': 'Да' if is_insured_now(r) else 'Нет',
         })
 
     df = pd.DataFrame(data)
