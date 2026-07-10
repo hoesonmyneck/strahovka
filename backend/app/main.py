@@ -635,6 +635,70 @@ def get_login_logs(
     return schemas.LoginLogList(items=items, total=total, page=page, page_size=page_size)
 
 
+@app.get("/api/logs/export")
+def export_login_stats(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    """Excel: сколько раз каждый аккаунт заходил. Без дат — за всё время."""
+    L = models.LoginLog
+    query = db.query(
+        L.username,
+        func.count().label("logins"),
+        func.min(L.logged_at).label("first_login"),
+        func.max(L.logged_at).label("last_login"),
+    )
+
+    if date_from:
+        query = query.filter(L.logged_at >= date_from)
+    if date_to:
+        query = query.filter(L.logged_at < date_to + timedelta(days=1))
+
+    rows = query.group_by(L.username).order_by(func.count().desc()).all()
+
+    period = "за всё время"
+    if date_from and date_to:
+        period = f"с {date_from.strftime('%d.%m.%Y')} по {date_to.strftime('%d.%m.%Y')}"
+    elif date_from:
+        period = f"с {date_from.strftime('%d.%m.%Y')}"
+    elif date_to:
+        period = f"по {date_to.strftime('%d.%m.%Y')}"
+
+    data = [{
+        'Логин': r.username,
+        'Количество входов': r.logins,
+        'Первый вход': r.first_login,
+        'Последний вход': r.last_login,
+    } for r in rows]
+
+    if not data:
+        data = [{'Логин': '', 'Количество входов': '', 'Первый вход': '', 'Последний вход': ''}]
+
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl', datetime_format='DD.MM.YYYY HH:MM') as writer:
+        # Первая строка — период выгрузки, таблица начинается со второй
+        df.to_excel(writer, index=False, sheet_name='Входы', startrow=1)
+        ws = writer.sheets['Входы']
+        ws['A1'] = f"Статистика входов, {period}"
+        for col_cells in ws.columns:
+            max_len = max(
+                (len(str(cell.value)) if cell.value is not None else 0)
+                for cell in col_cells[1:]  # A1 длинная — не растягиваем по ней
+            )
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 3, 40)
+    output.seek(0)
+
+    fname = f"logins_{date_from or 'all'}_{date_to or 'all'}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"}
+    )
+
+
 # ============ SHARED FILES ============
 
 FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "files")

@@ -174,6 +174,8 @@ const Dashboard = () => {
   const [logsPage, setLogsPage] = useState(1)
   const [logsUserFilter, setLogsUserFilter] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
+  const [logsDateFrom, setLogsDateFrom] = useState(null)
+  const [logsDateTo, setLogsDateTo] = useState(null)
   const LOGS_PAGE_SIZE = 50
 
   // ─── Общие файлы ──────────────────────────────────────────────────────────
@@ -459,11 +461,24 @@ const Dashboard = () => {
   }
 
   // ─── Логи входов ──────────────────────────────────────────────────────────
-  const fetchLogs = useCallback(async (page = 1, username = '') => {
+  // toISOString() сдвинул бы дату на день назад при UTC+5 — форматируем локально
+  const toLocalISODate = (d) => {
+    if (!d) return undefined
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  }
+
+  const fetchLogs = useCallback(async (page = 1, username = '', from = null, to = null) => {
     setLogsLoading(true)
     try {
       const res = await api.get('/api/logs', {
-        params: { page, page_size: LOGS_PAGE_SIZE, username: username || undefined }
+        params: {
+          page,
+          page_size: LOGS_PAGE_SIZE,
+          username: username || undefined,
+          date_from: toLocalISODate(from),
+          date_to: toLocalISODate(to),
+        }
       })
       setLogs(res.data.items)
       setLogsTotal(res.data.total)
@@ -478,6 +493,28 @@ const Dashboard = () => {
   const openLogs = () => {
     setShowLogs(true)
     fetchLogs(1, logsUserFilter)
+  }
+
+  const downloadLoginStats = async () => {
+    try {
+      const res = await api.get('/api/logs/export', {
+        params: { date_from: toLocalISODate(logsDateFrom), date_to: toLocalISODate(logsDateTo) },
+        responseType: 'blob',
+      })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const from = logsDateFrom ? toLocalISODate(logsDateFrom) : 'весь-период'
+      const to = logsDateTo ? toLocalISODate(logsDateTo) : ''
+      link.setAttribute('download', `входы_${from}${to ? '_' + to : ''}.xlsx`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Файл скачан')
+    } catch {
+      toast.error('Ошибка при скачивании')
+    }
   }
 
   // ─── Общие файлы ──────────────────────────────────────────────────────────
@@ -757,12 +794,48 @@ const Dashboard = () => {
                 placeholder="Фильтр по логину..."
                 value={logsUserFilter}
                 onChange={(e) => setLogsUserFilter(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(1, logsUserFilter) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo) }}
               />
-              <button onClick={() => fetchLogs(1, logsUserFilter)} className="apply-btn" style={{ padding: '8px 16px' }}>
+              <DatePicker
+                selected={logsDateFrom}
+                onChange={(d) => setLogsDateFrom(d)}
+                dateFormat="dd.MM.yyyy"
+                placeholderText="Дата с"
+                isClearable
+                className="logs-date-input"
+              />
+              <DatePicker
+                selected={logsDateTo}
+                onChange={(d) => setLogsDateTo(d)}
+                dateFormat="dd.MM.yyyy"
+                placeholderText="Дата по"
+                isClearable
+                className="logs-date-input"
+              />
+              <button
+                onClick={() => fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo)}
+                className="apply-btn"
+                style={{ padding: '8px 16px' }}
+              >
                 <Search size={16} /> Найти
               </button>
-              <span style={{ marginLeft: 'auto', color: '#666', fontSize: 13 }}>
+              <button
+                onClick={downloadLoginStats}
+                className="download-btn"
+                style={{ padding: '8px 16px' }}
+                title="Excel: сколько раз каждый аккаунт заходил"
+              >
+                <Download size={16} /> Выгрузка
+              </button>
+            </div>
+
+            <div className="logs-subbar">
+              <span>
+                {logsDateFrom || logsDateTo
+                  ? 'Выгрузка за выбранный период'
+                  : 'Выгрузка за всё время — выберите даты, чтобы ограничить период'}
+              </span>
+              <span style={{ marginLeft: 'auto' }}>
                 Всего записей: <b>{logsTotal.toLocaleString()}</b>
               </span>
             </div>
@@ -802,7 +875,7 @@ const Dashboard = () => {
               <div className="logs-pagination">
                 <button
                   disabled={logsPage <= 1}
-                  onClick={() => fetchLogs(logsPage - 1, logsUserFilter)}
+                  onClick={() => fetchLogs(logsPage - 1, logsUserFilter, logsDateFrom, logsDateTo)}
                 >
                   ← Назад
                 </button>
@@ -811,7 +884,7 @@ const Dashboard = () => {
                 </span>
                 <button
                   disabled={logsPage >= Math.ceil(logsTotal / LOGS_PAGE_SIZE)}
-                  onClick={() => fetchLogs(logsPage + 1, logsUserFilter)}
+                  onClick={() => fetchLogs(logsPage + 1, logsUserFilter, logsDateFrom, logsDateTo)}
                 >
                   Вперёд →
                 </button>
