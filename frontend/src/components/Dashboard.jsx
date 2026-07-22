@@ -128,7 +128,10 @@ const Dashboard = () => {
   const { user, logout, isAdmin } = useAuth()
   const gridRef = useRef()
 
-  const [metrics, setMetrics] = useState({ total: 0, insured: 0, not_insured: 0 })
+  const [metrics, setMetrics] = useState({
+    total: 0, insured: 0, not_insured: 0,
+    total_bins: 0, insured_bins: 0, not_insured_bins: 0,
+  })
 
   const EMPTY_FILTERS = {
     bin: '', bin_name: '', system_delimiter_bin: '', system_delimiter_bin_name: '',
@@ -901,6 +904,7 @@ const Dashboard = () => {
           <div className="metric-info">
             <span className="metric-value">{metrics.total.toLocaleString()}</span>
             <span className="metric-label">Всего записей</span>
+            <span className="metric-bins">{metrics.total_bins.toLocaleString()} уникальных БИН</span>
           </div>
         </div>
         <div className="metric-card insured">
@@ -908,6 +912,7 @@ const Dashboard = () => {
           <div className="metric-info">
             <span className="metric-value">{metrics.insured.toLocaleString()}</span>
             <span className="metric-label">Застрахованы</span>
+            <span className="metric-bins">{metrics.insured_bins.toLocaleString()} уникальных БИН</span>
           </div>
         </div>
         <div className="metric-card not-insured">
@@ -915,6 +920,7 @@ const Dashboard = () => {
           <div className="metric-info">
             <span className="metric-value">{metrics.not_insured.toLocaleString()}</span>
             <span className="metric-label">Не застрахованы</span>
+            <span className="metric-bins">{metrics.not_insured_bins.toLocaleString()} уникальных БИН</span>
           </div>
         </div>
       </div>

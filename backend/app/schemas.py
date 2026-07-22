@@ -75,6 +75,9 @@ class MetricsResponse(BaseModel):
     total: int
     insured: int
     not_insured: int
+    total_bins: int = 0
+    insured_bins: int = 0
+    not_insured_bins: int = 0
 
 class UserBase(BaseModel):
     username: str

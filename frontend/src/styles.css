@@ -351,6 +351,12 @@ body {
   color: #666;
 }
 
+.metric-bins {
+  font-size: 12px;
+  color: #9aa0b4;
+  margin-top: 2px;
+}
+
 /* Filters */
 .filters-section {
   background: white;
