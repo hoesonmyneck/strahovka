@@ -77,7 +77,10 @@ class MetricsResponse(BaseModel):
     not_insured: int
     total_bins: int = 0
     insured_bins: int = 0
-    not_insured_bins: int = 0
+    # Нарушители: обязанные страховать (не госучреждение, esutd>=2) без
+    # действующего договора, считаются по уникальным БИН.
+    violators: int = 0
+    eligible_total: int = 0  # всего обязанных страховать — для контекста
 
 class UserBase(BaseModel):
     username: str

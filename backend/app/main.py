@@ -88,6 +88,22 @@ def not_insured_expr(M):
     return or_(M.date_end == None, M.date_end <= date.today(), M.rescinding_date != None)
 
 
+# Госучреждения не обязаны страховать работников от несчастных случаев
+STATE_INSTITUTION = "Государственное учреждение"
+
+
+def active_insurance_expr(M):
+    """Договор действует по новому скрипту заказчика (для метрики нарушителей):
+        date_end > сегодня AND (rescinding_date IS NULL OR rescinding_date > сегодня)
+    Отличие от insured_expr: расторжение будущей датой ещё считается активным.
+    """
+    return and_(
+        M.date_end != None,
+        M.date_end > date.today(),
+        or_(M.rescinding_date == None, M.rescinding_date > date.today()),
+    )
+
+
 def is_insured_now(record) -> int:
     """То же правило, но для уже загруженной строки — колонка is_insured в БД
     хранит снимок на момент загрузки файла и для показа не годится."""
@@ -257,7 +273,7 @@ def get_metrics(
     params.pop("current_user"); params.pop("db")
     M = models.InsuranceRecord
 
-    # Строки договоров + уникальные БИН (компании) в каждой из трёх цифр.
+    # Карточки «Всего» и «Застрахованы»: строки договоров + уникальные БИН.
     # case(...) без else_ даёт NULL, а count(distinct) его пропускает.
     query = apply_filters(
         db.query(
@@ -265,7 +281,6 @@ def get_metrics(
             func.sum(case((insured_expr(M), 1), else_=0)).label("insured"),
             func.count(distinct(M.bin)).label("total_bins"),
             func.count(distinct(case((insured_expr(M), M.bin)))).label("insured_bins"),
-            func.count(distinct(case((not_insured_expr(M), M.bin)))).label("not_insured_bins"),
         ),
         M,
         params,
@@ -274,13 +289,42 @@ def get_metrics(
     row = query.one()
     total = row.total or 0
     insured = row.insured or 0
+
+    # Карточка «Не застрахованы»: нарушители — компании (БИН), обязанные
+    # страховать работников, но без действующего договора.
+    #   обязан = не госучреждение И esutd_akt_td >= 2
+    #   не застрахован = ни одной строки с активной страховкой
+    # Поля паспорта (opf_name, esutd) в выгрузке одинаковы для всех строк БИН,
+    # поэтому берём их через max().
+    per_bin = apply_filters(
+        db.query(
+            M.bin.label("bin"),
+            func.max(M.esutd_akt_td).label("esutd"),
+            func.max(M.opf_name).label("opf"),
+            func.sum(case((active_insurance_expr(M), 1), else_=0)).label("active_cnt"),
+        ),
+        M,
+        params,
+        force_region=current_user.region,
+    ).group_by(M.bin).subquery()
+
+    eligible_filter = and_(
+        per_bin.c.esutd >= 2,
+        per_bin.c.opf != STATE_INSTITUTION,  # != исключает и NULL
+    )
+    row2 = db.query(
+        func.count().label("eligible"),
+        func.sum(case((per_bin.c.active_cnt == 0, 1), else_=0)).label("violators"),
+    ).select_from(per_bin).filter(eligible_filter).one()
+
     return schemas.MetricsResponse(
         total=total,
         insured=insured,
         not_insured=total - insured,
         total_bins=row.total_bins or 0,
         insured_bins=row.insured_bins or 0,
-        not_insured_bins=row.not_insured_bins or 0,
+        violators=row2.violators or 0,
+        eligible_total=row2.eligible or 0,
     )
 
 

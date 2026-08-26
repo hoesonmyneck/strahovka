@@ -130,7 +130,8 @@ const Dashboard = () => {
 
   const [metrics, setMetrics] = useState({
     total: 0, insured: 0, not_insured: 0,
-    total_bins: 0, insured_bins: 0, not_insured_bins: 0,
+    total_bins: 0, insured_bins: 0,
+    violators: 0, eligible_total: 0,
   })
 
   const EMPTY_FILTERS = {
@@ -918,9 +919,9 @@ const Dashboard = () => {
         <div className="metric-card not-insured">
           <ShieldOff className="metric-icon" size={32} />
           <div className="metric-info">
-            <span className="metric-value">{metrics.not_insured.toLocaleString()}</span>
+            <span className="metric-value">{metrics.violators.toLocaleString()}</span>
             <span className="metric-label">Не застрахованы</span>
-            <span className="metric-bins">{metrics.not_insured_bins.toLocaleString()} уникальных БИН</span>
+            <span className="metric-bins">из {metrics.eligible_total.toLocaleString()} обязанных страховать</span>
           </div>
         </div>
       </div>
