@@ -921,7 +921,7 @@ const Dashboard = () => {
           <div className="metric-info">
             <span className="metric-value">{metrics.violators.toLocaleString()}</span>
             <span className="metric-label">Не застрахованы</span>
-            <span className="metric-bins">из {metrics.eligible_total.toLocaleString()} обязанных страховать</span>
+            <span className="metric-bins">компаний, обязанных страховать</span>
           </div>
         </div>
       </div>
