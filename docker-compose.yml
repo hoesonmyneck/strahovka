@@ -13,6 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   backend:
     build: ./backend
@@ -27,6 +28,10 @@ services:
         condition: service_healthy
     volumes:
       - ./uploads:/app/uploads
+    # Потолок памяти: при всплеске OOM убьёт только контейнер, а не весь сервер,
+    # и контейнер сам поднимется. Сервер 15Gi, ~4Gi backend с запасом хватает.
+    mem_limit: 4g
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
@@ -35,6 +40,7 @@ services:
       - "8082:80"
     depends_on:
       - backend
+    restart: unless-stopped
 
 volumes:
   postgres_data:

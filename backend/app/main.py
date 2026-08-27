@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from starlette.background import BackgroundTask
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, String, case, distinct
@@ -406,58 +407,84 @@ def download_records(
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
 ):
-    params = {k: v for k, v in locals().items() if k not in ("current_user", "db")}
-    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params, force_region=current_user.region)
-    records = query.all()
+    M = models.InsuranceRecord
+    params = {k: v for k, v in locals().items() if k not in ("current_user", "db", "M")}
+    query = apply_filters(db.query(M), M, params, force_region=current_user.region)
 
-    data = []
-    for r in records:
-        data.append({
-            'БИН': str(int(r.bin)).zfill(12) if r.bin is not None else '',
-            'Название компании': r.bin_name,
-            'БИН страховой компании': str(int(r.system_delimiter_bin)).zfill(12) if r.system_delimiter_bin is not None else '',
-            'Страховая компания': r.system_delimiter_bin_name,
-            'Номер договора': r.contract_number,
-            'Дата договора': r.contract_date,
-            'Дата начала': r.date_beg,
-            'Дата окончания': r.date_end,
-            'Дата расторжения': r.rescinding_date,
-            'Сумма': r.calculated_amount,
-            'Застрахованных сотр.': r.count_employees,
-            'Всего сотрудников': r.total_employees_count,
-            'Кол-во 12 мес.': r.kol_12mes,
-            'ФОТ 12 мес.': r.fot_12mes,
-            'ESUTD акт. ТД': r.esutd_akt_td,
-            'Область': r.obl_name,
-            'Район': r.rai_name,
-            'Адрес': r.address,
-            'Телефон': r.phone,
-            'Руководитель': f"{r.leader_surname or ''} {r.leader_name or ''} {r.leader_middlename or ''}".strip(),
-            'ОПФ': r.opf_name,
-            'Код ОКЭД': r.id_oked,
-            'Вид деятельности (ОКЭД)': r.name_oked,
-            'ИП': r.ip,
-            'Флаг': r.flag_head,
-            'Застрахован': 'Да' if is_insured_now(r) else 'Нет',
-        })
+    # Тянем только нужные колонки лёгкими кортежами (не ORM-объектами) и
+    # серверным курсором (yield_per), чтобы не держать в памяти весь миллион строк.
+    query = query.with_entities(
+        M.bin, M.bin_name, M.system_delimiter_bin, M.system_delimiter_bin_name,
+        M.contract_number, M.contract_date, M.date_beg, M.date_end, M.rescinding_date,
+        M.calculated_amount, M.count_employees, M.total_employees_count,
+        M.kol_12mes, M.fot_12mes, M.esutd_akt_td, M.obl_name, M.rai_name,
+        M.address, M.phone, M.leader_surname, M.leader_name, M.leader_middlename,
+        M.opf_name, M.id_oked, M.name_oked, M.ip, M.flag_head,
+    )
 
-    df = pd.DataFrame(data)
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl', datetime_format='DD.MM.YYYY', date_format='DD.MM.YYYY') as writer:
-        df.to_excel(writer, index=False, sheet_name='Insurance Records')
-        ws = writer.sheets['Insurance Records']
-        for col_cells in ws.columns:
-            max_len = max(
-                (len(str(cell.value)) if cell.value is not None else 0)
-                for cell in col_cells
-            )
-            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 3, 50)
-    output.seek(0)
+    headers = [
+        'БИН', 'Название компании', 'БИН страховой компании', 'Страховая компания',
+        'Номер договора', 'Дата договора', 'Дата начала', 'Дата окончания',
+        'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
+        'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
+        'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
+        'Вид деятельности (ОКЭД)', 'ИП', 'Флаг', 'Застрахован',
+    ]
 
-    return StreamingResponse(
-        output,
+    today = date.today()
+
+    def fmt_date(d):
+        return d.strftime('%d.%m.%Y') if d else ''
+
+    def bin12(v):
+        return str(int(v)).zfill(12) if v is not None else ''
+
+    # write_only: openpyxl держит в памяти только текущую строку, а не весь лист.
+    wb = openpyxl.Workbook(write_only=True)
+    ws = wb.create_sheet('Insurance Records')
+    ws.append(headers)
+
+    for r in query.yield_per(2000):
+        insured = bool(r.date_end and r.date_end > today and r.rescinding_date is None)
+        ws.append([
+            bin12(r.bin),
+            r.bin_name,
+            bin12(r.system_delimiter_bin),
+            r.system_delimiter_bin_name,
+            r.contract_number,
+            fmt_date(r.contract_date),
+            fmt_date(r.date_beg),
+            fmt_date(r.date_end),
+            fmt_date(r.rescinding_date),
+            r.calculated_amount,
+            r.count_employees,
+            r.total_employees_count,
+            r.kol_12mes,
+            r.fot_12mes,
+            r.esutd_akt_td,
+            r.obl_name,
+            r.rai_name,
+            r.address,
+            r.phone,
+            f"{r.leader_surname or ''} {r.leader_name or ''} {r.leader_middlename or ''}".strip(),
+            r.opf_name,
+            r.id_oked,
+            r.name_oked,
+            r.ip,
+            r.flag_head,
+            'Да' if insured else 'Нет',
+        ])
+
+    # Пишем на диск, а не в BytesIO — иначе весь готовый xlsx висит в RAM.
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    wb.save(tmp.name)
+
+    return FileResponse(
+        tmp.name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=insurance_records.xlsx"}
+        filename="insurance_records.xlsx",
+        background=BackgroundTask(os.unlink, tmp.name),
     )
 
 
