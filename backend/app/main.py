@@ -14,6 +14,7 @@ import tempfile
 import shutil
 import uuid
 import openpyxl
+import xlsxwriter
 
 from . import models, schemas, database, auth
 from .database import SessionLocal, engine
@@ -433,29 +434,47 @@ def download_records(
 
     today = date.today()
 
-    def fmt_date(d):
-        return d.strftime('%d.%m.%Y') if d else ''
-
     def bin12(v):
         return str(int(v)).zfill(12) if v is not None else ''
 
-    # write_only: openpyxl держит в памяти только текущую строку, а не весь лист.
-    wb = openpyxl.Workbook(write_only=True)
-    ws = wb.create_sheet('Insurance Records')
-    ws.append(headers)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
 
+    # xlsxwriter + constant_memory: строки сбрасываются на диск сразу, в памяти
+    # только текущая. Быстрее openpyxl write_only в 2-3 раза, xlsx настоящий.
+    wb = xlsxwriter.Workbook(tmp.name, {
+        'constant_memory': True,
+        'default_date_format': 'dd.mm.yyyy',
+    })
+    ws = wb.add_worksheet('Insurance Records')
+    header_fmt = wb.add_format({'bold': True})
+
+    # Ширины колонок задаём заранее (в constant_memory нельзя после записи строк).
+    widths = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
+              22, 22, 40, 16, 30, 22, 10, 30, 6, 8, 12]
+    for col, w in enumerate(widths):
+        ws.set_column(col, col, w)
+
+    for col, name in enumerate(headers):
+        ws.write_string(0, col, name, header_fmt)
+    ws.freeze_panes(1, 0)
+
+    row_idx = 0
     for r in query.yield_per(2000):
+        row_idx += 1
         insured = bool(r.date_end and r.date_end > today and r.rescinding_date is None)
-        ws.append([
-            bin12(r.bin),
-            r.bin_name,
-            bin12(r.system_delimiter_bin),
+        # БИН — строкой, чтобы сохранить ведущие нули; даты — датами (сортируемы);
+        # числа и None write_row определяет сам.
+        ws.write_string(row_idx, 0, bin12(r.bin))
+        ws.write_string(row_idx, 1, r.bin_name or '')
+        ws.write_string(row_idx, 2, bin12(r.system_delimiter_bin))
+        ws.write_row(row_idx, 3, [
             r.system_delimiter_bin_name,
             r.contract_number,
-            fmt_date(r.contract_date),
-            fmt_date(r.date_beg),
-            fmt_date(r.date_end),
-            fmt_date(r.rescinding_date),
+            r.contract_date,
+            r.date_beg,
+            r.date_end,
+            r.rescinding_date,
             r.calculated_amount,
             r.count_employees,
             r.total_employees_count,
@@ -475,10 +494,9 @@ def download_records(
             'Да' if insured else 'Нет',
         ])
 
-    # Пишем на диск, а не в BytesIO — иначе весь готовый xlsx висит в RAM.
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
-    tmp.close()
-    wb.save(tmp.name)
+    if row_idx:
+        ws.autofilter(0, 0, row_idx, len(headers) - 1)
+    wb.close()
 
     return FileResponse(
         tmp.name,
