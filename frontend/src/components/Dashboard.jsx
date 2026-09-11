@@ -507,6 +507,7 @@ const Dashboard = () => {
     setAdminTab(tab)
     if (tab === 'users') fetchUsers()
     if (tab === 'logs') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo)
+    if (tab === 'files') fetchFiles()
   }
 
   const downloadLoginStats = async () => {
@@ -728,18 +729,6 @@ const Dashboard = () => {
               </button>
             </div>
 
-            {isAdmin() && (
-              <div className="logs-toolbar">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={uploadSharedFile}
-                  disabled={fileUploading}
-                />
-                {fileUploading && <span style={{ color: '#666', fontSize: 13 }}>Загрузка...</span>}
-              </div>
-            )}
-
             <div className="logs-table-wrap">
               {filesLoading ? (
                 <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
@@ -772,15 +761,6 @@ const Dashboard = () => {
                             >
                               <Download size={14} /> Скачать
                             </button>
-                            {isAdmin() && (
-                              <button
-                                onClick={() => deleteSharedFile(f)}
-                                className="reset-btn"
-                                style={{ padding: '4px 10px', fontSize: 12 }}
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -813,6 +793,9 @@ const Dashboard = () => {
               </button>
               <button className={adminTab === 'logs' ? 'active' : ''} onClick={() => selectAdminTab('logs')}>
                 <ScrollText size={16} /> Логи входов
+              </button>
+              <button className={adminTab === 'files' ? 'active' : ''} onClick={() => selectAdminTab('files')}>
+                <FolderOpen size={16} /> Файлы
               </button>
             </div>
 
@@ -886,6 +869,69 @@ const Dashboard = () => {
                   </button>
                 </form>
               </div>
+            )}
+
+            {/* Вкладка: файлы (управление — загрузка и удаление) */}
+            {adminTab === 'files' && (
+            <>
+            <div className="logs-toolbar">
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={uploadSharedFile}
+                disabled={fileUploading}
+              />
+              {fileUploading && <span style={{ color: '#666', fontSize: 13 }}>Загрузка...</span>}
+            </div>
+
+            <div className="logs-table-wrap">
+              {filesLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
+              ) : filesList.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Файлов нет</div>
+              ) : (
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Название</th>
+                      <th>Размер</th>
+                      <th>Загрузил</th>
+                      <th>Дата</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filesList.map(f => (
+                      <tr key={f.id}>
+                        <td>{f.original_name}</td>
+                        <td>{formatBytes(f.size_bytes)}</td>
+                        <td>{f.uploaded_by || '—'}</td>
+                        <td>{new Date(f.uploaded_at).toLocaleString('ru-RU')}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                            <button
+                              onClick={() => downloadFile(f)}
+                              className="download-btn"
+                              style={{ padding: '4px 10px', fontSize: 12 }}
+                            >
+                              <Download size={14} /> Скачать
+                            </button>
+                            <button
+                              onClick={() => deleteSharedFile(f)}
+                              className="reset-btn"
+                              style={{ padding: '4px 10px', fontSize: 12 }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            </>
             )}
 
             {/* Вкладка: логи входов */}
