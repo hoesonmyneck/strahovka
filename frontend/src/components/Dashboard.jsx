@@ -763,23 +763,25 @@ const Dashboard = () => {
                         <td>{formatBytes(f.size_bytes)}</td>
                         <td>{f.uploaded_by || '—'}</td>
                         <td>{new Date(f.uploaded_at).toLocaleString('ru-RU')}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          <button
-                            onClick={() => downloadFile(f)}
-                            className="download-btn"
-                            style={{ padding: '4px 10px', fontSize: 12 }}
-                          >
-                            <Download size={14} /> Скачать
-                          </button>
-                          {isAdmin() && (
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                             <button
-                              onClick={() => deleteSharedFile(f)}
-                              className="reset-btn"
-                              style={{ padding: '4px 10px', fontSize: 12, marginLeft: 6 }}
+                              onClick={() => downloadFile(f)}
+                              className="download-btn"
+                              style={{ padding: '4px 10px', fontSize: 12 }}
                             >
-                              <Trash2 size={14} />
+                              <Download size={14} /> Скачать
                             </button>
-                          )}
+                            {isAdmin() && (
+                              <button
+                                onClick={() => deleteSharedFile(f)}
+                                className="reset-btn"
+                                style={{ padding: '4px 10px', fontSize: 12 }}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
