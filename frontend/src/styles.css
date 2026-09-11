@@ -278,6 +278,44 @@ body {
   padding: 0 24px;
 }
 
+/* Вкладки админ-панели */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid #e8ecff;
+}
+
+.admin-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.admin-tabs button:hover {
+  color: #333;
+}
+
+.admin-tabs button.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+}
+
+.admin-tab-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 20px 24px;
+}
+
 .logs-pagination {
   display: flex;
   align-items: center;

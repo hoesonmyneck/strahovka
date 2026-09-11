@@ -16,6 +16,7 @@ import {
   ScrollText,
   FolderOpen,
   Trash2,
+  Settings,
   X
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -167,12 +168,14 @@ const Dashboard = () => {
 
   // ─── Управление пользователями (только admin) ─────────────────────────────
   const [usersList, setUsersList] = useState([])
-  const [showUserMgmt, setShowUserMgmt] = useState(false)
   const [newUser, setNewUser] = useState({ username: '', password: '', region: '' })
   const [userMgmtMsg, setUserMgmtMsg] = useState('')
 
+  // ─── Админ-панель (вкладки: пользователи / загрузка / логи) ───────────────
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [adminTab, setAdminTab] = useState('users')
+
   // ─── Логи входов (только admin) ───────────────────────────────────────────
-  const [showLogs, setShowLogs] = useState(false)
   const [logs, setLogs] = useState([])
   const [logsTotal, setLogsTotal] = useState(0)
   const [logsPage, setLogsPage] = useState(1)
@@ -494,9 +497,16 @@ const Dashboard = () => {
     }
   }, [])
 
-  const openLogs = () => {
-    setShowLogs(true)
-    fetchLogs(1, logsUserFilter)
+  const openAdminPanel = () => {
+    setShowAdmin(true)
+    setAdminTab('users')
+    fetchUsers()
+  }
+
+  const selectAdminTab = (tab) => {
+    setAdminTab(tab)
+    if (tab === 'users') fetchUsers()
+    if (tab === 'logs') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo)
   }
 
   const downloadLoginStats = async () => {
@@ -697,8 +707,8 @@ const Dashboard = () => {
             <FolderOpen size={18} /> Файлы
           </button>
           {isAdmin() && (
-            <button onClick={openLogs} className="logs-btn">
-              <ScrollText size={18} /> Логи
+            <button onClick={openAdminPanel} className="logs-btn">
+              <Settings size={18} /> Админ панель
             </button>
           )}
           <button onClick={logout} className="logout-btn">
@@ -781,17 +791,104 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Модалка с логами входов (только admin) */}
-      {showLogs && (
-        <div className="logs-overlay" onClick={() => setShowLogs(false)}>
-          <div className="logs-modal" onClick={(e) => e.stopPropagation()}>
+      {/* Админ панель (только admin): пользователи / загрузка / логи */}
+      {showAdmin && (
+        <div className="logs-overlay" onClick={() => setShowAdmin(false)}>
+          <div className="logs-modal admin-modal" onClick={(e) => e.stopPropagation()}>
             <div className="logs-modal-header">
-              <h3><ScrollText size={20} /> Логи входов в систему</h3>
-              <button onClick={() => setShowLogs(false)} className="logs-close-btn">
+              <h3><Settings size={20} /> Админ панель</h3>
+              <button onClick={() => setShowAdmin(false)} className="logs-close-btn">
                 <X size={20} />
               </button>
             </div>
 
+            <div className="admin-tabs">
+              <button className={adminTab === 'users' ? 'active' : ''} onClick={() => selectAdminTab('users')}>
+                <Users size={16} /> Пользователи
+              </button>
+              <button className={adminTab === 'upload' ? 'active' : ''} onClick={() => selectAdminTab('upload')}>
+                <Upload size={16} /> Загрузка файла
+              </button>
+              <button className={adminTab === 'logs' ? 'active' : ''} onClick={() => selectAdminTab('logs')}>
+                <ScrollText size={16} /> Логи входов
+              </button>
+            </div>
+
+            {/* Вкладка: региональные пользователи */}
+            {adminTab === 'users' && (
+              <div className="admin-tab-body">
+                <div className="user-create-form">
+                  <select
+                    value={newUser.region}
+                    onChange={(e) => setNewUser({ ...newUser, region: e.target.value })}
+                  >
+                    <option value="">— Весь Казахстан —</option>
+                    {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Логин (латиница)"
+                    value={newUser.username}
+                    onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Пароль"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  />
+                  <button onClick={createRegionalUser} className="apply-btn" style={{ padding: '8px 16px' }}>
+                    Создать
+                  </button>
+                  {userMgmtMsg && <span style={{ marginLeft: 8, color: userMgmtMsg.includes('создан') ? 'green' : 'red' }}>{userMgmtMsg}</span>}
+                </div>
+
+                <table className="users-table">
+                  <thead>
+                    <tr><th>Логин</th><th>Роль</th><th>Регион</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {usersList.map(u => (
+                      <tr key={u.id}>
+                        <td>{u.username}</td>
+                        <td>{u.role}</td>
+                        <td>{u.region || '— все регионы —'}</td>
+                        <td>
+                          {!['admin', 'user'].includes(u.username) && (
+                            <button onClick={() => deleteUser(u.id)} className="reset-btn" style={{ padding: '4px 10px', fontSize: 12 }}>
+                              Удалить
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Вкладка: загрузка нового файла */}
+            {adminTab === 'upload' && (
+              <div className="admin-tab-body">
+                <p style={{ color: '#666', fontSize: 14, marginTop: 0 }}>
+                  Загрузите новый Excel-файл — текущие данные будут заменены.
+                </p>
+                <form onSubmit={handleUpload} className="upload-form">
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={(e) => setUploadFile(e.target.files[0])}
+                  />
+                  <button type="submit" disabled={isUploading}>
+                    {isUploading ? 'Загрузка...' : 'Загрузить Excel'}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* Вкладка: логи входов */}
+            {adminTab === 'logs' && (
+            <>
             <div className="logs-toolbar">
               <input
                 type="text"
@@ -893,6 +990,8 @@ const Dashboard = () => {
                   Вперёд →
                 </button>
               </div>
+            )}
+            </>
             )}
           </div>
         </div>
@@ -1054,89 +1153,6 @@ const Dashboard = () => {
           </button>
         </div>
       </div>
-
-      {/* Загрузка (только admin) */}
-      {isAdmin() && (
-        <div className="upload-section">
-          <h3><Upload size={20} /> Загрузка нового файла (Admin)</h3>
-          <form onSubmit={handleUpload} className="upload-form">
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => setUploadFile(e.target.files[0])}
-            />
-            <button type="submit" disabled={isUploading}>
-              {isUploading ? 'Загрузка...' : 'Загрузить Excel'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Управление пользователями (только admin) */}
-      {isAdmin() && (
-        <div className="upload-section">
-          <h3
-            style={{ cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => { setShowUserMgmt(v => !v); if (!showUserMgmt) fetchUsers() }}
-          >
-            👥 Управление региональными пользователями {showUserMgmt ? '▲' : '▼'}
-          </h3>
-
-          {showUserMgmt && (
-            <div style={{ marginTop: 12 }}>
-              {/* Создание нового пользователя */}
-              <div className="user-create-form">
-                <select
-                  value={newUser.region}
-                  onChange={(e) => setNewUser({ ...newUser, region: e.target.value })}
-                >
-                  <option value="">— Весь Казахстан —</option>
-                  {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <input
-                  type="text"
-                  placeholder="Логин (латиница)"
-                  value={newUser.username}
-                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="Пароль"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                />
-                <button onClick={createRegionalUser} className="apply-btn" style={{ padding: '8px 16px' }}>
-                  Создать
-                </button>
-                {userMgmtMsg && <span style={{ marginLeft: 8, color: userMgmtMsg.includes('создан') ? 'green' : 'red' }}>{userMgmtMsg}</span>}
-              </div>
-
-              {/* Список пользователей */}
-              <table className="users-table">
-                <thead>
-                  <tr><th>Логин</th><th>Роль</th><th>Регион</th><th></th></tr>
-                </thead>
-                <tbody>
-                  {usersList.map(u => (
-                    <tr key={u.id}>
-                      <td>{u.username}</td>
-                      <td>{u.role}</td>
-                      <td>{u.region || '— все регионы —'}</td>
-                      <td>
-                        {!['admin', 'user'].includes(u.username) && (
-                          <button onClick={() => deleteUser(u.id)} className="reset-btn" style={{ padding: '4px 10px', fontSize: 12 }}>
-                            Удалить
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Таблица */}
       <div className="table-section">
