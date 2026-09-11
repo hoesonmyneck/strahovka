@@ -201,6 +201,11 @@ body {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
 }
 
+/* Админ-панель: фиксированная высота, чтобы окно не прыгало между вкладками */
+.admin-modal {
+  height: 85vh;
+}
+
 .logs-modal-header {
   display: flex;
   align-items: center;
