@@ -692,7 +692,7 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="user-info">
-          <span>{user?.username} ({user?.role})</span>
+          <span>{user?.username}</span>
           <button onClick={openFiles} className="files-btn">
             <FolderOpen size={18} /> Файлы
           </button>
