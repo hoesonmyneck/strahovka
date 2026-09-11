@@ -85,17 +85,7 @@ def init_default_users(db: Session):
             is_active=1
         )
         db.add(admin_user)
-    
-    user = get_user(db, "user")
-    if not user:
-        regular_user = models.User(
-            username="user",
-            hashed_password=get_password_hash("user"),
-            role="user",
-            is_active=1
-        )
-        db.add(regular_user)
-    
+
     # gak — просмотр всех регионов, без загрузки файлов
     gak = get_user(db, "gak")
     if not gak:
