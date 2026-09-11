@@ -856,7 +856,7 @@ const Dashboard = () => {
             {/* Вкладка: загрузка нового файла */}
             {adminTab === 'upload' && (
               <div className="admin-tab-body">
-                <p style={{ color: '#666', fontSize: 14, marginTop: 0 }}>
+                <p style={{ fontWeight: 600, marginTop: 0, marginBottom: 12 }}>
                   Загрузите новый Excel-файл — текущие данные будут заменены.
                 </p>
                 <label className={`upload-btn${isUploading ? ' disabled' : ''}`}>
