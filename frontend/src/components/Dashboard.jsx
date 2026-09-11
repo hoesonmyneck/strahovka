@@ -125,7 +125,7 @@ const binFormatter = (params) => {
 }
 
 // ─── Зона загрузки: клик по кнопке ИЛИ перетаскивание файла ──────────────────
-const FileDropzone = ({ onFile, uploading, disabled, accept, label }) => {
+const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = '' }) => {
   const [drag, setDrag] = useState(false)
   const inputRef = useRef()
   const busy = uploading || disabled
@@ -134,7 +134,7 @@ const FileDropzone = ({ onFile, uploading, disabled, accept, label }) => {
 
   return (
     <div
-      className={`dropzone${drag ? ' dragover' : ''}${busy ? ' disabled' : ''}`}
+      className={`dropzone${className ? ' ' + className : ''}${drag ? ' dragover' : ''}${busy ? ' disabled' : ''}`}
       onClick={() => !busy && inputRef.current?.click()}
       onDragOver={(e) => { e.preventDefault(); if (!busy) setDrag(true) }}
       onDragLeave={() => setDrag(false)}
@@ -881,7 +881,7 @@ const Dashboard = () => {
 
             {/* Вкладка: загрузка нового файла */}
             {adminTab === 'upload' && (
-              <div className="admin-tab-body">
+              <div className="admin-tab-body admin-tab-body--upload">
                 <p style={{ fontWeight: 600, marginTop: 0, marginBottom: 12 }}>
                   Загрузите новый Excel-файл — текущие данные будут заменены.
                 </p>
@@ -890,6 +890,7 @@ const Dashboard = () => {
                   uploading={isUploading}
                   accept=".xlsx,.xls"
                   label="Загрузить новый файл"
+                  className="dropzone--full dropzone--tall"
                 />
               </div>
             )}
@@ -903,6 +904,7 @@ const Dashboard = () => {
                 onFile={uploadSharedFile}
                 uploading={fileUploading}
                 label="Загрузить новый файл"
+                className="dropzone--full"
               />
             </div>
 

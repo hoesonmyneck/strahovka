@@ -385,6 +385,21 @@ body {
   color: #8a90a8;
 }
 
+/* На всю ширину контейнера */
+.dropzone.dropzone--full {
+  max-width: none;
+}
+
+/* На всю высоту вкладки (для загрузки Excel) */
+.admin-tab-body--upload {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropzone.dropzone--tall {
+  flex: 1;
+}
+
 .logs-pagination {
   display: flex;
   align-items: center;
