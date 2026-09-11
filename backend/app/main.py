@@ -13,6 +13,8 @@ import os
 import tempfile
 import shutil
 import uuid
+import threading
+import time
 import openpyxl
 import xlsxwriter
 
@@ -382,39 +384,37 @@ def get_records(
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
 
-@app.get("/api/records/download")
-def download_records(
-    bin: Optional[str] = None,
-    bin_name: Optional[str] = None,
-    system_delimiter_bin: Optional[str] = None,
-    system_delimiter_bin_name: Optional[str] = None,
-    contract_number: Optional[str] = None,
-    contract_date_from: Optional[date] = None,
-    contract_date_to: Optional[date] = None,
-    date_beg_from: Optional[date] = None,
-    date_beg_to: Optional[date] = None,
-    date_end_from: Optional[date] = None,
-    date_end_to: Optional[date] = None,
-    obl_name: Optional[str] = None,
-    rai_name: Optional[str] = None,
-    address: Optional[str] = None,
-    phone: Optional[str] = None,
-    leader_surname: Optional[str] = None,
-    opf_name: Optional[str] = None,
-    id_oked: Optional[str] = None,
-    name_oked: Optional[str] = None,
-    is_insured: Optional[int] = None,
-    expires_in_months: Optional[int] = None,
-    current_user: models.User = Depends(auth.get_current_active_user),
-    db: Session = Depends(database.get_db)
-):
-    M = models.InsuranceRecord
-    params = {k: v for k, v in locals().items() if k not in ("current_user", "db", "M")}
-    query = apply_filters(db.query(M), M, params, force_region=current_user.region)
+# ============ EXPORT (xlsx) ============
 
-    # Тянем только нужные колонки лёгкими кортежами (не ORM-объектами) и
-    # серверным курсором (yield_per), чтобы не держать в памяти весь миллион строк.
-    query = query.with_entities(
+EXPORT_HEADERS = [
+    'БИН', 'Название компании', 'БИН страховой компании', 'Страховая компания',
+    'Номер договора', 'Дата договора', 'Дата начала', 'Дата окончания',
+    'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
+    'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
+    'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
+    'Вид деятельности (ОКЭД)', 'ИП', 'Флаг', 'Застрахован',
+]
+EXPORT_COL_WIDTHS = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
+                     22, 22, 40, 16, 30, 22, 10, 30, 6, 8, 12]
+
+EXPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "exports")
+os.makedirs(EXPORT_DIR, exist_ok=True)
+
+# Суточные готовые файлы по значению is_insured: None — все, 1 — застрахованы, 0 — нет.
+CACHED_EXPORTS = {
+    None: "insurance_records.xlsx",
+    1: "insurance_records_insured.xlsx",
+    0: "insurance_records_not_insured.xlsx",
+}
+
+_export_build_lock = threading.Lock()
+
+
+def records_export_query(db, params: dict, force_region: str = None):
+    """Отфильтрованный запрос выгрузки: только нужные колонки, лёгкими кортежами."""
+    M = models.InsuranceRecord
+    q = apply_filters(db.query(M), M, params, force_region=force_region)
+    return q.with_entities(
         M.bin, M.bin_name, M.system_delimiter_bin, M.system_delimiter_bin_name,
         M.contract_number, M.contract_date, M.date_beg, M.date_end, M.rescinding_date,
         M.calculated_amount, M.count_employees, M.total_employees_count,
@@ -423,39 +423,24 @@ def download_records(
         M.opf_name, M.id_oked, M.name_oked, M.ip, M.flag_head,
     )
 
-    headers = [
-        'БИН', 'Название компании', 'БИН страховой компании', 'Страховая компания',
-        'Номер договора', 'Дата договора', 'Дата начала', 'Дата окончания',
-        'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
-        'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
-        'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
-        'Вид деятельности (ОКЭД)', 'ИП', 'Флаг', 'Застрахован',
-    ]
 
+def write_records_xlsx(query, path: str):
+    """Пишет выгрузку в xlsx потоково (xlsxwriter constant_memory) в файл path."""
     today = date.today()
 
     def bin12(v):
         return str(int(v)).zfill(12) if v is not None else ''
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
-    tmp.close()
-
-    # xlsxwriter + constant_memory: строки сбрасываются на диск сразу, в памяти
-    # только текущая. Быстрее openpyxl write_only в 2-3 раза, xlsx настоящий.
-    wb = xlsxwriter.Workbook(tmp.name, {
+    wb = xlsxwriter.Workbook(path, {
         'constant_memory': True,
         'default_date_format': 'dd.mm.yyyy',
     })
     ws = wb.add_worksheet('Insurance Records')
     header_fmt = wb.add_format({'bold': True})
 
-    # Ширины колонок задаём заранее (в constant_memory нельзя после записи строк).
-    widths = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
-              22, 22, 40, 16, 30, 22, 10, 30, 6, 8, 12]
-    for col, w in enumerate(widths):
+    for col, w in enumerate(EXPORT_COL_WIDTHS):
         ws.set_column(col, col, w)
-
-    for col, name in enumerate(headers):
+    for col, name in enumerate(EXPORT_HEADERS):
         ws.write_string(0, col, name, header_fmt)
     ws.freeze_panes(1, 0)
 
@@ -463,8 +448,6 @@ def download_records(
     for r in query.yield_per(2000):
         row_idx += 1
         insured = bool(r.date_end and r.date_end > today and r.rescinding_date is None)
-        # БИН — строкой, чтобы сохранить ведущие нули; даты — датами (сортируемы);
-        # числа и None write_row определяет сам.
         ws.write_string(row_idx, 0, bin12(r.bin))
         ws.write_string(row_idx, 1, r.bin_name or '')
         ws.write_string(row_idx, 2, bin12(r.system_delimiter_bin))
@@ -495,9 +478,116 @@ def download_records(
         ])
 
     if row_idx:
-        ws.autofilter(0, 0, row_idx, len(headers) - 1)
+        ws.autofilter(0, 0, row_idx, len(EXPORT_HEADERS) - 1)
     wb.close()
 
+
+def cached_export_path(params: dict, region: str):
+    """Путь к готовому суточному файлу, если запрос под него подходит, иначе None.
+
+    Подходит: пользователь без региона и без фильтров, кроме is_insured in {None,0,1}.
+    """
+    if region:
+        return None
+    if any(params.get(k) not in (None, "") for k in params if k != "is_insured"):
+        return None
+    iv = params.get("is_insured")
+    if iv not in CACHED_EXPORTS:
+        return None
+    return os.path.join(EXPORT_DIR, CACHED_EXPORTS[iv])
+
+
+def rebuild_cached_exports(wait: bool = False):
+    """Пересобирает три суточных файла. Атомарно (temp -> os.replace).
+
+    wait=False — пропустить, если сборка уже идёт (для планировщика).
+    wait=True  — дождаться и собрать (после загрузки нового Excel).
+    """
+    if not _export_build_lock.acquire(blocking=wait):
+        return
+    try:
+        db = SessionLocal()
+        try:
+            for iv, fname in CACHED_EXPORTS.items():
+                q = records_export_query(db, {"is_insured": iv}, force_region=None)
+                dest = os.path.join(EXPORT_DIR, fname)
+                tmp = dest + ".tmp"
+                write_records_xlsx(q, tmp)
+                os.replace(tmp, dest)
+                print(f"Rebuilt cached export: {fname}", flush=True)
+        finally:
+            db.close()
+    finally:
+        _export_build_lock.release()
+
+
+def _export_scheduler():
+    """Фоновый поток: собрать файлы если их нет, дальше пересобирать раз в сутки в 06:00."""
+    if any(not os.path.exists(os.path.join(EXPORT_DIR, f)) for f in CACHED_EXPORTS.values()):
+        try:
+            rebuild_cached_exports()
+        except Exception as e:
+            print(f"Initial export build failed: {e}")
+    while True:
+        now = datetime.now()
+        nxt = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        time.sleep(max(1, (nxt - now).total_seconds()))
+        try:
+            rebuild_cached_exports()
+        except Exception as e:
+            print(f"Scheduled export build failed: {e}")
+
+
+@app.on_event("startup")
+def _start_export_scheduler():
+    threading.Thread(target=_export_scheduler, daemon=True, name="export-scheduler").start()
+
+
+@app.get("/api/records/download")
+def download_records(
+    bin: Optional[str] = None,
+    bin_name: Optional[str] = None,
+    system_delimiter_bin: Optional[str] = None,
+    system_delimiter_bin_name: Optional[str] = None,
+    contract_number: Optional[str] = None,
+    contract_date_from: Optional[date] = None,
+    contract_date_to: Optional[date] = None,
+    date_beg_from: Optional[date] = None,
+    date_beg_to: Optional[date] = None,
+    date_end_from: Optional[date] = None,
+    date_end_to: Optional[date] = None,
+    obl_name: Optional[str] = None,
+    rai_name: Optional[str] = None,
+    address: Optional[str] = None,
+    phone: Optional[str] = None,
+    leader_surname: Optional[str] = None,
+    opf_name: Optional[str] = None,
+    id_oked: Optional[str] = None,
+    name_oked: Optional[str] = None,
+    is_insured: Optional[int] = None,
+    expires_in_months: Optional[int] = None,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    params = {k: v for k, v in locals().items() if k not in ("current_user", "db")}
+
+    # Готовые суточные файлы: без фильтров / застрахованы / не застрахованы —
+    # только для пользователей без региона и без прочих фильтров.
+    cached = cached_export_path(params, current_user.region)
+    if cached and os.path.exists(cached):
+        return FileResponse(
+            cached,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=os.path.basename(cached),
+        )
+
+    # Иначе генерируем на лету во временный файл и удаляем после отдачи.
+    query = records_export_query(db, params, force_region=current_user.region)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    write_records_xlsx(query, tmp.name)
     return FileResponse(
         tmp.name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -647,6 +737,13 @@ def upload_file(
         else:
             db.add(models.AppSetting(key="last_update", value=today))
         db.commit()
+
+        # Данные сменились — пересобираем суточные готовые файлы в фоне,
+        # чтобы «Скачать всё» сразу отдавало свежак, не дожидаясь 06:00.
+        threading.Thread(
+            target=lambda: rebuild_cached_exports(wait=True), daemon=True
+        ).start()
+
         return {"message": f"Successfully uploaded {count} records"}
 
     except Exception as e:
