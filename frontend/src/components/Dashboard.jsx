@@ -704,9 +704,11 @@ const Dashboard = () => {
         </div>
         <div className="user-info">
           <span>{user?.username}</span>
-          <button onClick={openFiles} className="files-btn">
-            <FolderOpen size={18} /> Файлы
-          </button>
+          {!isAdmin() && (
+            <button onClick={openFiles} className="files-btn">
+              <FolderOpen size={18} /> Файлы
+            </button>
+          )}
           {isAdmin() && (
             <button onClick={openAdminPanel} className="logs-btn">
               <Settings size={18} /> Админ панель
