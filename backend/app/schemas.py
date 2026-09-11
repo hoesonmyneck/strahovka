@@ -72,15 +72,10 @@ class FilterParams(BaseModel):
     expires_in_months: Optional[int] = None  # 1, 3, или 6 месяцев
 
 class MetricsResponse(BaseModel):
-    total: int
-    insured: int
-    not_insured: int
+    # Все метрики — по уникальным БИН (компаниям)
     total_bins: int = 0
     insured_bins: int = 0
-    # Нарушители: обязанные страховать (не госучреждение, esutd>=2) без
-    # действующего договора, считаются по уникальным БИН.
-    violators: int = 0
-    eligible_total: int = 0  # всего обязанных страховать — для контекста
+    not_insured_bins: int = 0
 
 class UserBase(BaseModel):
     username: str

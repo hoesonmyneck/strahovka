@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from starlette.background import BackgroundTask
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, String, case, distinct
+from sqlalchemy.orm import Session, aliased
+from sqlalchemy import func, and_, or_, not_, String, case, distinct
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -78,43 +78,31 @@ def startup_event():
 
 
 def insured_expr(M):
-    """Застрахован: договор ещё не истёк и не расторгнут.
-
-    Совпадает с эталонным запросом заказчика:
-        date_end > <дата запроса> AND rescinding_date IS NULL
-    Считается на дату запроса, а не на дату загрузки файла.
-    """
-    return and_(M.date_end != None, M.date_end > date.today(), M.rescinding_date == None)
-
-
-def not_insured_expr(M):
-    """Обратное к insured_expr, с явной обработкой пустой date_end."""
-    return or_(M.date_end == None, M.date_end <= date.today(), M.rescinding_date != None)
-
-
-# Госучреждения не обязаны страховать работников от несчастных случаев
-STATE_INSTITUTION = "Государственное учреждение"
-
-
-def active_insurance_expr(M):
-    """Договор действует по новому скрипту заказчика (для метрики нарушителей):
-        date_end > сегодня AND (rescinding_date IS NULL OR rescinding_date > сегодня)
-    Отличие от insured_expr: расторжение будущей датой ещё считается активным.
+    """Договор застрахован (правило заказчика):
+        contract_number IS NOT NULL
+        AND flag_head = 1
+        AND rescinding_date IS NULL
+        AND date_end > сегодня
+    Компания (БИН) застрахована, если хотя бы одна её строка это выполняет.
     """
     return and_(
+        M.contract_number != None,
+        M.flag_head == 1,
+        M.rescinding_date == None,
         M.date_end != None,
         M.date_end > date.today(),
-        or_(M.rescinding_date == None, M.rescinding_date > date.today()),
     )
 
 
 def is_insured_now(record) -> int:
-    """То же правило, но для уже загруженной строки — колонка is_insured в БД
-    хранит снимок на момент загрузки файла и для показа не годится."""
+    """То же правило для уже полученной строки (не читаем колонку is_insured —
+    она снимок на момент загрузки)."""
     return 1 if (
-        record.date_end
-        and record.date_end > date.today()
+        record.contract_number is not None
+        and record.flag_head == 1
         and record.rescinding_date is None
+        and record.date_end
+        and record.date_end > date.today()
     ) else 0
 
 
@@ -183,10 +171,9 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     if params.get("name_oked"):
         query = query.filter(M.name_oked.ilike(f"%{params['name_oked']}%"))
 
-    if params.get("is_insured") is not None:
-        query = query.filter(
-            insured_expr(M) if params["is_insured"] == 1 else not_insured_expr(M)
-        )
+    # is_insured сознательно НЕ фильтруется здесь: статус застрахованности —
+    # свойство компании (БИН), поэтому он применяется в дедуп-пути
+    # (deduped_records_query) на уровне представителя, а не построчно.
 
     if params.get("expires_in_months"):
         target_date = date.today() + timedelta(days=30 * params["expires_in_months"])
@@ -198,6 +185,32 @@ def apply_filters(query, model, params: dict, force_region: str = None):
         )
 
     return query
+
+
+def deduped_records_query(db, params: dict, force_region: str = None):
+    """Одна строка на БИН (реестр организаций) с учётом фильтров.
+
+    Представитель БИН: застрахованный договор, если он есть у компании,
+    иначе самый свежий по date_end. Значит статус представителя = статус
+    компании. Возвращает (query представителей, alias-класс Rep).
+    Фильтр is_insured применяется на уровне компании (по представителю).
+    """
+    M = models.InsuranceRecord
+    base = apply_filters(db.query(M), M, params, force_region=force_region)
+    rep_subq = (
+        base.order_by(M.bin, insured_expr(M).desc(), M.date_end.desc().nullslast())
+            .distinct(M.bin)
+            .subquery()
+    )
+    Rep = aliased(M, rep_subq)
+    q = db.query(Rep)
+
+    is_ins = params.get("is_insured")
+    if is_ins is not None:
+        ins_flag = case((insured_expr(Rep), 1), else_=0)  # else_ убирает NULL
+        q = q.filter(ins_flag == (1 if is_ins == 1 else 0))
+
+    return q, Rep
 
 
 # ============ AUTH ============
@@ -277,12 +290,11 @@ def get_metrics(
     params.pop("current_user"); params.pop("db")
     M = models.InsuranceRecord
 
-    # Карточки «Всего» и «Застрахованы»: строки договоров + уникальные БИН.
+    # Все три карточки — по уникальным БИН (компаниям).
+    # Компания застрахована, если хотя бы одна её строка удовлетворяет insured_expr;
     # case(...) без else_ даёт NULL, а count(distinct) его пропускает.
     query = apply_filters(
         db.query(
-            func.count().label("total"),
-            func.sum(case((insured_expr(M), 1), else_=0)).label("insured"),
             func.count(distinct(M.bin)).label("total_bins"),
             func.count(distinct(case((insured_expr(M), M.bin)))).label("insured_bins"),
         ),
@@ -291,44 +303,13 @@ def get_metrics(
         force_region=current_user.region,
     )
     row = query.one()
-    total = row.total or 0
-    insured = row.insured or 0
-
-    # Карточка «Не застрахованы»: нарушители — компании (БИН), обязанные
-    # страховать работников, но без действующего договора.
-    #   обязан = не госучреждение И esutd_akt_td >= 2
-    #   не застрахован = ни одной строки с активной страховкой
-    # Поля паспорта (opf_name, esutd) в выгрузке одинаковы для всех строк БИН,
-    # поэтому берём их через max().
-    per_bin = apply_filters(
-        db.query(
-            M.bin.label("bin"),
-            func.max(M.esutd_akt_td).label("esutd"),
-            func.max(M.opf_name).label("opf"),
-            func.sum(case((active_insurance_expr(M), 1), else_=0)).label("active_cnt"),
-        ),
-        M,
-        params,
-        force_region=current_user.region,
-    ).group_by(M.bin).subquery()
-
-    eligible_filter = and_(
-        per_bin.c.esutd >= 2,
-        per_bin.c.opf != STATE_INSTITUTION,  # != исключает и NULL
-    )
-    row2 = db.query(
-        func.count().label("eligible"),
-        func.sum(case((per_bin.c.active_cnt == 0, 1), else_=0)).label("violators"),
-    ).select_from(per_bin).filter(eligible_filter).one()
+    total_bins = row.total_bins or 0
+    insured_bins = row.insured_bins or 0
 
     return schemas.MetricsResponse(
-        total=total,
-        insured=insured,
-        not_insured=total - insured,
-        total_bins=row.total_bins or 0,
-        insured_bins=row.insured_bins or 0,
-        violators=row2.violators or 0,
-        eligible_total=row2.eligible or 0,
+        total_bins=total_bins,
+        insured_bins=insured_bins,
+        not_insured_bins=total_bins - insured_bins,
     )
 
 
@@ -365,12 +346,14 @@ def get_records(
     db: Session = Depends(database.get_db)
 ):
     params = {k: v for k, v in locals().items() if k not in ("page", "page_size", "sort_by", "sort_order", "current_user", "db")}
-    query = apply_filters(db.query(models.InsuranceRecord), models.InsuranceRecord, params, force_region=current_user.region)
+
+    # Одна строка на БИН (реестр организаций)
+    query, Rep = deduped_records_query(db, params, force_region=current_user.region)
 
     total = query.count()
 
-    if sort_by and hasattr(models.InsuranceRecord, sort_by):
-        order_col = getattr(models.InsuranceRecord, sort_by)
+    if sort_by and hasattr(Rep, sort_by):
+        order_col = getattr(Rep, sort_by)
         query = query.order_by(order_col.desc() if sort_order == "desc" else order_col.asc())
 
     records = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -386,15 +369,15 @@ def get_records(
 
 # ============ EXPORT (xlsx) ============
 
+# Реестр организаций: без договорных колонок (номер/даты договора, расторжение)
 EXPORT_HEADERS = [
     'БИН', 'Название компании', 'БИН страховой компании', 'Страховая компания',
-    'Номер договора', 'Дата договора', 'Дата начала', 'Дата окончания',
-    'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
+    'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
     'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
     'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
     'Вид деятельности (ОКЭД)', 'ИП', 'Флаг', 'Застрахован',
 ]
-EXPORT_COL_WIDTHS = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
+EXPORT_COL_WIDTHS = [15, 40, 18, 40, 14, 12, 12, 13, 14, 12,
                      22, 22, 40, 16, 30, 22, 10, 30, 6, 8, 12]
 
 EXPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "exports")
@@ -411,23 +394,13 @@ _export_build_lock = threading.Lock()
 
 
 def records_export_query(db, params: dict, force_region: str = None):
-    """Отфильтрованный запрос выгрузки: только нужные колонки, лёгкими кортежами."""
-    M = models.InsuranceRecord
-    q = apply_filters(db.query(M), M, params, force_region=force_region)
-    return q.with_entities(
-        M.bin, M.bin_name, M.system_delimiter_bin, M.system_delimiter_bin_name,
-        M.contract_number, M.contract_date, M.date_beg, M.date_end, M.rescinding_date,
-        M.calculated_amount, M.count_employees, M.total_employees_count,
-        M.kol_12mes, M.fot_12mes, M.esutd_akt_td, M.obl_name, M.rai_name,
-        M.address, M.phone, M.leader_surname, M.leader_name, M.leader_middlename,
-        M.opf_name, M.id_oked, M.name_oked, M.ip, M.flag_head,
-    )
+    """Запрос выгрузки: реестр организаций (одна строка на БИН) с фильтрами."""
+    q, _ = deduped_records_query(db, params, force_region=force_region)
+    return q
 
 
 def write_records_xlsx(query, path: str):
     """Пишет выгрузку в xlsx потоково (xlsxwriter constant_memory) в файл path."""
-    today = date.today()
-
     def bin12(v):
         return str(int(v)).zfill(12) if v is not None else ''
 
@@ -447,17 +420,12 @@ def write_records_xlsx(query, path: str):
     row_idx = 0
     for r in query.yield_per(2000):
         row_idx += 1
-        insured = bool(r.date_end and r.date_end > today and r.rescinding_date is None)
+        insured = is_insured_now(r)  # статус компании (представитель)
         ws.write_string(row_idx, 0, bin12(r.bin))
         ws.write_string(row_idx, 1, r.bin_name or '')
         ws.write_string(row_idx, 2, bin12(r.system_delimiter_bin))
         ws.write_row(row_idx, 3, [
             r.system_delimiter_bin_name,
-            r.contract_number,
-            r.contract_date,
-            r.date_beg,
-            r.date_end,
-            r.rescinding_date,
             r.calculated_amount,
             r.count_employees,
             r.total_employees_count,

@@ -161,9 +161,7 @@ const Dashboard = () => {
   const gridRef = useRef()
 
   const [metrics, setMetrics] = useState({
-    total: 0, insured: 0, not_insured: 0,
-    total_bins: 0, insured_bins: 0,
-    violators: 0, eligible_total: 0,
+    total_bins: 0, insured_bins: 0, not_insured_bins: 0,
   })
 
   const EMPTY_FILTERS = {
@@ -254,18 +252,6 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       minWidth: 220,
     },
-    // Договор
-    {
-      field: 'contract_number',
-      headerName: '№ Договора',
-      sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
-      minWidth: 150,
-    },
-    // Даты
-    { field: 'contract_date', headerName: 'Дата договора', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 150 },
-    { field: 'date_beg', headerName: 'Дата начала', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 140 },
-    { field: 'date_end', headerName: 'Дата окончания', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 150 },
-    { field: 'rescinding_date', headerName: 'Дата расторжения', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 160 },
     // Финансы и сотрудники
     {
       field: 'calculated_amount',
@@ -1074,25 +1060,22 @@ const Dashboard = () => {
         <div className="metric-card">
           <Users className="metric-icon" size={32} />
           <div className="metric-info">
-            <span className="metric-value">{metrics.total.toLocaleString()}</span>
-            <span className="metric-label">Всего записей</span>
-            <span className="metric-bins">{metrics.total_bins.toLocaleString()} уникальных БИН</span>
+            <span className="metric-value">{metrics.total_bins.toLocaleString()}</span>
+            <span className="metric-label">Всего организаций</span>
           </div>
         </div>
         <div className="metric-card insured">
           <Shield className="metric-icon" size={32} />
           <div className="metric-info">
-            <span className="metric-value">{metrics.insured.toLocaleString()}</span>
+            <span className="metric-value">{metrics.insured_bins.toLocaleString()}</span>
             <span className="metric-label">Застрахованы</span>
-            <span className="metric-bins">{metrics.insured_bins.toLocaleString()} уникальных БИН</span>
           </div>
         </div>
         <div className="metric-card not-insured">
           <ShieldOff className="metric-icon" size={32} />
           <div className="metric-info">
-            <span className="metric-value">{metrics.violators.toLocaleString()}</span>
+            <span className="metric-value">{metrics.not_insured_bins.toLocaleString()}</span>
             <span className="metric-label">Не застрахованы</span>
-            <span className="metric-bins">компаний, обязанных страховать</span>
           </div>
         </div>
       </div>
@@ -1234,7 +1217,7 @@ const Dashboard = () => {
           </div>
         )}
         <div className="table-header">
-          <span>Всего: {totalRecords.toLocaleString()} записей</span>
+          <span>Всего: {totalRecords.toLocaleString()} организаций</span>
           <div className="pagination">
             <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}>← Назад</button>
             <span>Страница {currentPage} из {totalPages}</span>
