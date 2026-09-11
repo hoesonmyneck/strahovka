@@ -340,30 +340,49 @@ body {
   padding: 20px 24px;
 }
 
-/* Кастомная кнопка загрузки файла (скрывает нативный input) */
-.upload-btn {
-  display: inline-flex;
+/* Зона загрузки: клик или перетаскивание файла */
+.dropzone {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  background: #667eea;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 32px;
+  background: #f5f7ff;
+  color: #667eea;
+  border: 2px dashed #b9c2ee;
+  border-radius: 10px;
   cursor: pointer;
-  transition: background 0.2s;
-  width: fit-content;
+  transition: background 0.2s, border-color 0.2s;
+  width: 100%;
+  max-width: 420px;
 }
 
-.upload-btn:hover {
-  background: #5568d3;
+.dropzone:hover {
+  background: #eef1fe;
+  border-color: #8b98e0;
 }
 
-.upload-btn.disabled {
+.dropzone.dragover {
+  background: #e4e9ff;
+  border-color: #667eea;
+  border-style: solid;
+}
+
+.dropzone.disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.dropzone-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #4353c4;
+}
+
+.dropzone-hint {
+  font-size: 12px;
+  color: #8a90a8;
 }
 
 .logs-pagination {

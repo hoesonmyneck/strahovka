@@ -124,6 +124,37 @@ const binFormatter = (params) => {
   return String(params.value).padStart(12, '0')
 }
 
+// ─── Зона загрузки: клик по кнопке ИЛИ перетаскивание файла ──────────────────
+const FileDropzone = ({ onFile, uploading, disabled, accept, label }) => {
+  const [drag, setDrag] = useState(false)
+  const inputRef = useRef()
+  const busy = uploading || disabled
+
+  const pick = (file) => { if (file && !busy) onFile(file) }
+
+  return (
+    <div
+      className={`dropzone${drag ? ' dragover' : ''}${busy ? ' disabled' : ''}`}
+      onClick={() => !busy && inputRef.current?.click()}
+      onDragOver={(e) => { e.preventDefault(); if (!busy) setDrag(true) }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]) }}
+    >
+      <Upload size={22} />
+      <span className="dropzone-label">{uploading ? 'Загрузка...' : label}</span>
+      <span className="dropzone-hint">или перетащите файл сюда</span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        disabled={busy}
+        hidden
+        onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; pick(f) }}
+      />
+    </div>
+  )
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 const Dashboard = () => {
   const { user, logout, isAdmin } = useAuth()
@@ -156,7 +187,6 @@ const Dashboard = () => {
   const pageSize = 100
 
   const [isUploading, setIsUploading] = useState(false)
-  const excelInputRef = useRef()
   const [isLoading, setIsLoading] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [editingDate, setEditingDate] = useState(false)
@@ -190,7 +220,6 @@ const Dashboard = () => {
   const [filesList, setFilesList] = useState([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [fileUploading, setFileUploading] = useState(false)
-  const fileInputRef = useRef()
 
   // ─── Колонки (useMemo чтобы AG Grid не сбрасывал фильтры при ре-рендере) ──
   const columnDefs = useMemo(() => [
@@ -575,8 +604,7 @@ const Dashboard = () => {
     }
   }
 
-  const uploadSharedFile = async (e) => {
-    const file = e.target.files[0]
+  const uploadSharedFile = async (file) => {
     if (!file) return
     setFileUploading(true)
     const formData = new FormData()
@@ -589,7 +617,6 @@ const Dashboard = () => {
       toast.error(err.response?.data?.detail || 'Ошибка загрузки')
     } finally {
       setFileUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -648,7 +675,6 @@ const Dashboard = () => {
       toast.error(error.response?.data?.detail || 'Ошибка загрузки файла')
     } finally {
       setIsUploading(false)
-      if (excelInputRef.current) excelInputRef.current.value = ''
     }
   }
 
@@ -859,17 +885,12 @@ const Dashboard = () => {
                 <p style={{ fontWeight: 600, marginTop: 0, marginBottom: 12 }}>
                   Загрузите новый Excel-файл — текущие данные будут заменены.
                 </p>
-                <label className={`upload-btn${isUploading ? ' disabled' : ''}`}>
-                  <Upload size={16} /> {isUploading ? 'Загрузка...' : 'Загрузить новый файл'}
-                  <input
-                    ref={excelInputRef}
-                    type="file"
-                    accept=".xlsx,.xls"
-                    disabled={isUploading}
-                    onChange={(e) => handleUpload(e.target.files[0])}
-                    hidden
-                  />
-                </label>
+                <FileDropzone
+                  onFile={handleUpload}
+                  uploading={isUploading}
+                  accept=".xlsx,.xls"
+                  label="Загрузить новый файл"
+                />
               </div>
             )}
 
@@ -878,16 +899,11 @@ const Dashboard = () => {
             <>
             <div className="logs-toolbar" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
               <span style={{ fontWeight: 600 }}>Загрузить новый файл</span>
-              <label className={`upload-btn${fileUploading ? ' disabled' : ''}`}>
-                <Upload size={16} /> {fileUploading ? 'Загрузка...' : 'Загрузить новый файл'}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={uploadSharedFile}
-                  disabled={fileUploading}
-                  hidden
-                />
-              </label>
+              <FileDropzone
+                onFile={uploadSharedFile}
+                uploading={fileUploading}
+                label="Загрузить новый файл"
+              />
             </div>
 
             <div className="logs-table-wrap">
