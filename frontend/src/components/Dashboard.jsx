@@ -155,8 +155,8 @@ const Dashboard = () => {
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 100
 
-  const [uploadFile, setUploadFile] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
+  const excelInputRef = useRef()
   const [isLoading, setIsLoading] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [editingDate, setEditingDate] = useState(false)
@@ -634,22 +634,21 @@ const Dashboard = () => {
     }
   }
 
-  const handleUpload = async (e) => {
-    e.preventDefault()
-    if (!uploadFile) { toast.error('Выберите файл'); return }
+  const handleUpload = async (file) => {
+    if (!file) return
     setIsUploading(true)
     const formData = new FormData()
-    formData.append('file', uploadFile)
+    formData.append('file', file)
     try {
       await api.post('/api/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
       toast.success('Файл успешно загружен!')
-      setUploadFile(null)
       fetchMetrics()
       fetchData(1)
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Ошибка загрузки файла')
     } finally {
       setIsUploading(false)
+      if (excelInputRef.current) excelInputRef.current.value = ''
     }
   }
 
@@ -791,7 +790,7 @@ const Dashboard = () => {
                 <Users size={16} /> Пользователи
               </button>
               <button className={adminTab === 'upload' ? 'active' : ''} onClick={() => selectAdminTab('upload')}>
-                <Upload size={16} /> Загрузка файла
+                <Upload size={16} /> Загрузка Excel
               </button>
               <button className={adminTab === 'logs' ? 'active' : ''} onClick={() => selectAdminTab('logs')}>
                 <ScrollText size={16} /> Логи входов
@@ -860,30 +859,35 @@ const Dashboard = () => {
                 <p style={{ color: '#666', fontSize: 14, marginTop: 0 }}>
                   Загрузите новый Excel-файл — текущие данные будут заменены.
                 </p>
-                <form onSubmit={handleUpload} className="upload-form">
+                <label className={`upload-btn${isUploading ? ' disabled' : ''}`}>
+                  <Upload size={16} /> {isUploading ? 'Загрузка...' : 'Загрузить новый файл'}
                   <input
+                    ref={excelInputRef}
                     type="file"
                     accept=".xlsx,.xls"
-                    onChange={(e) => setUploadFile(e.target.files[0])}
+                    disabled={isUploading}
+                    onChange={(e) => handleUpload(e.target.files[0])}
+                    hidden
                   />
-                  <button type="submit" disabled={isUploading}>
-                    {isUploading ? 'Загрузка...' : 'Загрузить Excel'}
-                  </button>
-                </form>
+                </label>
               </div>
             )}
 
             {/* Вкладка: файлы (управление — загрузка и удаление) */}
             {adminTab === 'files' && (
             <>
-            <div className="logs-toolbar">
-              <input
-                ref={fileInputRef}
-                type="file"
-                onChange={uploadSharedFile}
-                disabled={fileUploading}
-              />
-              {fileUploading && <span style={{ color: '#666', fontSize: 13 }}>Загрузка...</span>}
+            <div className="logs-toolbar" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Загрузить новый файл</span>
+              <label className={`upload-btn${fileUploading ? ' disabled' : ''}`}>
+                <Upload size={16} /> {fileUploading ? 'Загрузка...' : 'Загрузить новый файл'}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={uploadSharedFile}
+                  disabled={fileUploading}
+                  hidden
+                />
+              </label>
             </div>
 
             <div className="logs-table-wrap">

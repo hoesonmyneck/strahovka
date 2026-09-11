@@ -340,6 +340,32 @@ body {
   padding: 20px 24px;
 }
 
+/* Кастомная кнопка загрузки файла (скрывает нативный input) */
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  width: fit-content;
+}
+
+.upload-btn:hover {
+  background: #5568d3;
+}
+
+.upload-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .logs-pagination {
   display: flex;
   align-items: center;
