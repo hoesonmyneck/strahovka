@@ -254,11 +254,30 @@ body {
   border: 1px solid #dde3f5;
   border-radius: 6px;
   font-size: 14px;
-  min-width: 200px;
+  min-width: 0;              /* было 200px — не влезало на узких экранах */
+}
+
+/* Фильтр по логину тянется и сжимается, занимая свободное место */
+.logs-toolbar input[type="text"]:not(.logs-date-input) {
+  flex: 1 1 160px;
+}
+
+/* Поля дат сжимаются, но остаются читаемыми */
+.logs-toolbar .react-datepicker-wrapper {
+  flex: 1 1 130px;
+  min-width: 0;
 }
 
 .logs-toolbar .logs-date-input {
-  min-width: 130px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Кнопки не сжимаются и не переносятся по словам */
+.logs-toolbar .apply-btn,
+.logs-toolbar .download-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .logs-subbar {
