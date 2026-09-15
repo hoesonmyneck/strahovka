@@ -164,8 +164,16 @@ const Dashboard = () => {
 
   // Доступ к разделу ОПВР: админ или пользователь с флагом appvr_access
   const canAppvr = isAdmin() || !!user?.appvr_access
-  // Активный раздел: 'insurance' (страхование) или 'oppv' (пенсионные взносы)
-  const [section, setSection] = useState('insurance')
+  // Активный раздел: 'insurance' (страхование) или 'oppv' (пенсионные взносы).
+  // Запоминаем выбор, чтобы после перезагрузки страницы остаться в том же разделе.
+  const [section, setSection] = useState(() => localStorage.getItem('section') || 'insurance')
+
+  useEffect(() => { localStorage.setItem('section', section) }, [section])
+
+  // Если пользователь без доступа к ОПВР — не оставляем его в этом разделе
+  useEffect(() => {
+    if (user && !canAppvr && section === 'oppv') setSection('insurance')
+  }, [user, canAppvr, section])
 
   // ─── Загрузка файла ОПВР (только admin) ───────────────────────────────────
   const [isOppvUploading, setIsOppvUploading] = useState(false)
