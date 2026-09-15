@@ -55,6 +55,32 @@ class InsuranceRecord(Base):
         Index('idx_date_end', 'date_end'),  # для фильтра по дате окончания
     )
 
+class OppvRecord(Base):
+    """Обязательные пенсионные взносы работодателя (ОПВР) — сводная выгрузка.
+    БИН хранится строкой: в источнике есть ведущие нули (000940000567)."""
+    __tablename__ = "oppv_records"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    region = Column(String(200), index=True)              # Регион
+    bin = Column(String(20), index=True)                  # БИН (строка, ведущие нули)
+    oked_code = Column(String(20))                         # Код ОКЭД
+    oked_name = Column(String(300))                        # ОКЭД
+    age = Column(Integer)                                  # Возраст
+    gender = Column(String(20))                            # Пол
+    count = Column(Integer)                                # Кол-во
+    experience = Column(Integer)                           # Стаж
+    fot = Column(Float)                                    # ФОТ
+    smz = Column(Float)                                    # СМЗ
+    oked_code_low = Column(String(20))                     # Код ОКЭД (нижний уровень)
+    oked_name_low = Column(String(300))                    # ОКЭД (нижний уровень)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_oppv_bin', 'bin'),
+        Index('idx_oppv_region', 'region'),
+    )
+
+
 class AppSetting(Base):
     """Общие настройки приложения (ключ-значение)"""
     __tablename__ = "app_settings"
@@ -70,6 +96,7 @@ class User(Base):
     hashed_password = Column(String(255))
     role = Column(String(20), default="user")  # admin или user
     region = Column(String(200), nullable=True)  # None = без ограничений, иначе = значение obl_name
+    appvr_access = Column(Integer, default=0)  # 1 = доступ к разделу ОПВР (Пенсионные взносы)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 

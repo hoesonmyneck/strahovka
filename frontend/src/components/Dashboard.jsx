@@ -17,9 +17,11 @@ import {
   FolderOpen,
   Trash2,
   Settings,
+  Coins,
   X
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
+import OppvSection from './OppvSection.jsx'
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 const MONTHS_RU_PREP = [
@@ -159,6 +161,14 @@ const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = 
 const Dashboard = () => {
   const { user, logout, isAdmin } = useAuth()
   const gridRef = useRef()
+
+  // Доступ к разделу ОПВР: админ или пользователь с флагом appvr_access
+  const canAppvr = isAdmin() || !!user?.appvr_access
+  // Активный раздел: 'insurance' (страхование) или 'oppv' (пенсионные взносы)
+  const [section, setSection] = useState('insurance')
+
+  // ─── Загрузка файла ОПВР (только admin) ───────────────────────────────────
+  const [isOppvUploading, setIsOppvUploading] = useState(false)
 
   const [metrics, setMetrics] = useState({
     total_bins: 0, insured_bins: 0, not_insured_bins: 0,
@@ -664,6 +674,30 @@ const Dashboard = () => {
     }
   }
 
+  const handleOppvUpload = async (file) => {
+    if (!file) return
+    setIsOppvUploading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await api.post('/api/oppv/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      toast.success(res.data?.message || 'Файл ОПВР загружен')
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Ошибка загрузки файла')
+    } finally {
+      setIsOppvUploading(false)
+    }
+  }
+
+  const toggleAppvr = async (u) => {
+    try {
+      await api.patch(`/api/users/${u.id}`, { appvr_access: u.appvr_access ? 0 : 1 })
+      fetchUsers()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Ошибка')
+    }
+  }
+
   const totalPages = Math.ceil(totalRecords / pageSize)
   const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchAll(page) }
 
@@ -714,6 +748,22 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="user-info">
+          {canAppvr && (
+            <div className="section-toggle">
+              <button
+                className={section === 'insurance' ? 'active' : ''}
+                onClick={() => setSection('insurance')}
+              >
+                <Shield size={16} /> Страхование
+              </button>
+              <button
+                className={section === 'oppv' ? 'active' : ''}
+                onClick={() => setSection('oppv')}
+              >
+                <Coins size={16} /> Пенсионные взносы работников
+              </button>
+            </div>
+          )}
           <span>{user?.username}</span>
           {!isAdmin() && (
             <button onClick={openFiles} className="files-btn">
@@ -804,6 +854,9 @@ const Dashboard = () => {
               <button className={adminTab === 'upload' ? 'active' : ''} onClick={() => selectAdminTab('upload')}>
                 <Upload size={16} /> Загрузка Excel
               </button>
+              <button className={adminTab === 'oppv' ? 'active' : ''} onClick={() => selectAdminTab('oppv')}>
+                <Coins size={16} /> Загрузка ОПВР
+              </button>
               <button className={adminTab === 'logs' ? 'active' : ''} onClick={() => selectAdminTab('logs')}>
                 <ScrollText size={16} /> Логи входов
               </button>
@@ -843,7 +896,7 @@ const Dashboard = () => {
 
                 <table className="users-table">
                   <thead>
-                    <tr><th>Логин</th><th>Роль</th><th>Регион</th><th></th></tr>
+                    <tr><th>Логин</th><th>Роль</th><th>Регион</th><th>Доступ к ОПВР</th><th></th></tr>
                   </thead>
                   <tbody>
                     {usersList.map(u => (
@@ -851,6 +904,18 @@ const Dashboard = () => {
                         <td>{u.username}</td>
                         <td>{u.role}</td>
                         <td>{u.region || '— все регионы —'}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          {u.role === 'admin' ? (
+                            <span title="Админам доступ открыт всегда">✓</span>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={!!u.appvr_access}
+                              onChange={() => toggleAppvr(u)}
+                              style={{ width: 18, height: 18, cursor: 'pointer' }}
+                            />
+                          )}
+                        </td>
                         <td>
                           {!['admin', 'user'].includes(u.username) && (
                             <button onClick={() => deleteUser(u.id)} className="reset-btn" style={{ padding: '4px 10px', fontSize: 12 }}>
@@ -876,6 +941,22 @@ const Dashboard = () => {
                   uploading={isUploading}
                   accept=".xlsx,.xls"
                   label="Загрузить новый файл"
+                  className="dropzone--full dropzone--tall"
+                />
+              </div>
+            )}
+
+            {/* Вкладка: загрузка файла ОПВР (Пенсионные взносы работников) */}
+            {adminTab === 'oppv' && (
+              <div className="admin-tab-body admin-tab-body--upload">
+                <p style={{ fontWeight: 600, marginTop: 0, marginBottom: 12 }}>
+                  Загрузите Excel «Пенсионные взносы работников» (ОПВР) — текущие данные раздела будут заменены.
+                </p>
+                <FileDropzone
+                  onFile={handleOppvUpload}
+                  uploading={isOppvUploading}
+                  accept=".xlsx,.xls"
+                  label="Загрузить файл ОПВР"
                   className="dropzone--full dropzone--tall"
                 />
               </div>
@@ -1055,6 +1136,10 @@ const Dashboard = () => {
         </div>
       )}
 
+      {section === 'oppv' && <OppvSection />}
+
+      {section === 'insurance' && (
+      <>
       {/* Метрики */}
       <div className="metrics">
         <div className="metric-card">
@@ -1247,6 +1332,8 @@ const Dashboard = () => {
           <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages}>Вперед →</button>
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }

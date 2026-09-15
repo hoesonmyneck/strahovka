@@ -27,6 +27,7 @@ models.Base.metadata.create_all(bind=engine)
 with engine.connect() as _conn:
     for _sql in [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS appvr_access INTEGER DEFAULT 0",
         """CREATE TABLE IF NOT EXISTS app_settings (
                key   VARCHAR(100) PRIMARY KEY,
                value VARCHAR(500)
@@ -722,6 +723,232 @@ def upload_file(
             os.unlink(tmp_path)
 
 
+# ============ ОПВР (Пенсионные взносы работников) ============
+
+# Поля, по которым разрешена серверная сортировка/фильтрация ОПВР
+OPPV_SORT_FIELDS = {
+    'id', 'region', 'bin', 'oked_code', 'oked_name', 'age', 'gender',
+    'count', 'experience', 'fot', 'smz', 'oked_code_low', 'oked_name_low',
+}
+OPPV_TEXT_FILTERS = (
+    'region', 'bin', 'oked_code', 'oked_name', 'gender',
+    'oked_code_low', 'oked_name_low',
+)
+
+
+def apply_oppv_filters(query, params: dict):
+    O = models.OppvRecord
+    for f in OPPV_TEXT_FILTERS:
+        val = params.get(f)
+        if val:
+            query = query.filter(getattr(O, f).cast(String).ilike(f"%{val}%"))
+    return query
+
+
+@app.get("/api/oppv", response_model=schemas.OppvRecordList)
+def get_oppv(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=1000),
+    sort_by: Optional[str] = "id",
+    sort_order: Optional[str] = "asc",
+    region: Optional[str] = None,
+    bin: Optional[str] = None,
+    oked_code: Optional[str] = None,
+    oked_name: Optional[str] = None,
+    gender: Optional[str] = None,
+    oked_code_low: Optional[str] = None,
+    oked_name_low: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_appvr),
+    db: Session = Depends(database.get_db)
+):
+    O = models.OppvRecord
+    params = {k: v for k, v in locals().items()
+              if k not in ("page", "page_size", "sort_by", "sort_order", "current_user", "db")}
+    query = apply_oppv_filters(db.query(O), params)
+    total = query.count()
+
+    if sort_by in OPPV_SORT_FIELDS:
+        col = getattr(O, sort_by)
+        query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    return schemas.OppvRecordList(items=items, total=total, page=page, page_size=page_size)
+
+
+OPPV_EXPORT_HEADERS = [
+    'Регион', 'БИН', 'Код ОКЭД', 'ОКЭД', 'Возраст', 'Пол', 'Кол-во',
+    'Стаж', 'ФОТ', 'СМЗ', 'Код ОКЭД (нижний уровень)', 'ОКЭД (нижний уровень)',
+]
+OPPV_EXPORT_WIDTHS = [22, 16, 12, 40, 10, 10, 10, 8, 16, 16, 20, 40]
+
+
+@app.get("/api/oppv/download")
+def download_oppv(
+    region: Optional[str] = None,
+    bin: Optional[str] = None,
+    oked_code: Optional[str] = None,
+    oked_name: Optional[str] = None,
+    gender: Optional[str] = None,
+    oked_code_low: Optional[str] = None,
+    oked_name_low: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_appvr),
+    db: Session = Depends(database.get_db)
+):
+    O = models.OppvRecord
+    params = {k: v for k, v in locals().items() if k not in ("current_user", "db")}
+    query = apply_oppv_filters(db.query(O), params).order_by(O.id)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    wb = xlsxwriter.Workbook(tmp.name, {'constant_memory': True})
+    ws = wb.add_worksheet('ОПВР')
+    header_fmt = wb.add_format({'bold': True})
+    for col, w in enumerate(OPPV_EXPORT_WIDTHS):
+        ws.set_column(col, col, w)
+    for col, name in enumerate(OPPV_EXPORT_HEADERS):
+        ws.write_string(0, col, name, header_fmt)
+    ws.freeze_panes(1, 0)
+
+    row_idx = 0
+    for r in query.yield_per(2000):
+        row_idx += 1
+        ws.write_string(row_idx, 0, r.region or '')
+        ws.write_string(row_idx, 1, r.bin or '')
+        ws.write_string(row_idx, 2, r.oked_code or '')
+        ws.write_row(row_idx, 3, [
+            r.oked_name, r.age, r.gender, r.count, r.experience,
+            r.fot, r.smz,
+        ])
+        ws.write_string(row_idx, 10, r.oked_code_low or '')
+        ws.write_string(row_idx, 11, r.oked_name_low or '')
+    if row_idx:
+        ws.autofilter(0, 0, row_idx, len(OPPV_EXPORT_HEADERS) - 1)
+    wb.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="oppv_svod.xlsx",
+        background=BackgroundTask(os.unlink, tmp.name),
+    )
+
+
+@app.get("/api/oppv/regions")
+def get_oppv_regions(
+    current_user: models.User = Depends(auth.require_appvr),
+    db: Session = Depends(database.get_db)
+):
+    rows = (
+        db.query(models.OppvRecord.region)
+        .filter(models.OppvRecord.region.isnot(None))
+        .distinct()
+        .order_by(models.OppvRecord.region)
+        .all()
+    )
+    return [r[0] for r in rows if r[0]]
+
+
+@app.post("/api/oppv/upload")
+def upload_oppv(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    """Загрузка сводного Excel ОПВР. Колонки читаются по позиции:
+    0 Регион, 1 БИН, 2 Код ОКЭД, 3 ОКЭД, 4 Возраст, 5 Пол, 6 Кол-во,
+    7 Стаж, 8 ФОТ, 9 СМЗ, 10 Код ОКЭД (ниж.), 11 ОКЭД (ниж.)."""
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(400, "Only Excel files are allowed")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        next(rows_iter)  # пропускаем строку заголовков
+
+        def s_int(v):
+            if v is None:
+                return None
+            try:
+                return int(v)
+            except Exception:
+                return None
+
+        def s_float(v):
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                return None if f != f else f
+            except Exception:
+                return None
+
+        def s_str(v):
+            return str(v).strip() if v is not None else None
+
+        db.query(models.OppvRecord).delete()
+        db.commit()
+
+        now = datetime.now()
+        records = []
+        BATCH = 5000
+
+        for idx, row in enumerate(rows_iter):
+            if row is None or len(row) < 12:
+                continue
+            try:
+                records.append({
+                    'region': s_str(row[0]),
+                    'bin': s_str(row[1]),
+                    'oked_code': s_str(row[2]),
+                    'oked_name': s_str(row[3]),
+                    'age': s_int(row[4]),
+                    'gender': s_str(row[5]),
+                    'count': s_int(row[6]),
+                    'experience': s_int(row[7]),
+                    'fot': s_float(row[8]),
+                    'smz': s_float(row[9]),
+                    'oked_code_low': s_str(row[10]),
+                    'oked_name_low': s_str(row[11]),
+                    'created_at': now,
+                })
+                if len(records) >= BATCH:
+                    try:
+                        db.bulk_insert_mappings(models.OppvRecord, records)
+                        db.commit()
+                    except Exception as be:
+                        db.rollback()
+                        print(f"OPPV batch insert failed: {be}")
+                    records = []
+            except Exception as e:
+                print(f"Error processing OPPV row {idx}: {e}")
+                continue
+
+        if records:
+            try:
+                db.bulk_insert_mappings(models.OppvRecord, records)
+                db.commit()
+            except Exception as be:
+                db.rollback()
+                print(f"OPPV final batch insert failed: {be}")
+
+        wb.close()
+        count = db.query(models.OppvRecord).count()
+        return {"message": f"Загружено записей ОПВР: {count}"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Error processing file: {str(e)}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 # ============ REGIONS & DISTRICTS ============
 
 @app.get("/api/regions")
@@ -783,9 +1010,27 @@ def create_user(
         hashed_password=auth.get_password_hash(data.password),
         role=data.role,
         region=data.region,
+        appvr_access=1 if data.appvr_access else 0,
         is_active=1,
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.patch("/api/users/{user_id}", response_model=schemas.UserResponse)
+def update_user(
+    user_id: int,
+    data: schemas.UserUpdate,
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    if data.appvr_access is not None:
+        user.appvr_access = 1 if data.appvr_access else 0
     db.commit()
     db.refresh(user)
     return user

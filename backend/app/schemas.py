@@ -81,14 +81,19 @@ class UserBase(BaseModel):
     username: str
     role: str = "user"
     region: Optional[str] = None
+    appvr_access: int = 0
 
 class UserCreate(UserBase):
     password: str
+
+class UserUpdate(BaseModel):
+    appvr_access: Optional[int] = None
 
 class UserResponse(UserBase):
     id: int
     is_active: int
     region: Optional[str] = None
+    appvr_access: int = 0
 
     class Config:
         from_attributes = True
@@ -117,6 +122,32 @@ class LoginLogResponse(BaseModel):
 
 class LoginLogList(BaseModel):
     items: List[LoginLogResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class OppvRecordResponse(BaseModel):
+    id: int
+    region: Optional[str] = None
+    bin: Optional[str] = None
+    oked_code: Optional[str] = None
+    oked_name: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    count: Optional[int] = None
+    experience: Optional[int] = None
+    fot: Optional[float] = None
+    smz: Optional[float] = None
+    oked_code_low: Optional[str] = None
+    oked_name_low: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OppvRecordList(BaseModel):
+    items: List[OppvRecordResponse]
     total: int
     page: int
     page_size: int

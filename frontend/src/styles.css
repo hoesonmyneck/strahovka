@@ -178,6 +178,41 @@ body {
   background: #26bb63;
 }
 
+/* Переключатель разделов (Страхование / Пенсионные взносы) */
+.section-toggle {
+  display: flex;
+  gap: 2px;
+  background: #eef1f8;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.section-toggle button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #555;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+
+.section-toggle button:hover {
+  color: #333;
+}
+
+.section-toggle button.active {
+  background: #fff;
+  color: #667eea;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
 /* Модалка логов */
 .logs-overlay {
   position: fixed;
@@ -480,6 +515,11 @@ body {
 }
 
 /* Filters */
+/* Раздел «Пенсионные взносы»: отступ от шапки (в страховании его давал блок метрик) */
+.oppv-section {
+  padding-top: 30px;
+}
+
 .filters-section {
   background: white;
   margin: 0 30px 20px;
