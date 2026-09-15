@@ -768,7 +768,7 @@ const Dashboard = () => {
                 className={section === 'oppv' ? 'active' : ''}
                 onClick={() => setSection('oppv')}
               >
-                <Coins size={16} /> Пенсионные взносы работников
+                <Coins size={16} /> Анализ ОППВ
               </button>
             </div>
           )}
