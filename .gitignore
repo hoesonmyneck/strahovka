@@ -6,6 +6,7 @@ backend/app/*.pyc
 frontend/node_modules/
 frontend/dist/
 frontend/build/
+frontend/tmp/
 
 # Environment
 .env
