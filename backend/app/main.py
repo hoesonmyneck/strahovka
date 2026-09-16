@@ -370,15 +370,16 @@ def get_records(
 
 # ============ EXPORT (xlsx) ============
 
-# Реестр организаций: без договорных колонок (номер/даты договора, расторжение)
+# Реестр организаций (одна строка на БИН), со всеми колонками включая договорные
 EXPORT_HEADERS = [
     'БИН', 'Название компании', 'БИН страховой компании', 'Страховая компания',
-    'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
+    'Номер договора', 'Дата договора', 'Дата начала', 'Дата окончания',
+    'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
     'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
     'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
     'Вид деятельности (ОКЭД)', 'ИП', 'Флаг', 'Застрахован',
 ]
-EXPORT_COL_WIDTHS = [15, 40, 18, 40, 14, 12, 12, 13, 14, 12,
+EXPORT_COL_WIDTHS = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
                      22, 22, 40, 16, 30, 22, 10, 30, 6, 8, 12]
 
 EXPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "exports")
@@ -427,6 +428,11 @@ def write_records_xlsx(query, path: str):
         ws.write_string(row_idx, 2, bin12(r.system_delimiter_bin))
         ws.write_row(row_idx, 3, [
             r.system_delimiter_bin_name,
+            r.contract_number,
+            r.contract_date,
+            r.date_beg,
+            r.date_end,
+            r.rescinding_date,
             r.calculated_amount,
             r.count_employees,
             r.total_employees_count,

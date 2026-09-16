@@ -270,6 +270,18 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       minWidth: 220,
     },
+    // Договор
+    {
+      field: 'contract_number',
+      headerName: '№ Договора',
+      sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
+      minWidth: 150,
+    },
+    // Даты
+    { field: 'contract_date', headerName: 'Дата договора', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'date_beg', headerName: 'Дата начала', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 140 },
+    { field: 'date_end', headerName: 'Дата окончания', sortable: true, filter: 'agDateColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'rescinding_date', headerName: 'Дата расторжения', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 160 },
     // Финансы и сотрудники
     {
       field: 'calculated_amount',
