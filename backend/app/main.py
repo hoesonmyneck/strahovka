@@ -1173,6 +1173,30 @@ def download_oppv(
     )
 
 
+@app.get("/api/oppv/suggestions")
+def get_oppv_suggestions(
+    field: str,
+    query: str = "",
+    limit: int = Query(10, le=20),
+    current_user: models.User = Depends(auth.require_appvr),
+    db: Session = Depends(database.get_db)
+):
+    """Справочник значений для фильтров ОПВР (ОКЭД и нижний уровень)."""
+    allowed = {
+        'oked_name': models.OppvRecord.oked_name,
+        'oked_name_low': models.OppvRecord.oked_name_low,
+        'region': models.OppvRecord.region,
+    }
+    if field not in allowed:
+        raise HTTPException(400, "Invalid field")
+    col = allowed[field]
+    q = db.query(col).filter(col.isnot(None))
+    if query:
+        q = q.filter(col.ilike(f"%{query}%"))
+    rows = q.distinct().order_by(col).limit(limit).all()
+    return [str(r[0]) for r in rows if r[0] is not None]
+
+
 @app.get("/api/oppv/regions")
 def get_oppv_regions(
     current_user: models.User = Depends(auth.require_appvr),

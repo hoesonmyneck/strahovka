@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
+import SuggestInput from './SuggestInput.jsx'
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 const MONTHS_RU_PREP = [
@@ -54,70 +55,6 @@ const fmtNumber = (v, decimals = 0) => {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })
-}
-
-// ─── Компонент поля с автодополнением ────────────────────────────────────────
-const SuggestInput = ({ field, value, onChange, placeholder }) => {
-  // Локальный state чтобы input не сбрасывался при ре-рендере родителя
-  const [inputValue, setInputValue] = useState(value)
-  const [suggestions, setSuggestions] = useState([])
-  const [open, setOpen] = useState(false)
-  const timer = useRef(null)
-
-  // Синхронизируем с родителем только когда родитель сбрасывает значение (сброс фильтров)
-  useEffect(() => {
-    if (value === '') setInputValue('')
-  }, [value])
-
-  const handleChange = (e) => {
-    const v = e.target.value
-    setInputValue(v)   // немедленно обновляем локальный state
-    onChange(v)        // уведомляем родителя
-    clearTimeout(timer.current)
-    if (v.length >= 1) {
-      timer.current = setTimeout(async () => {
-        try {
-          const res = await api.get('/api/suggestions', { params: { field, query: v, limit: 10 } })
-          setSuggestions(res.data)
-          setOpen(res.data.length > 0)
-        } catch {
-          setSuggestions([])
-        }
-      }, 300)
-    } else {
-      setSuggestions([])
-      setOpen(false)
-    }
-  }
-
-  const selectSuggestion = (s) => {
-    setInputValue(s)
-    onChange(s)
-    setOpen(false)
-  }
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <input
-        type="text"
-        value={inputValue}
-        onChange={handleChange}
-        placeholder={placeholder}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onFocus={() => suggestions.length > 0 && setOpen(true)}
-        autoComplete="off"
-      />
-      {open && suggestions.length > 0 && (
-        <div className="suggestions-dropdown">
-          {suggestions.map((s, i) => (
-            <div key={i} className="suggestion-item" onMouseDown={() => selectSuggestion(s)}>
-              {s}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ─── Форматтер БИН с ведущими нулями (12 цифр) ───────────────────────────────
@@ -1311,7 +1248,8 @@ const Dashboard = () => {
               field="system_delimiter_bin_name"
               value={filters.system_delimiter_bin_name}
               onChange={(v) => setFilters({ ...filters, system_delimiter_bin_name: v })}
-              placeholder="Название страховой..."
+              placeholder="Выберите или введите..."
+              openOnFocus
             />
           </div>
 

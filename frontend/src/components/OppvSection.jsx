@@ -3,6 +3,7 @@ import { AgGridReact } from 'ag-grid-react'
 import api from '../utils/api.js'
 import { toast } from 'react-toastify'
 import { Search, Filter, Download } from 'lucide-react'
+import SuggestInput from './SuggestInput.jsx'
 
 // Форматирование числа с пробелами: 1000000 → "1 000 000"
 const fmtNumber = (v, decimals = 0) => {
@@ -14,8 +15,7 @@ const fmtNumber = (v, decimals = 0) => {
 }
 
 const EMPTY = {
-  region: '', bin: '', oked_code: '', oked_name: '', gender: '',
-  oked_code_low: '', oked_name_low: '',
+  region: '', bin: '', oked_name: '', gender: '', oked_name_low: '',
 }
 
 // ─── Раздел «Пенсионные взносы работников» (ОПВР) ────────────────────────────
@@ -39,8 +39,8 @@ const OppvSection = () => {
     { field: 'oked_code_low', headerName: 'Код ОКЭД (ниж.)', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'age', headerName: 'Возраст', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'gender', headerName: 'Пол', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 110 },
-    { field: 'count', headerName: 'Кол-во', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'experience', headerName: 'Стаж', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 100 },
+    { field: 'count', headerName: 'Кол-во', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'fot', headerName: 'ФОТ', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
     { field: 'smz', headerName: 'СМЗ', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
   ], [])
@@ -155,14 +155,26 @@ const OppvSection = () => {
               onChange={(e) => setFilters({ ...filters, bin: e.target.value })} />
           </div>
           <div className="filter-group">
-            <label>Код ОКЭД</label>
-            <input type="text" value={filters.oked_code} placeholder="Код ОКЭД..."
-              onChange={(e) => setFilters({ ...filters, oked_code: e.target.value })} />
+            <label>ОКЭД</label>
+            <SuggestInput
+              endpoint="/api/oppv/suggestions"
+              field="oked_name"
+              value={filters.oked_name}
+              onChange={(v) => setFilters({ ...filters, oked_name: v })}
+              placeholder="Выберите или введите..."
+              openOnFocus
+            />
           </div>
           <div className="filter-group">
-            <label>ОКЭД</label>
-            <input type="text" value={filters.oked_name} placeholder="Вид деятельности..."
-              onChange={(e) => setFilters({ ...filters, oked_name: e.target.value })} />
+            <label>ОКЭД (нижний уровень)</label>
+            <SuggestInput
+              endpoint="/api/oppv/suggestions"
+              field="oked_name_low"
+              value={filters.oked_name_low}
+              onChange={(v) => setFilters({ ...filters, oked_name_low: v })}
+              placeholder="Выберите или введите..."
+              openOnFocus
+            />
           </div>
           <div className="filter-group">
             <label>Пол</label>
@@ -171,11 +183,6 @@ const OppvSection = () => {
               <option value="Мужской">Мужской</option>
               <option value="Женский">Женский</option>
             </select>
-          </div>
-          <div className="filter-group">
-            <label>ОКЭД (нижний уровень)</label>
-            <input type="text" value={filters.oked_name_low} placeholder="Нижний уровень..."
-              onChange={(e) => setFilters({ ...filters, oked_name_low: e.target.value })} />
           </div>
         </div>
 
