@@ -280,6 +280,153 @@ def deduped_records_query(db, params: dict, force_region: str = None):
     return q, Rep
 
 
+# ============ ПРЕДРАСЧЁТ (company_summary) ============
+
+# Фильтры уровня строки/договора — их нет в предрасчёте, для них идём живым путём
+COMPLEX_FILTER_KEYS = (
+    "contract_number", "contract_date_from", "contract_date_to",
+    "date_beg_from", "date_beg_to", "date_end_from", "date_end_to",
+    "expires_in_months",
+)
+
+
+def summary_ready(db) -> bool:
+    return db.query(models.CompanySummary.id).first() is not None
+
+
+def can_use_summary(db, params: dict) -> bool:
+    """Быстрый путь применим, если нет сложных (строчных) фильтров и предрасчёт готов."""
+    if any(params.get(k) not in (None, "") for k in COMPLEX_FILTER_KEYS):
+        return False
+    return summary_ready(db)
+
+
+def apply_summary_filters(query, params: dict, force_region: str = None):
+    """Фильтры уровня компании поверх предрасчётной таблицы company_summary."""
+    S = models.CompanySummary
+    if force_region:
+        query = query.filter(S.obl_name == force_region)
+        params = {k: v for k, v in params.items() if k != 'obl_name'}
+
+    bin_ = params.get("bin")
+    if bin_:
+        b = bin_.lstrip('0') or bin_
+        query = query.filter(S.bin.cast(String).like(f"%{b}%"))
+    if params.get("bin_name"):
+        query = query.filter(S.bin_name.ilike(f"%{params['bin_name']}%"))
+    if params.get("system_delimiter_bin"):
+        sdb = params['system_delimiter_bin'].lstrip('0') or params['system_delimiter_bin']
+        query = query.filter(S.system_delimiter_bin.cast(String).like(f"%{sdb}%"))
+    if params.get("system_delimiter_bin_name"):
+        query = query.filter(S.system_delimiter_bin_name.ilike(f"%{params['system_delimiter_bin_name']}%"))
+    if params.get("obl_name"):
+        query = query.filter(S.obl_name.ilike(f"%{params['obl_name']}%"))
+    if params.get("rai_name"):
+        query = query.filter(S.rai_name.ilike(f"%{params['rai_name']}%"))
+    if params.get("address"):
+        query = query.filter(S.address.ilike(f"%{params['address']}%"))
+    if params.get("phone"):
+        query = query.filter(S.phone.ilike(f"%{params['phone']}%"))
+    if params.get("leader_surname"):
+        query = query.filter(S.leader_surname.ilike(f"%{params['leader_surname']}%"))
+    if params.get("opf_name"):
+        query = query.filter(S.opf_name.ilike(f"%{params['opf_name']}%"))
+    if params.get("id_oked"):
+        query = query.filter(S.id_oked.ilike(f"%{params['id_oked']}%"))
+    if params.get("name_oked"):
+        query = query.filter(S.name_oked.ilike(f"%{params['name_oked']}%"))
+    return query
+
+
+def summary_records_query(db, params: dict, force_region: str = None):
+    """Реестр из предрасчёта: (query из кортежей (S, obl, act, ins_old), класс S).
+    Совпадает по форме с deduped_records_query, поэтому get_records/выгрузка
+    работают одинаково для обоих путей."""
+    S = models.CompanySummary
+    q = apply_summary_filters(
+        db.query(S, S.obl.label("obl"), S.act.label("act"), S.ins_old.label("ins_old")),
+        params, force_region,
+    )
+    is_ins = params.get("is_insured")
+    if is_ins == 0:
+        q = q.filter(S.status == 0)
+    elif is_ins == 1:
+        q = q.filter(S.status == 1)
+    return q, S
+
+
+def registry_query(db, params: dict, force_region: str = None):
+    """Диспетчер: быстрый предрасчёт для простых фильтров, иначе живой дедуп."""
+    if can_use_summary(db, params):
+        return summary_records_query(db, params, force_region)
+    return deduped_records_query(db, params, force_region)
+
+
+_summary_build_lock = threading.Lock()
+
+
+def rebuild_company_summary(db):
+    """Пересобирает company_summary из insurance_records живым дедуп-запросом.
+    Тяжёлая агрегация делается здесь ОДИН раз (после загрузки/в 06:00),
+    дальше карточки/таблица/выгрузка читают готовое → мгновенно."""
+    db.query(models.CompanySummary).delete()
+    db.commit()
+    # Читаем поток на ОТДЕЛЬНОЙ сессии: yield_per держит серверный курсор, а
+    # commit по вставкам на той же сессии его бы инвалидировал.
+    read_db = SessionLocal()
+    rows = []
+    total = 0
+    BATCH = 5000
+    try:
+        q, _ = deduped_records_query(read_db, {}, force_region=None)
+        for rep, obl, act, ins_old in q.yield_per(2000):
+            rows.append({
+                'bin': rep.bin, 'bin_name': rep.bin_name,
+                'system_delimiter_bin': rep.system_delimiter_bin,
+                'system_delimiter_bin_name': rep.system_delimiter_bin_name,
+                'contract_number': rep.contract_number, 'contract_date': rep.contract_date,
+                'date_beg': rep.date_beg, 'date_end': rep.date_end, 'rescinding_date': rep.rescinding_date,
+                'calculated_amount': rep.calculated_amount, 'count_employees': rep.count_employees,
+                'total_employees_count': rep.total_employees_count, 'flag_head': rep.flag_head,
+                'row_num': rep.row_num, 'id_reg': rep.id_reg,
+                'obl_name': rep.obl_name, 'rai_name': rep.rai_name, 'address': rep.address, 'phone': rep.phone,
+                'leader_surname': rep.leader_surname, 'leader_name': rep.leader_name,
+                'leader_middlename': rep.leader_middlename,
+                'opf_name': rep.opf_name, 'id_oked': rep.id_oked, 'name_oked': rep.name_oked,
+                'kol_12mes': rep.kol_12mes, 'fot_12mes': rep.fot_12mes, 'esutd_akt_td': rep.esutd_akt_td,
+                'ip': rep.ip, 'tip': rep.tip,
+                'obl': obl, 'act': act, 'ins_old': ins_old,
+                'status': company_status(obl, act, ins_old),
+            })
+            if len(rows) >= BATCH:
+                db.bulk_insert_mappings(models.CompanySummary, rows)
+                db.commit()
+                total += len(rows)
+                rows = []
+        if rows:
+            db.bulk_insert_mappings(models.CompanySummary, rows)
+            db.commit()
+            total += len(rows)
+    finally:
+        read_db.close()
+    print(f"Rebuilt company_summary: {total} rows", flush=True)
+    return total
+
+
+def rebuild_company_summary_safe():
+    """Пересборка предрасчёта в отдельной сессии (для фонового вызова)."""
+    if not _summary_build_lock.acquire(blocking=False):
+        return
+    try:
+        db = SessionLocal()
+        try:
+            rebuild_company_summary(db)
+        finally:
+            db.close()
+    finally:
+        _summary_build_lock.release()
+
+
 # ============ AUTH ============
 
 # Системные учётки — не журналируем и не показываем в статистике входов
@@ -358,9 +505,27 @@ def get_metrics(
 
     # Карточки по уникальным БИН. Правила независимы (не дополняют друг друга):
     #   Всего        — все БИН;
-    #   Застрахованы — старое правило (ins_old);
-    #   Не застрах.  — обязан (obl) И нет действующего договора (act=0).
-    # Флаги агрегируются по БИН, поэтому считаем поверх подзапроса с группировкой.
+    #   Застрахованы — старое правило (ins_old / status=1);
+    #   Не застрах.  — обязан И нет действующего договора (status=0).
+
+    # Быстрый путь: считаем поверх предрасчёта company_summary (мгновенно).
+    if can_use_summary(db, params):
+        S = models.CompanySummary
+        row = apply_summary_filters(
+            db.query(
+                func.count().label("total_bins"),
+                func.sum(case((S.status == 1, 1), else_=0)).label("insured_bins"),
+                func.sum(case((S.status == 0, 1), else_=0)).label("not_insured_bins"),
+            ),
+            params, force_region=current_user.region,
+        ).one()
+        return schemas.MetricsResponse(
+            total_bins=row.total_bins or 0,
+            insured_bins=row.insured_bins or 0,
+            not_insured_bins=row.not_insured_bins or 0,
+        )
+
+    # Живой путь (сложные фильтры или предрасчёт ещё не готов): агрегируем по БИН.
     flags = bin_flags_subquery(db, params, force_region=current_user.region)
     row = db.query(
         func.count().label("total_bins"),
@@ -411,13 +576,13 @@ def get_records(
 ):
     params = {k: v for k, v in locals().items() if k not in ("page", "page_size", "sort_by", "sort_order", "current_user", "db")}
 
-    # Одна строка на БИН (реестр организаций)
-    query, Rep = deduped_records_query(db, params, force_region=current_user.region)
+    # Одна строка на БИН (реестр организаций): предрасчёт или живой дедуп
+    query, Model = registry_query(db, params, force_region=current_user.region)
 
     total = query.count()
 
-    if sort_by and hasattr(Rep, sort_by):
-        order_col = getattr(Rep, sort_by)
+    if sort_by and hasattr(Model, sort_by):
+        order_col = getattr(Model, sort_by)
         query = query.order_by(order_col.desc() if sort_order == "desc" else order_col.asc())
 
     records = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -459,8 +624,9 @@ _export_build_lock = threading.Lock()
 
 
 def records_export_query(db, params: dict, force_region: str = None):
-    """Запрос выгрузки: реестр организаций (одна строка на БИН) с фильтрами."""
-    q, _ = deduped_records_query(db, params, force_region=force_region)
+    """Запрос выгрузки: реестр организаций (одна строка на БИН) с фильтрами.
+    Идёт через диспетчер — для простых фильтров читает предрасчёт (быстро)."""
+    q, _ = registry_query(db, params, force_region=force_region)
     return q
 
 
@@ -536,11 +702,13 @@ def cached_export_path(params: dict, region: str):
     return os.path.join(EXPORT_DIR, CACHED_EXPORTS[iv])
 
 
-def rebuild_cached_exports(wait: bool = False):
-    """Пересобирает три суточных файла. Атомарно (temp -> os.replace).
+def rebuild_cached_exports(wait: bool = False, only_missing: bool = False):
+    """Пересобирает суточные файлы. Атомарно (temp -> os.replace).
 
     wait=False — пропустить, если сборка уже идёт (для планировщика).
     wait=True  — дождаться и собрать (после загрузки нового Excel).
+    only_missing=True — собрать только отсутствующие файлы (resumable: обрыв
+    не заставляет пересобирать уже готовые all/insured заново).
     """
     if not _export_build_lock.acquire(blocking=wait):
         return
@@ -548,8 +716,10 @@ def rebuild_cached_exports(wait: bool = False):
         db = SessionLocal()
         try:
             for iv, fname in CACHED_EXPORTS.items():
-                q = records_export_query(db, {"is_insured": iv}, force_region=None)
                 dest = os.path.join(EXPORT_DIR, fname)
+                if only_missing and os.path.exists(dest):
+                    continue
+                q = records_export_query(db, {"is_insured": iv}, force_region=None)
                 tmp = dest + ".tmp"
                 write_records_xlsx(q, tmp)
                 os.replace(tmp, dest)
@@ -560,13 +730,36 @@ def rebuild_cached_exports(wait: bool = False):
         _export_build_lock.release()
 
 
+def _summary_stale() -> bool:
+    """Нужна пересборка предрасчёта: он пуст, недособран (частичный остаток от
+    прерванной сборки) или число строк не совпадает с числом БИН в данных."""
+    db = SessionLocal()
+    try:
+        sc = db.query(func.count(models.CompanySummary.id)).scalar() or 0
+        if sc == 0:
+            return True
+        bc = db.query(func.count(distinct(models.InsuranceRecord.bin))).scalar() or 0
+        return sc != bc
+    finally:
+        db.close()
+
+
 def _export_scheduler():
-    """Фоновый поток: собрать файлы если их нет, дальше пересобирать раз в сутки в 06:00."""
+    """Фоновый поток: при старте собрать предрасчёт (если пуст) и недостающие
+    файлы; дальше раз в сутки в 06:00 пересобирать предрасчёт и все файлы."""
+    # 1) Предрасчёт — основа быстрых карточек/таблицы/выгрузки.
+    try:
+        if _summary_stale():
+            rebuild_company_summary_safe()
+    except Exception as e:
+        print(f"Initial summary build failed: {e}")
+    # 2) Готовые Excel — только недостающие (resumable), читают предрасчёт.
     if any(not os.path.exists(os.path.join(EXPORT_DIR, f)) for f in CACHED_EXPORTS.values()):
         try:
-            rebuild_cached_exports()
+            rebuild_cached_exports(only_missing=True)
         except Exception as e:
             print(f"Initial export build failed: {e}")
+    # 3) Ежесуточно 06:00 — пересобрать предрасчёт (даты могли сдвинуться) и файлы.
     while True:
         now = datetime.now()
         nxt = now.replace(hour=6, minute=0, second=0, microsecond=0)
@@ -574,9 +767,10 @@ def _export_scheduler():
             nxt += timedelta(days=1)
         time.sleep(max(1, (nxt - now).total_seconds()))
         try:
+            rebuild_company_summary_safe()
             rebuild_cached_exports()
         except Exception as e:
-            print(f"Scheduled export build failed: {e}")
+            print(f"Scheduled rebuild failed: {e}")
 
 
 @app.on_event("startup")
@@ -806,7 +1000,10 @@ def _run_insurance_upload(tmp_path: str, job_id: str):
             db.add(models.AppSetting(key="last_update", value=today))
         db.commit()
 
-        # Данные сменились — пересобираем суточные готовые файлы в фоне.
+        # Данные сменились — сперва пересобираем предрасчёт (одна тяжёлая
+        # агрегация), затем в фоне готовые Excel-файлы (они читают предрасчёт).
+        _set_job(job_id, message="Пересчёт статусов по организациям…")
+        rebuild_company_summary(db)
         threading.Thread(
             target=lambda: rebuild_cached_exports(wait=True), daemon=True
         ).start()

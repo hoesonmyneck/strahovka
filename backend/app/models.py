@@ -56,6 +56,57 @@ class InsuranceRecord(Base):
         Index('idx_date_end', 'date_end'),  # для фильтра по дате окончания
     )
 
+class CompanySummary(Base):
+    """Предрасчёт: одна строка на БИН (реестр организаций) + флаги статуса.
+    Пересобирается после каждой загрузки. Карточки/таблица/выгрузка читают
+    отсюда → мгновенно, без агрегации по всей таблице на каждый запрос."""
+    __tablename__ = "company_summary"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    bin = Column(BigInteger, index=True)
+    bin_name = Column(String(500), index=True)
+    system_delimiter_bin = Column(Float)
+    system_delimiter_bin_name = Column(String(500), index=True)
+    contract_number = Column(String(100))
+    contract_date = Column(Date)
+    date_beg = Column(Date)
+    date_end = Column(Date)
+    rescinding_date = Column(Date)
+    calculated_amount = Column(Float)
+    count_employees = Column(Float)
+    total_employees_count = Column(Float)
+    flag_head = Column(Float)
+    row_num = Column(BigInteger)
+    id_reg = Column(BigInteger)
+    obl_name = Column(String(200), index=True)
+    rai_name = Column(String(200))
+    address = Column(String(500))
+    phone = Column(String(100))
+    leader_surname = Column(String(100))
+    leader_name = Column(String(100))
+    leader_middlename = Column(String(100))
+    opf_name = Column(String(200))
+    id_oked = Column(String(20))
+    name_oked = Column(String(300))
+    kol_12mes = Column(BigInteger)
+    fot_12mes = Column(BigInteger)
+    esutd_akt_td = Column(BigInteger)
+    ip = Column(BigInteger)
+    tip = Column(BigInteger)
+    # Флаги статуса (агрегированы по БИН на момент пересборки)
+    obl = Column(Integer)       # обязан
+    act = Column(Integer)       # есть действующий договор
+    ins_old = Column(Integer)   # застрахован по старому правилу
+    status = Column(Integer, index=True)  # 0 не застрах / 1 застрах / 2 прочее
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_cs_bin', 'bin'),
+        Index('idx_cs_status', 'status'),
+        Index('idx_cs_obl_name', 'obl_name'),
+    )
+
+
 class OppvRecord(Base):
     """Обязательные пенсионные взносы работодателя (ОПВР) — сводная выгрузка.
     БИН хранится строкой: в источнике есть ведущие нули (000940000567)."""
