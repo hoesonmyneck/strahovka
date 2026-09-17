@@ -1197,7 +1197,7 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
         _set_job(job_id, total=_sheet_total_rows(ws))
 
         rows_iter = ws.iter_rows(values_only=True)
-        next(rows_iter)  # пропускаем строку заголовков
+        header = list(next(rows_iter))  # строка заголовков
 
         def s_int(v):
             if v is None:
@@ -1219,6 +1219,24 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
         def s_str(v):
             return str(v).strip() if v is not None else None
 
+        # Колонки читаем ПО НАЗВАНИЮ (регистронезависимо), а не по позиции —
+        # чтобы перестановка/добавление столбцов в источнике ничего не ломали.
+        hidx = {str(h).strip().lower(): i for i, h in enumerate(header) if h is not None}
+        OPPV_COLS = {
+            'region': 'Регион', 'bin': 'БИН', 'oked_code': 'Код ОКЭД', 'oked_name': 'ОКЭД',
+            'age': 'Возраст', 'gender': 'Пол', 'count': 'Кол-во', 'experience': 'Стаж',
+            'fot': 'ФОТ', 'smz': 'СМЗ',
+            'oked_code_low': 'Код ОКЭД (нижний уровень)', 'oked_name_low': 'ОКЭД (нижний уровень)',
+        }
+        colpos = {field: hidx.get(name.strip().lower()) for field, name in OPPV_COLS.items()}
+        missing = [OPPV_COLS[f] for f, p in colpos.items() if p is None]
+        if missing:
+            raise Exception("В файле не найдены колонки: " + ", ".join(missing))
+
+        def cell(row, field):
+            p = colpos[field]
+            return row[p] if (p is not None and p < len(row)) else None
+
         db.query(models.OppvRecord).delete()
         db.commit()
 
@@ -1228,22 +1246,22 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
         BATCH = 5000
 
         for idx, row in enumerate(rows_iter):
-            if row is None or len(row) < 12:
+            if row is None:
                 continue
             try:
                 records.append({
-                    'region': s_str(row[0]),
-                    'bin': s_str(row[1]),
-                    'oked_code': s_str(row[2]),
-                    'oked_name': s_str(row[3]),
-                    'age': s_int(row[4]),
-                    'gender': s_str(row[5]),
-                    'count': s_int(row[6]),
-                    'experience': s_int(row[7]),
-                    'fot': s_float(row[8]),
-                    'smz': s_float(row[9]),
-                    'oked_code_low': s_str(row[10]),
-                    'oked_name_low': s_str(row[11]),
+                    'region': s_str(cell(row, 'region')),
+                    'bin': s_str(cell(row, 'bin')),
+                    'oked_code': s_str(cell(row, 'oked_code')),
+                    'oked_name': s_str(cell(row, 'oked_name')),
+                    'age': s_int(cell(row, 'age')),
+                    'gender': s_str(cell(row, 'gender')),
+                    'count': s_int(cell(row, 'count')),
+                    'experience': s_int(cell(row, 'experience')),
+                    'fot': s_float(cell(row, 'fot')),
+                    'smz': s_float(cell(row, 'smz')),
+                    'oked_code_low': s_str(cell(row, 'oked_code_low')),
+                    'oked_name_low': s_str(cell(row, 'oked_name_low')),
                     'created_at': now,
                 })
                 processed += 1
@@ -1288,8 +1306,9 @@ def upload_oppv(
     current_user: models.User = Depends(auth.require_admin),
 ):
     """Принимает файл ОПВР, парсит в фоне. Возвращает job_id для опроса прогресса.
-    Колонки по позиции: 0 Регион, 1 БИН, 2 Код ОКЭД, 3 ОКЭД, 4 Возраст, 5 Пол,
-    6 Кол-во, 7 Стаж, 8 ФОТ, 9 СМЗ, 10 Код ОКЭД (ниж.), 11 ОКЭД (ниж.)."""
+    Колонки читаются по названиям (Регион, БИН, Код ОКЭД, ОКЭД, Возраст, Пол,
+    Кол-во, Стаж, ФОТ, СМЗ, Код ОКЭД (нижний уровень), ОКЭД (нижний уровень)) —
+    порядок столбцов в файле значения не имеет."""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(400, "Only Excel files are allowed")
 
