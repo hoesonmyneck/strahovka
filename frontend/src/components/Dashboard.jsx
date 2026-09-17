@@ -1310,8 +1310,8 @@ const Dashboard = () => {
             </select>
           </div>
 
-          {/* Справочник страховых компаний — широкий, на отдельном (нижнем) ряду */}
-          <div className="filter-group filter-group--wide">
+          {/* Справочник страховых компаний — сразу после «Срок истечения», шириной в 2 колонки */}
+          <div className="filter-group filter-group--half">
             <label>Страховая компания</label>
             <SuggestInput
               field="system_delimiter_bin_name"

@@ -64,7 +64,7 @@ const SuggestInput = ({ field, value, onChange, placeholder, endpoint = '/api/su
       {open && suggestions.length > 0 && (
         <div className="suggestions-dropdown">
           {suggestions.map((s, i) => (
-            <div key={i} className="suggestion-item" onMouseDown={() => selectSuggestion(s)}>
+            <div key={i} className="suggestion-item" title={s} onMouseDown={() => selectSuggestion(s)}>
               {s}
             </div>
           ))}

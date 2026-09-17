@@ -163,8 +163,8 @@ const OppvSection = () => {
             </select>
           </div>
 
-          {/* Справочники ОКЭД — широкие, на отдельных (нижних) рядах */}
-          <div className="filter-group filter-group--wide">
+          {/* Справочники ОКЭД — по половине ряда, стоят рядом в одном ряду */}
+          <div className="filter-group filter-group--half">
             <label>ОКЭД</label>
             <SuggestInput
               endpoint="/api/oppv/suggestions"
@@ -175,7 +175,7 @@ const OppvSection = () => {
               openOnFocus
             />
           </div>
-          <div className="filter-group filter-group--wide">
+          <div className="filter-group filter-group--half">
             <label>ОКЭД (нижний уровень)</label>
             <SuggestInput
               endpoint="/api/oppv/suggestions"

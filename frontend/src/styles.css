@@ -605,11 +605,17 @@ body {
 .filter-group--wide {
   grid-column: 1 / span 3;
 }
+/* Половина ряда: две колонки (два таких поля встают в один ряд) */
+.filter-group--half {
+  grid-column: span 2;
+}
 @media (max-width: 1200px) {
   .filter-group--wide { grid-column: 1 / -1; }
+  .filter-group--half { grid-column: 1 / -1; }
 }
 @media (max-width: 768px) {
   .filter-group--wide { grid-column: auto; }
+  .filter-group--half { grid-column: auto; }
 }
 
 .filter-group input:focus,

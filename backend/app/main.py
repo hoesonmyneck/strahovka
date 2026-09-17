@@ -35,6 +35,7 @@ with engine.connect() as _conn:
                value VARCHAR(500)
            )""",
         "INSERT INTO app_settings (key, value) VALUES ('last_update', NULL) ON CONFLICT DO NOTHING",
+        "INSERT INTO app_settings (key, value) VALUES ('data_version', '1') ON CONFLICT DO NOTHING",
         """CREATE TABLE IF NOT EXISTS login_logs (
                id         SERIAL PRIMARY KEY,
                username   VARCHAR(50),
@@ -303,6 +304,20 @@ def can_use_summary(db, params: dict) -> bool:
     return _summary_ready
 
 
+def _get_setting(db, key, default=None):
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
+    return row.value if (row and row.value is not None) else default
+
+
+def _set_setting(db, key, value):
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(models.AppSetting(key=key, value=value))
+    db.commit()
+
+
 def apply_summary_filters(query, params: dict, force_region: str = None):
     """Фильтры уровня компании поверх предрасчётной таблицы company_summary."""
     S = models.CompanySummary
@@ -413,6 +428,8 @@ def rebuild_company_summary(db):
             total += len(rows)
     finally:
         read_db.close()
+    # Помечаем, под какую версию данных собран предрасчёт (для авто-проверки свежести)
+    _set_setting(db, "summary_version", _get_setting(db, "data_version", "1"))
     _summary_ready = True  # собрано полностью — можно пользоваться быстрым путём
     print(f"Rebuilt company_summary: {total} rows", flush=True)
     return total
@@ -744,7 +761,10 @@ def _summary_stale() -> bool:
         if sc == 0:
             return True
         bc = db.query(func.count(distinct(models.InsuranceRecord.bin))).scalar() or 0
-        return sc != bc
+        if sc != bc:
+            return True
+        # Данные могли смениться без изменения числа БИН (напр. дозалили is_passport)
+        return _get_setting(db, "summary_version") != _get_setting(db, "data_version", "1")
     finally:
         db.close()
 
@@ -1010,8 +1030,9 @@ def _run_insurance_upload(tmp_path: str, job_id: str):
             db.add(models.AppSetting(key="last_update", value=today))
         db.commit()
 
-        # Данные сменились — сперва пересобираем предрасчёт (одна тяжёлая
-        # агрегация), затем в фоне готовые Excel-файлы (они читают предрасчёт).
+        # Данные сменились — поднимаем версию данных и пересобираем предрасчёт
+        # (одна тяжёлая агрегация), затем в фоне готовые Excel-файлы.
+        _set_setting(db, "data_version", str(int(time.time())))
         _set_job(job_id, message="Пересчёт статусов по организациям…")
         rebuild_company_summary(db)
         threading.Thread(
