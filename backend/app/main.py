@@ -290,15 +290,17 @@ COMPLEX_FILTER_KEYS = (
 )
 
 
-def summary_ready(db) -> bool:
-    return db.query(models.CompanySummary.id).first() is not None
+# Предрасчёт полностью собран и им можно пользоваться. Во время (пере)сборки —
+# False, чтобы не читать частично наполненную таблицу (иначе числа «ползут с нуля»).
+_summary_ready = False
 
 
 def can_use_summary(db, params: dict) -> bool:
-    """Быстрый путь применим, если нет сложных (строчных) фильтров и предрасчёт готов."""
+    """Быстрый путь применим, если нет сложных (строчных) фильтров и предрасчёт
+    собран ПОЛНОСТЬЮ (флаг готовности, а не просто наличие строк)."""
     if any(params.get(k) not in (None, "") for k in COMPLEX_FILTER_KEYS):
         return False
-    return summary_ready(db)
+    return _summary_ready
 
 
 def apply_summary_filters(query, params: dict, force_region: str = None):
@@ -369,6 +371,8 @@ def rebuild_company_summary(db):
     """Пересобирает company_summary из insurance_records живым дедуп-запросом.
     Тяжёлая агрегация делается здесь ОДИН раз (после загрузки/в 06:00),
     дальше карточки/таблица/выгрузка читают готовое → мгновенно."""
+    global _summary_ready
+    _summary_ready = False  # пока пересобираем — быстрый путь выключен
     db.query(models.CompanySummary).delete()
     db.commit()
     # Читаем поток на ОТДЕЛЬНОЙ сессии: yield_per держит серверный курсор, а
@@ -409,6 +413,7 @@ def rebuild_company_summary(db):
             total += len(rows)
     finally:
         read_db.close()
+    _summary_ready = True  # собрано полностью — можно пользоваться быстрым путём
     print(f"Rebuilt company_summary: {total} rows", flush=True)
     return total
 
@@ -748,9 +753,14 @@ def _export_scheduler():
     """Фоновый поток: при старте собрать предрасчёт (если пуст) и недостающие
     файлы; дальше раз в сутки в 06:00 пересобирать предрасчёт и все файлы."""
     # 1) Предрасчёт — основа быстрых карточек/таблицы/выгрузки.
+    #    Если он уже собран (не устарел) — просто включаем быстрый путь;
+    #    иначе пересобираем (rebuild сам поднимет флаг готовности в конце).
+    global _summary_ready
     try:
         if _summary_stale():
             rebuild_company_summary_safe()
+        else:
+            _summary_ready = True
     except Exception as e:
         print(f"Initial summary build failed: {e}")
     # 2) Готовые Excel — только недостающие (resumable), читают предрасчёт.
