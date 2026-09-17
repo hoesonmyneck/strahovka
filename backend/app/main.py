@@ -108,11 +108,32 @@ def active_contract_expr(M):
     )
 
 
-def company_status(obl: int, act: int) -> int:
-    """Статус компании по агрегированным по БИН флагам.
-    Не застрахована = обязана (obl) И нет действующего договора (act=0).
-    Всё остальное = застрахована (дополнение)."""
-    return 0 if (obl == 1 and act == 0) else 1
+def old_insured_expr(M):
+    """Старое правило «застрахован» (до актуального изменения):
+        contract_number IS NOT NULL AND flag_head = 1
+        AND rescinding_date IS NULL AND date_end > сегодня.
+    Компания застрахована, если хотя бы одна её строка это выполняет.
+    Считается ОТДЕЛЬНО от «не застрахована» (это разные правила)."""
+    return and_(
+        M.contract_number != None,
+        M.flag_head == 1,
+        M.rescinding_date == None,
+        M.date_end != None,
+        M.date_end > date.today(),
+    )
+
+
+def company_status(obl: int, act: int, ins_old: int) -> int:
+    """Статус компании по агрегированным по БИН флагам. Правила независимы:
+        0 — не застрахована: обязана (obl) И нет действующего договора (act=0);
+        1 — застрахована: по старому правилу (ins_old=1);
+        2 — прочее (ни то, ни другое) → в таблице «—».
+    Группы (0) и (1) не пересекаются: наличие flag_head-договора делает act=1."""
+    if obl == 1 and act == 0:
+        return 0
+    if ins_old == 1:
+        return 1
+    return 2
 
 
 def apply_filters(query, model, params: dict, force_region: str = None):
@@ -197,18 +218,22 @@ def apply_filters(query, model, params: dict, force_region: str = None):
 
 
 def bin_flags_subquery(db, params: dict, force_region: str = None):
-    """Подзапрос с агрегированными по БИН флагами: obl (обязан) и act
-    (есть действующий договор). Обязанность/действующий договор могут быть
-    в разных строках одного БИН, поэтому агрегируем max() по группе."""
+    """Подзапрос с агрегированными по БИН флагами:
+        obl     — обязан (esutd/opf/is_passport),
+        act     — есть действующий договор (новое правило, без flag_head),
+        ins_old — застрахован по старому правилу (с flag_head).
+    Признаки могут быть в разных строках одного БИН, поэтому берём max() по группе."""
     M = models.InsuranceRecord
     obl_flag = case((obligated_row_expr(M), 1), else_=0)
     act_flag = case((active_contract_expr(M), 1), else_=0)
+    ins_old_flag = case((old_insured_expr(M), 1), else_=0)
     return (
         apply_filters(
             db.query(
                 M.bin.label("bin"),
                 func.max(obl_flag).label("obl"),
                 func.max(act_flag).label("act"),
+                func.max(ins_old_flag).label("ins_old"),
             ),
             M, params, force_region=force_region,
         )
@@ -236,14 +261,21 @@ def deduped_records_query(db, params: dict, force_region: str = None):
 
     flags = bin_flags_subquery(db, params, force_region=force_region)
     q = (
-        db.query(Rep, flags.c.obl.label("obl"), flags.c.act.label("act"))
+        db.query(
+            Rep,
+            flags.c.obl.label("obl"),
+            flags.c.act.label("act"),
+            flags.c.ins_old.label("ins_old"),
+        )
         .join(flags, flags.c.bin == Rep.bin)
     )
 
+    # Фильтр «Статус»: 0 — не застрах. (новое правило), 1 — застрах. (старое правило)
     is_ins = params.get("is_insured")
-    if is_ins is not None:
-        not_insured_cond = and_(flags.c.obl == 1, flags.c.act == 0)
-        q = q.filter(not_insured_cond if is_ins == 0 else not_(not_insured_cond))
+    if is_ins == 0:
+        q = q.filter(and_(flags.c.obl == 1, flags.c.act == 0))
+    elif is_ins == 1:
+        q = q.filter(flags.c.ins_old == 1)
 
     return q, Rep
 
@@ -324,25 +356,24 @@ def get_metrics(
     params = locals()
     params.pop("current_user"); params.pop("db")
 
-    # Все три карточки — по уникальным БИН (компаниям).
-    # Не застрахована = обязана (obl) И нет действующего договора (act=0).
-    # Застрахована = дополнение. Флаги агрегируются по БИН (obl/act могут быть
-    # в разных строках), поэтому считаем поверх подзапроса с группировкой по БИН.
+    # Карточки по уникальным БИН. Правила независимы (не дополняют друг друга):
+    #   Всего        — все БИН;
+    #   Застрахованы — старое правило (ins_old);
+    #   Не застрах.  — обязан (obl) И нет действующего договора (act=0).
+    # Флаги агрегируются по БИН, поэтому считаем поверх подзапроса с группировкой.
     flags = bin_flags_subquery(db, params, force_region=current_user.region)
     row = db.query(
         func.count().label("total_bins"),
+        func.sum(case((flags.c.ins_old == 1, 1), else_=0)).label("insured_bins"),
         func.sum(
             case((and_(flags.c.obl == 1, flags.c.act == 0), 1), else_=0)
         ).label("not_insured_bins"),
     ).select_from(flags).one()
 
-    total_bins = row.total_bins or 0
-    not_insured_bins = row.not_insured_bins or 0
-
     return schemas.MetricsResponse(
-        total_bins=total_bins,
-        insured_bins=total_bins - not_insured_bins,
-        not_insured_bins=not_insured_bins,
+        total_bins=row.total_bins or 0,
+        insured_bins=row.insured_bins or 0,
+        not_insured_bins=row.not_insured_bins or 0,
     )
 
 
@@ -392,9 +423,9 @@ def get_records(
     records = query.offset((page - 1) * page_size).limit(page_size).all()
 
     items = []
-    for rep, obl, act in records:
+    for rep, obl, act, ins_old in records:
         item = schemas.InsuranceRecordResponse.model_validate(rep)
-        item.is_insured = company_status(obl, act)
+        item.is_insured = company_status(obl, act, ins_old)
         items.append(item)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
@@ -451,10 +482,11 @@ def write_records_xlsx(query, path: str):
         ws.write_string(0, col, name, header_fmt)
     ws.freeze_panes(1, 0)
 
+    status_label = {1: 'Да', 0: 'Нет', 2: '—'}
     row_idx = 0
-    for r, obl, act in query.yield_per(2000):
+    for r, obl, act, ins_old in query.yield_per(2000):
         row_idx += 1
-        insured = company_status(obl, act)  # статус компании (по флагам БИН)
+        status = company_status(obl, act, ins_old)  # 0/1/2 (по флагам БИН)
         ws.write_string(row_idx, 0, bin12(r.bin))
         ws.write_string(row_idx, 1, r.bin_name or '')
         ws.write_string(row_idx, 2, bin12(r.system_delimiter_bin))
@@ -481,7 +513,7 @@ def write_records_xlsx(query, path: str):
             r.name_oked,
             r.ip,
             r.flag_head,
-            'Да' if insured else 'Нет',
+            status_label.get(status, '—'),
         ])
 
     if row_idx:
@@ -605,25 +637,50 @@ def download_records(
 
 # ============ UPLOAD (ADMIN ONLY) ============
 
-@app.post("/api/upload")
-def upload_file(
-    file: UploadFile = File(...),
-    current_user: models.User = Depends(auth.require_admin),
-    db: Session = Depends(database.get_db)
-):
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(400, "Only Excel files are allowed")
+# Реестр фоновых задач загрузки: job_id -> прогресс. Парсинг больших файлов
+# идёт в фоновом потоке, фронт опрашивает статус и показывает реальный %.
+UPLOAD_JOBS: dict = {}
+_jobs_lock = threading.Lock()
 
-    tmp_path = None
+
+def _new_upload_job() -> str:
+    job_id = uuid.uuid4().hex
+    with _jobs_lock:
+        # Чистим завершённые задачи старше часа, чтобы словарь не рос
+        now = time.time()
+        for k in [k for k, v in UPLOAD_JOBS.items()
+                  if v.get("finished_at") and now - v["finished_at"] > 3600]:
+            UPLOAD_JOBS.pop(k, None)
+        UPLOAD_JOBS[job_id] = {
+            "status": "running", "processed": 0, "total": 0,
+            "message": None, "error": None, "finished_at": None,
+        }
+    return job_id
+
+
+def _set_job(job_id: str, **kw):
+    with _jobs_lock:
+        if job_id in UPLOAD_JOBS:
+            UPLOAD_JOBS[job_id].update(kw)
+
+
+def _sheet_total_rows(ws) -> int:
+    """Число строк данных (без заголовка). 0 — если неизвестно (нет %)."""
     try:
-        # Stream to disk — не грузим 145MB целиком в RAM
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
+        mr = ws.max_row
+        return max(0, mr - 1) if mr else 0
+    except Exception:
+        return 0
 
-        # read_only=True — потоковое чтение, память ~200MB вместо 12GB
+
+def _run_insurance_upload(tmp_path: str, job_id: str):
+    """Фоновый разбор Excel страхования с обновлением прогресса задачи."""
+    db = SessionLocal()
+    try:
         wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
         ws = wb.active
+        _set_job(job_id, total=_sheet_total_rows(ws))
+
         rows_iter = ws.iter_rows(values_only=True)
         headers = list(next(rows_iter))
 
@@ -659,6 +716,7 @@ def upload_file(
 
         now = datetime.now()
         records = []
+        processed = 0
         BATCH = 5000
 
         for idx, row_vals in enumerate(rows_iter):
@@ -713,6 +771,7 @@ def upload_file(
                     'created_at': now,
                     'updated_at': now,
                 })
+                processed += 1
 
                 if len(records) >= BATCH:
                     try:
@@ -722,6 +781,7 @@ def upload_file(
                         db.rollback()
                         print(f"Batch insert failed: {batch_err}")
                     records = []
+                    _set_job(job_id, processed=processed)
 
             except Exception as e:
                 print(f"Error processing row {idx}: {e}")
@@ -746,20 +806,54 @@ def upload_file(
             db.add(models.AppSetting(key="last_update", value=today))
         db.commit()
 
-        # Данные сменились — пересобираем суточные готовые файлы в фоне,
-        # чтобы «Скачать всё» сразу отдавало свежак, не дожидаясь 06:00.
+        # Данные сменились — пересобираем суточные готовые файлы в фоне.
         threading.Thread(
             target=lambda: rebuild_cached_exports(wait=True), daemon=True
         ).start()
 
-        return {"message": f"Successfully uploaded {count} records"}
+        _set_job(job_id, status="done", processed=processed,
+                 message=f"Успешно загружено записей: {count}", finished_at=time.time())
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, f"Error processing file: {str(e)}")
+        _set_job(job_id, status="error", error=str(e), finished_at=time.time())
     finally:
+        db.close()
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+@app.post("/api/upload")
+def upload_file(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.require_admin),
+):
+    """Принимает файл, парсит в фоне. Возвращает job_id для опроса прогресса."""
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(400, "Only Excel files are allowed")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    job_id = _new_upload_job()
+    threading.Thread(
+        target=_run_insurance_upload, args=(tmp_path, job_id), daemon=True
+    ).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/uploads/{job_id}")
+def upload_status(
+    job_id: str,
+    current_user: models.User = Depends(auth.require_admin),
+):
+    with _jobs_lock:
+        job = UPLOAD_JOBS.get(job_id)
+        job = dict(job) if job else None
+    if not job:
+        raise HTTPException(404, "Задача не найдена")
+    return job
 
 
 # ============ ОПВР (Пенсионные взносы работников) ============
@@ -887,26 +981,14 @@ def get_oppv_regions(
     return [r[0] for r in rows if r[0]]
 
 
-@app.post("/api/oppv/upload")
-def upload_oppv(
-    file: UploadFile = File(...),
-    current_user: models.User = Depends(auth.require_admin),
-    db: Session = Depends(database.get_db)
-):
-    """Загрузка сводного Excel ОПВР. Колонки читаются по позиции:
-    0 Регион, 1 БИН, 2 Код ОКЭД, 3 ОКЭД, 4 Возраст, 5 Пол, 6 Кол-во,
-    7 Стаж, 8 ФОТ, 9 СМЗ, 10 Код ОКЭД (ниж.), 11 ОКЭД (ниж.)."""
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(400, "Only Excel files are allowed")
-
-    tmp_path = None
+def _run_oppv_upload(tmp_path: str, job_id: str):
+    """Фоновый разбор сводного Excel ОПВР (колонки по позиции) с прогрессом."""
+    db = SessionLocal()
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
-
         wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
         ws = wb.active
+        _set_job(job_id, total=_sheet_total_rows(ws))
+
         rows_iter = ws.iter_rows(values_only=True)
         next(rows_iter)  # пропускаем строку заголовков
 
@@ -935,6 +1017,7 @@ def upload_oppv(
 
         now = datetime.now()
         records = []
+        processed = 0
         BATCH = 5000
 
         for idx, row in enumerate(rows_iter):
@@ -956,6 +1039,7 @@ def upload_oppv(
                     'oked_name_low': s_str(row[11]),
                     'created_at': now,
                 })
+                processed += 1
                 if len(records) >= BATCH:
                     try:
                         db.bulk_insert_mappings(models.OppvRecord, records)
@@ -964,6 +1048,7 @@ def upload_oppv(
                         db.rollback()
                         print(f"OPPV batch insert failed: {be}")
                     records = []
+                    _set_job(job_id, processed=processed)
             except Exception as e:
                 print(f"Error processing OPPV row {idx}: {e}")
                 continue
@@ -978,14 +1063,38 @@ def upload_oppv(
 
         wb.close()
         count = db.query(models.OppvRecord).count()
-        return {"message": f"Загружено записей ОПВР: {count}"}
+        _set_job(job_id, status="done", processed=processed,
+                 message=f"Загружено записей ОПВР: {count}", finished_at=time.time())
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, f"Error processing file: {str(e)}")
+        _set_job(job_id, status="error", error=str(e), finished_at=time.time())
     finally:
+        db.close()
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+@app.post("/api/oppv/upload")
+def upload_oppv(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(auth.require_admin),
+):
+    """Принимает файл ОПВР, парсит в фоне. Возвращает job_id для опроса прогресса.
+    Колонки по позиции: 0 Регион, 1 БИН, 2 Код ОКЭД, 3 ОКЭД, 4 Возраст, 5 Пол,
+    6 Кол-во, 7 Стаж, 8 ФОТ, 9 СМЗ, 10 Код ОКЭД (ниж.), 11 ОКЭД (ниж.)."""
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(400, "Only Excel files are allowed")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    job_id = _new_upload_job()
+    threading.Thread(
+        target=_run_oppv_upload, args=(tmp_path, job_id), daemon=True
+    ).start()
+    return {"job_id": job_id}
 
 
 # ============ REGIONS & DISTRICTS ============

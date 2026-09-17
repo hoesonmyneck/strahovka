@@ -127,12 +127,40 @@ const binFormatter = (params) => {
 }
 
 // ─── Зона загрузки: клик по кнопке ИЛИ перетаскивание файла ──────────────────
-const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = '' }) => {
+const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = '', progress = 0, phase = null }) => {
   const [drag, setDrag] = useState(false)
   const inputRef = useRef()
   const busy = uploading || disabled
 
   const pick = (file) => { if (file && !busy) onFile(file) }
+
+  // Во время загрузки показываем прогресс вместо зоны выбора
+  if (uploading) {
+    const processing = phase === 'processing'
+    const sending = phase === 'sending'
+    // % определён, когда есть фаза передачи/обработки и известно значение
+    const showPct = (sending || processing) && progress > 0
+    const indeterminate = !showPct
+    const label = processing
+      ? (showPct ? `Обработка на сервере… ${progress}%` : 'Обработка на сервере…')
+      : sending ? `Отправка файла… ${progress}%` : 'Загрузка…'
+    return (
+      <div className={`dropzone dropzone--uploading${className ? ' ' + className : ''}`}>
+        <span className="dropzone-label">{label}</span>
+        <div className="upload-progress">
+          <div
+            className={`upload-progress-bar${indeterminate ? ' indeterminate' : ''}`}
+            style={indeterminate ? undefined : { width: `${progress}%` }}
+          />
+        </div>
+        <span className="dropzone-hint">
+          {processing
+            ? 'Разбор файла. Не закрывайте и не обновляйте вкладку.'
+            : 'Не закрывайте вкладку'}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -143,7 +171,7 @@ const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = 
       onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]) }}
     >
       <Upload size={22} />
-      <span className="dropzone-label">{uploading ? 'Загрузка...' : label}</span>
+      <span className="dropzone-label">{label}</span>
       <span className="dropzone-hint">или перетащите файл сюда</span>
       <input
         ref={inputRef}
@@ -177,6 +205,9 @@ const Dashboard = () => {
 
   // ─── Загрузка файла ОПВР (только admin) ───────────────────────────────────
   const [isOppvUploading, setIsOppvUploading] = useState(false)
+  // Прогресс загрузки: % отправки файла + фаза ('sending' | 'processing')
+  const [uploadPct, setUploadPct] = useState(0)
+  const [uploadPhase, setUploadPhase] = useState(null)
 
   const [metrics, setMetrics] = useState({
     total_bins: 0, insured_bins: 0, not_insured_bins: 0,
@@ -328,7 +359,9 @@ const Dashboard = () => {
       minWidth: 130,
       cellRenderer: (params) => {
         if (!params.data) return ''
-        return params.value ? '✅ Да' : '❌ Нет'
+        if (params.value === 1) return '✅ Да'
+        if (params.value === 0) return '❌ Нет'
+        return '—'
       },
     },
   ], [])  // useMemo — колонки не пересоздаются при ре-рендере
@@ -677,37 +710,85 @@ const Dashboard = () => {
     }
   }
 
+  // Отправка файла + опрос фоновой задачи.
+  // Фаза 'sending' — реальный % передачи байтов; 'processing' — реальный %
+  // разбора строк на сервере (сервер обновляет счётчик, мы опрашиваем статус).
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  const pollJob = async (jobId) => {
+    let errors = 0
+    while (true) {
+      await sleep(1000)
+      try {
+        const { data } = await api.get(`/api/uploads/${jobId}`)
+        errors = 0
+        if (data.total > 0) {
+          setUploadPct(Math.min(99, Math.round((data.processed * 100) / data.total)))
+        }
+        if (data.status === 'done') return data
+        if (data.status === 'error') throw new Error(data.error || 'Ошибка обработки файла')
+      } catch (e) {
+        if (e.message && e.message.includes('обработк')) throw e
+        if (++errors >= 5) throw new Error('Потеряна связь с задачей загрузки')
+      }
+    }
+  }
+
+  const uploadWithProgress = async (url, file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    setUploadPct(0)
+    setUploadPhase('sending')
+    const { data } = await api.post(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (!e.total) return
+        setUploadPct(Math.round((e.loaded * 100) / e.total))
+      },
+    })
+    // Файл долетел — сервер парсит в фоне, показываем реальный % разбора
+    setUploadPhase('processing')
+    setUploadPct(0)
+    return pollJob(data.job_id)
+  }
+
   const handleUpload = async (file) => {
     if (!file) return
     setIsUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
     try {
-      await api.post('/api/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
-      toast.success('Файл успешно загружен!')
+      const result = await uploadWithProgress('/api/upload', file)
+      toast.success(result.message || 'Файл успешно загружен!')
       fetchMetrics()
       fetchData(1)
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Ошибка загрузки файла')
+      toast.error(error.response?.data?.detail || error.message || 'Ошибка загрузки файла')
     } finally {
       setIsUploading(false)
+      setUploadPhase(null)
     }
   }
 
   const handleOppvUpload = async (file) => {
     if (!file) return
     setIsOppvUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
     try {
-      const res = await api.post('/api/oppv/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
-      toast.success(res.data?.message || 'Файл ОПВР загружен')
+      const result = await uploadWithProgress('/api/oppv/upload', file)
+      toast.success(result.message || 'Файл ОПВР загружен')
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Ошибка загрузки файла')
+      toast.error(error.response?.data?.detail || error.message || 'Ошибка загрузки файла')
     } finally {
       setIsOppvUploading(false)
+      setUploadPhase(null)
     }
   }
+
+  // Предупреждаем при попытке уйти со страницы во время загрузки
+  useEffect(() => {
+    if (!isUploading && !isOppvUploading) return
+    const handler = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isUploading, isOppvUploading])
 
   const toggleAppvr = async (u) => {
     try {
@@ -959,6 +1040,8 @@ const Dashboard = () => {
                 <FileDropzone
                   onFile={handleUpload}
                   uploading={isUploading}
+                  progress={uploadPct}
+                  phase={uploadPhase}
                   accept=".xlsx,.xls"
                   label="Загрузить новый файл"
                   className="dropzone--full dropzone--tall"
@@ -975,6 +1058,8 @@ const Dashboard = () => {
                 <FileDropzone
                   onFile={handleOppvUpload}
                   uploading={isOppvUploading}
+                  progress={uploadPct}
+                  phase={uploadPhase}
                   accept=".xlsx,.xls"
                   label="Загрузить файл ОПВР"
                   className="dropzone--full dropzone--tall"
