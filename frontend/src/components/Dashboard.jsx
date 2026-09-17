@@ -660,18 +660,21 @@ const Dashboard = () => {
     let errors = 0
     while (true) {
       await sleep(1000)
+      let data
       try {
-        const { data } = await api.get(`/api/uploads/${jobId}`)
+        data = (await api.get(`/api/uploads/${jobId}`)).data
         errors = 0
-        if (data.total > 0) {
-          setUploadPct(Math.min(99, Math.round((data.processed * 100) / data.total)))
-        }
-        if (data.status === 'done') return data
-        if (data.status === 'error') throw new Error(data.error || 'Ошибка обработки файла')
       } catch (e) {
-        if (e.message && e.message.includes('обработк')) throw e
+        // Сетевая ошибка опроса — повторяем несколько раз, потом сдаёмся
         if (++errors >= 5) throw new Error('Потеряна связь с задачей загрузки')
+        continue
       }
+      if (data.total > 0) {
+        setUploadPct(Math.min(99, Math.round((data.processed * 100) / data.total)))
+      }
+      if (data.status === 'done') return data
+      // Ошибка самой задачи (напр. не те колонки) — показываем сразу, не крутим
+      if (data.status === 'error') throw new Error(data.error || 'Ошибка обработки файла')
     }
   }
 

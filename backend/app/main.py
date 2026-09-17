@@ -1391,22 +1391,40 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
         def s_str(v):
             return str(v).strip() if v is not None else None
 
-        # Колонки читаем ПО НАЗВАНИЮ (регистронезависимо), а не по позиции —
-        # чтобы перестановка/добавление столбцов в источнике ничего не ломали.
+        # Колонки читаем ПО НАЗВАНИЮ (регистронезависимо), а не по позиции.
+        # Для каждого поля — список возможных заголовков по приоритету, чтобы
+        # разные форматы источника (с «нижним уровнем» и без, старые/новые имена)
+        # грузились без правок кода. Отображаемые «Код ОКЭД»/«ОКЭД» = *_low;
+        # если «нижнего уровня» в файле нет — берём обычные «Код ОКЭД»/«ОКЭД».
         hidx = {str(h).strip().lower(): i for i, h in enumerate(header) if h is not None}
-        OPPV_COLS = {
-            'region': 'Регион', 'bin': 'БИН', 'oked_code': 'Код ОКЭД', 'oked_name': 'ОКЭД',
-            'age': 'Возраст', 'gender': 'Пол', 'count': 'Кол-во', 'experience': 'Стаж',
-            'fot': 'ФОТ', 'smz': 'СМЗ',
-            'oked_code_low': 'Код ОКЭД (нижний уровень)', 'oked_name_low': 'ОКЭД (нижний уровень)',
+        OPPV_COL_ALIASES = {
+            'region': ['Регион'],
+            'bin': ['БИН'],
+            'oked_code': ['Код ОКЭД'],
+            'oked_name': ['ОКЭД'],
+            'oked_code_low': ['Код ОКЭД (нижний уровень)', 'Код ОКЭД'],
+            'oked_name_low': ['ОКЭД (нижний уровень)', 'ОКЭД'],
+            'age': ['Возраст'],
+            'gender': ['Пол'],
+            'count': ['Кол-во', 'Количество сотрудников', 'Количество'],
+            'experience': ['Стаж'],
+            'fot': ['ФОТ'],
+            'smz': ['СМЗ'],
         }
-        colpos = {field: hidx.get(name.strip().lower()) for field, name in OPPV_COLS.items()}
-        missing = [OPPV_COLS[f] for f, p in colpos.items() if p is None]
+        colpos = {}
+        for field, names in OPPV_COL_ALIASES.items():
+            colpos[field] = next((hidx[n.strip().lower()] for n in names
+                                  if n.strip().lower() in hidx), None)
+
+        # Обязателен минимум: регион, БИН и ОКЭД (в любом виде). «Нижний уровень»
+        # опционален — если его нет, отображаемый ОКЭД берётся из обычного.
+        REQUIRED = {'region': 'Регион', 'bin': 'БИН', 'oked_name_low': 'ОКЭД'}
+        missing = [label for f, label in REQUIRED.items() if colpos.get(f) is None]
         if missing:
             raise Exception("В файле не найдены колонки: " + ", ".join(missing))
 
         def cell(row, field):
-            p = colpos[field]
+            p = colpos.get(field)
             return row[p] if (p is not None and p < len(row)) else None
 
         db.query(models.OppvRecord).delete()
