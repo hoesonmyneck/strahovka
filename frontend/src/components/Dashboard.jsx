@@ -154,7 +154,7 @@ const Dashboard = () => {
     bin: '', bin_name: '', system_delimiter_bin: '', system_delimiter_bin_name: '',
     contract_number: '', contract_date_from: null, contract_date_to: null,
     date_end_from: null, date_end_to: null,
-    obl_name: '', rai_name: '', opf_name: '', is_insured: '',
+    obl_name: '', rai_name: '', opf_name: '', is_insured: '', ip: '',
     // Срок истечения — конкретный месяц (date_end_from/to считаем отдельно)
     expires_month: '',   // хранит date_end_from первого дня выбранного месяца
     expires_month_to: '', // хранит date_end_to последнего дня выбранного месяца
@@ -266,7 +266,6 @@ const Dashboard = () => {
     // Местоположение
     { field: 'obl_name', headerName: 'Область', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 180 },
     { field: 'rai_name', headerName: 'Район', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 180 },
-    { field: 'address', headerName: 'Адрес', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 280 },
     // Контакты
     { field: 'phone', headerName: 'Телефон', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150 },
     // Руководитель
@@ -333,6 +332,7 @@ const Dashboard = () => {
     if (filters.rai_name) params.rai_name = filters.rai_name
     if (filters.opf_name) params.opf_name = filters.opf_name
     if (filters.is_insured !== '') params.is_insured = parseInt(filters.is_insured)
+    if (filters.ip !== '') params.ip = parseInt(filters.ip)
     // Фильтр по конкретному месяцу истечения (перекрывает date_end_from/to если заданы)
     if (filters.expires_month) {
       params.date_end_from = filters.expires_month
@@ -1194,7 +1194,7 @@ const Dashboard = () => {
         <div className="metric-card">
           <Users className="metric-icon" size={32} />
           <div className="metric-info">
-            <span className="metric-value">{metrics.total_bins.toLocaleString()}</span>
+            <span className="metric-value">{(metrics.insured_bins + metrics.not_insured_bins).toLocaleString()}</span>
             <span className="metric-label">Всего организаций</span>
           </div>
         </div>
@@ -1294,6 +1294,18 @@ const Dashboard = () => {
               <option value="">Все</option>
               <option value="1">Застрахованы</option>
               <option value="0">Не застрахованы</option>
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>Форма предприятия</label>
+            <select
+              value={filters.ip}
+              onChange={(e) => setFilters({ ...filters, ip: e.target.value })}
+            >
+              <option value="">Все</option>
+              <option value="0">ЮЛ</option>
+              <option value="1">ИП</option>
             </select>
           </div>
 

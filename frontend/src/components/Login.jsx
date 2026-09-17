@@ -8,6 +8,7 @@ const Login = () => {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [leaving, setLeaving] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
 
@@ -18,16 +19,17 @@ const Login = () => {
     try {
       await login(username, password)
       toast.success('Успешный вход!')
-      window.location.href = '/dashboard'
+      // Плавный уход формы, затем переход в приложение (страница перезагрузится)
+      setLeaving(true)
+      setTimeout(() => { window.location.href = '/dashboard' }, 500)
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Ошибка входа')
-    } finally {
       setIsLoading(false)
     }
   }
 
   return (
-    <div className="login-container">
+    <div className={`login-container${leaving ? ' leaving' : ''}`}>
       <div className="login-box">
         <h1>Государственная компания по страхованию жизни</h1>
         <form onSubmit={handleSubmit}>
@@ -52,7 +54,7 @@ const Login = () => {
             />
           </div>
           <button type="submit" disabled={isLoading}>
-            {isLoading ? 'Вход...' : 'Войти'}
+            {isLoading ? <><span className="spinner"></span>Загружаем…</> : 'Войти'}
           </button>
         </form>
       </div>

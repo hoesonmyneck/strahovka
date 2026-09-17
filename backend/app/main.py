@@ -230,6 +230,10 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     if params.get("name_oked"):
         query = query.filter(M.name_oked.ilike(f"%{params['name_oked']}%"))
 
+    # Форма предприятия: ip=0 → ЮЛ, ip=1 → ИП (0 «falsy», поэтому проверяем на None)
+    if params.get("ip") is not None:
+        query = query.filter(M.ip == params["ip"])
+
     # is_insured сознательно НЕ фильтруется здесь: статус застрахованности —
     # свойство компании (БИН), поэтому он применяется в дедуп-пути
     # (deduped_records_query) на уровне представителя, а не построчно.
@@ -380,6 +384,8 @@ def apply_summary_filters(query, params: dict, force_region: str = None):
         query = query.filter(S.id_oked.ilike(f"%{params['id_oked']}%"))
     if params.get("name_oked"):
         query = query.filter(S.name_oked.ilike(f"%{params['name_oked']}%"))
+    if params.get("ip") is not None:
+        query = query.filter(S.ip == params["ip"])
     return query
 
 
@@ -546,6 +552,7 @@ def get_metrics(
     id_oked: Optional[str] = None,
     name_oked: Optional[str] = None,
     is_insured: Optional[int] = None,
+    ip: Optional[int] = None,
     expires_in_months: Optional[int] = None,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
@@ -620,6 +627,7 @@ def get_records(
     id_oked: Optional[str] = None,
     name_oked: Optional[str] = None,
     is_insured: Optional[int] = None,
+    ip: Optional[int] = None,
     expires_in_months: Optional[int] = None,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
@@ -654,11 +662,11 @@ EXPORT_HEADERS = [
     'Номер договора', 'Дата договора', 'Дата начала', 'Дата окончания',
     'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
     'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
-    'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
+    'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
     'Вид деятельности (ОКЭД)', 'Форма предприятия', 'Застрахован',
 ]
 EXPORT_COL_WIDTHS = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
-                     22, 22, 40, 16, 30, 22, 10, 30, 18, 12]
+                     22, 22, 16, 30, 22, 10, 30, 18, 12]
 
 EXPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "exports")
 os.makedirs(EXPORT_DIR, exist_ok=True)
@@ -721,7 +729,6 @@ def write_records_xlsx(query, path: str):
             r.esutd_akt_td,
             r.obl_name,
             r.rai_name,
-            r.address,
             r.phone,
             f"{r.leader_surname or ''} {r.leader_name or ''} {r.leader_middlename or ''}".strip(),
             r.opf_name,
@@ -862,6 +869,7 @@ def download_records(
     id_oked: Optional[str] = None,
     name_oked: Optional[str] = None,
     is_insured: Optional[int] = None,
+    ip: Optional[int] = None,
     expires_in_months: Optional[int] = None,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)

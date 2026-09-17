@@ -16,7 +16,7 @@ body {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #ffffff;
 }
 
 .login-box {
@@ -959,4 +959,62 @@ body {
   .download-btn {
     margin-left: 0;
   }
+}
+
+/* ─────────────── Анимации интерфейса ─────────────── */
+@keyframes ui-fade-in    { from { opacity: 0 } to { opacity: 1 } }
+@keyframes ui-rise-in    { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
+@keyframes modal-pop-in  { from { opacity: 0; transform: translateY(14px) scale(.975) } to { opacity: 1; transform: none } }
+@keyframes chk-pop       { 0% { transform: scale(.75) } 55% { transform: scale(1.15) } 100% { transform: scale(1) } }
+@keyframes ui-spin       { to { transform: rotate(360deg) } }
+
+/* Плавный вход в приложение (после перезагрузки на /dashboard) */
+.dashboard { animation: ui-fade-in .45s ease-out both; }
+
+/* Экран входа: появление формы и «уход» перед переходом в приложение */
+.login-container {
+  transition: opacity .5s ease, transform .5s cubic-bezier(.45, 0, .2, 1);
+}
+.login-container.leaving {
+  opacity: 0;
+  transform: scale(1.08);
+  pointer-events: none;
+}
+.login-box { animation: modal-pop-in .4s cubic-bezier(.34, 0, .2, 1) both; }
+
+/* Спиннер (кнопка входа, загрузки) */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, .45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ui-spin .7s linear infinite;
+  vertical-align: -3px;
+  margin-right: 8px;
+}
+
+/* Открытие модалок (админ-панель, файлы) */
+.logs-overlay { animation: ui-fade-in .2s ease-out; }
+.logs-modal   { animation: modal-pop-in .26s cubic-bezier(.34, 0, .2, 1); }
+
+/* Карточки-метрики: мягкий подъём со сдвижкой */
+.metric-card { animation: ui-rise-in .4s ease-out both; }
+.metric-card:nth-child(2) { animation-delay: .07s; }
+.metric-card:nth-child(3) { animation-delay: .14s; }
+
+/* Микроанимация кнопок: лёгкое нажатие */
+button { transition: background .18s, border-color .18s, color .18s, transform .12s, box-shadow .18s; }
+button:active:not(:disabled) { transform: scale(.97); }
+
+/* Чекбоксы: нажатие и «поп» при отметке */
+input[type="checkbox"] { transition: transform .12s; }
+input[type="checkbox"]:active { transform: scale(.85); }
+input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
+
+/* Уважать системную настройку «меньше движения» */
+@media (prefers-reduced-motion: reduce) {
+  .dashboard, .login-box, .logs-overlay, .logs-modal, .metric-card { animation: none; }
+  .login-container { transition: none; }
 }
