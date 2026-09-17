@@ -28,6 +28,8 @@ with engine.connect() as _conn:
     for _sql in [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS appvr_access INTEGER DEFAULT 0",
+        "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         """CREATE TABLE IF NOT EXISTS app_settings (
                key   VARCHAR(100) PRIMARY KEY,
                value VARCHAR(500)
@@ -78,33 +80,39 @@ def startup_event():
         db.close()
 
 
-def insured_expr(M):
-    """Договор застрахован (правило заказчика):
+def obligated_row_expr(M):
+    """Строка «обязанного» работодателя:
+        esutd_akt_td >= 2
+        AND (opf IS NULL OR opf != 13)   -- 13 = государственное учреждение
+        AND is_passport = 1
+    Компания (БИН) обязана страховать, если хотя бы одна её строка это выполняет.
+    """
+    return and_(
+        M.esutd_akt_td >= 2,
+        or_(M.opf == None, M.opf != 13),
+        M.is_passport == 1,
+    )
+
+
+def active_contract_expr(M):
+    """Действующий договор страхования:
         contract_number IS NOT NULL
-        AND flag_head = 1
-        AND rescinding_date IS NULL
-        AND date_end > сегодня
-    Компания (БИН) застрахована, если хотя бы одна её строка это выполняет.
+        AND (rescinding_date IS NULL OR rescinding_date > сегодня)  -- не расторгнут
+        AND date_end > сегодня                                      -- в будущем
     """
     return and_(
         M.contract_number != None,
-        M.flag_head == 1,
-        M.rescinding_date == None,
+        or_(M.rescinding_date == None, M.rescinding_date > date.today()),
         M.date_end != None,
         M.date_end > date.today(),
     )
 
 
-def is_insured_now(record) -> int:
-    """То же правило для уже полученной строки (не читаем колонку is_insured —
-    она снимок на момент загрузки)."""
-    return 1 if (
-        record.contract_number is not None
-        and record.flag_head == 1
-        and record.rescinding_date is None
-        and record.date_end
-        and record.date_end > date.today()
-    ) else 0
+def company_status(obl: int, act: int) -> int:
+    """Статус компании по агрегированным по БИН флагам.
+    Не застрахована = обязана (obl) И нет действующего договора (act=0).
+    Всё остальное = застрахована (дополнение)."""
+    return 0 if (obl == 1 and act == 0) else 1
 
 
 def apply_filters(query, model, params: dict, force_region: str = None):
@@ -188,28 +196,54 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     return query
 
 
+def bin_flags_subquery(db, params: dict, force_region: str = None):
+    """Подзапрос с агрегированными по БИН флагами: obl (обязан) и act
+    (есть действующий договор). Обязанность/действующий договор могут быть
+    в разных строках одного БИН, поэтому агрегируем max() по группе."""
+    M = models.InsuranceRecord
+    obl_flag = case((obligated_row_expr(M), 1), else_=0)
+    act_flag = case((active_contract_expr(M), 1), else_=0)
+    return (
+        apply_filters(
+            db.query(
+                M.bin.label("bin"),
+                func.max(obl_flag).label("obl"),
+                func.max(act_flag).label("act"),
+            ),
+            M, params, force_region=force_region,
+        )
+        .group_by(M.bin)
+        .subquery()
+    )
+
+
 def deduped_records_query(db, params: dict, force_region: str = None):
     """Одна строка на БИН (реестр организаций) с учётом фильтров.
 
-    Представитель БИН: застрахованный договор, если он есть у компании,
-    иначе самый свежий по date_end. Значит статус представителя = статус
-    компании. Возвращает (query представителей, alias-класс Rep).
-    Фильтр is_insured применяется на уровне компании (по представителю).
+    Представитель БИН: строка с действующим договором, если она есть у компании,
+    иначе самая свежая по date_end. Флаги obl/act агрегируются по БИН и
+    присоединяются к представителю. Возвращает (query из кортежей (Rep, obl, act),
+    alias-класс Rep). Фильтр is_insured применяется на уровне компании.
     """
     M = models.InsuranceRecord
     base = apply_filters(db.query(M), M, params, force_region=force_region)
     rep_subq = (
-        base.order_by(M.bin, insured_expr(M).desc(), M.date_end.desc().nullslast())
+        base.order_by(M.bin, active_contract_expr(M).desc(), M.date_end.desc().nullslast())
             .distinct(M.bin)
             .subquery()
     )
     Rep = aliased(M, rep_subq)
-    q = db.query(Rep)
+
+    flags = bin_flags_subquery(db, params, force_region=force_region)
+    q = (
+        db.query(Rep, flags.c.obl.label("obl"), flags.c.act.label("act"))
+        .join(flags, flags.c.bin == Rep.bin)
+    )
 
     is_ins = params.get("is_insured")
     if is_ins is not None:
-        ins_flag = case((insured_expr(Rep), 1), else_=0)  # else_ убирает NULL
-        q = q.filter(ins_flag == (1 if is_ins == 1 else 0))
+        not_insured_cond = and_(flags.c.obl == 1, flags.c.act == 0)
+        q = q.filter(not_insured_cond if is_ins == 0 else not_(not_insured_cond))
 
     return q, Rep
 
@@ -289,28 +323,26 @@ def get_metrics(
 ):
     params = locals()
     params.pop("current_user"); params.pop("db")
-    M = models.InsuranceRecord
 
     # Все три карточки — по уникальным БИН (компаниям).
-    # Компания застрахована, если хотя бы одна её строка удовлетворяет insured_expr;
-    # case(...) без else_ даёт NULL, а count(distinct) его пропускает.
-    query = apply_filters(
-        db.query(
-            func.count(distinct(M.bin)).label("total_bins"),
-            func.count(distinct(case((insured_expr(M), M.bin)))).label("insured_bins"),
-        ),
-        M,
-        params,
-        force_region=current_user.region,
-    )
-    row = query.one()
+    # Не застрахована = обязана (obl) И нет действующего договора (act=0).
+    # Застрахована = дополнение. Флаги агрегируются по БИН (obl/act могут быть
+    # в разных строках), поэтому считаем поверх подзапроса с группировкой по БИН.
+    flags = bin_flags_subquery(db, params, force_region=current_user.region)
+    row = db.query(
+        func.count().label("total_bins"),
+        func.sum(
+            case((and_(flags.c.obl == 1, flags.c.act == 0), 1), else_=0)
+        ).label("not_insured_bins"),
+    ).select_from(flags).one()
+
     total_bins = row.total_bins or 0
-    insured_bins = row.insured_bins or 0
+    not_insured_bins = row.not_insured_bins or 0
 
     return schemas.MetricsResponse(
         total_bins=total_bins,
-        insured_bins=insured_bins,
-        not_insured_bins=total_bins - insured_bins,
+        insured_bins=total_bins - not_insured_bins,
+        not_insured_bins=not_insured_bins,
     )
 
 
@@ -360,9 +392,9 @@ def get_records(
     records = query.offset((page - 1) * page_size).limit(page_size).all()
 
     items = []
-    for r in records:
-        item = schemas.InsuranceRecordResponse.model_validate(r)
-        item.is_insured = is_insured_now(r)
+    for rep, obl, act in records:
+        item = schemas.InsuranceRecordResponse.model_validate(rep)
+        item.is_insured = company_status(obl, act)
         items.append(item)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
@@ -420,9 +452,9 @@ def write_records_xlsx(query, path: str):
     ws.freeze_panes(1, 0)
 
     row_idx = 0
-    for r in query.yield_per(2000):
+    for r, obl, act in query.yield_per(2000):
         row_idx += 1
-        insured = is_insured_now(r)  # статус компании (представитель)
+        insured = company_status(obl, act)  # статус компании (по флагам БИН)
         ws.write_string(row_idx, 0, bin12(r.bin))
         ws.write_string(row_idx, 1, r.bin_name or '')
         ws.write_string(row_idx, 2, bin12(r.system_delimiter_bin))
@@ -676,6 +708,7 @@ def upload_file(
                     'esutd_akt_td': safe_int(row.get('ESUTD_AKT_TD')),
                     'ip': safe_int(row.get('IP')),
                     'tip': safe_int(row.get('TIP')),
+                    'is_passport': safe_int(row.get('IS_PASSPORT')),
                     'is_insured': 1 if (effective_end and effective_end > now) else 0,
                     'created_at': now,
                     'updated_at': now,

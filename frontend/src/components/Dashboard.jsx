@@ -872,10 +872,10 @@ const Dashboard = () => {
                 <Users size={16} /> Пользователи
               </button>
               <button className={adminTab === 'upload' ? 'active' : ''} onClick={() => selectAdminTab('upload')}>
-                <Upload size={16} /> Загрузка Excel
+                <Upload size={16} /> Обновить страхование
               </button>
               <button className={adminTab === 'oppv' ? 'active' : ''} onClick={() => selectAdminTab('oppv')}>
-                <Coins size={16} /> Загрузка ОПВР
+                <Coins size={16} /> Обновить ОППВ
               </button>
               <button className={adminTab === 'logs' ? 'active' : ''} onClick={() => selectAdminTab('logs')}>
                 <ScrollText size={16} /> Логи входов

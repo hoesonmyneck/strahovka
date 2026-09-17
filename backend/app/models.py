@@ -44,7 +44,8 @@ class InsuranceRecord(Base):
     esutd_akt_td = Column(BigInteger)
     ip = Column(BigInteger)
     tip = Column(BigInteger)
-    
+    is_passport = Column(Integer, index=True)  # 1 = есть паспорт (для правила «обязан»)
+
     # Дополнительные поля для фильтрации
     is_insured = Column(Integer, default=1)  # 1 - застрахован, 0 - нет
     created_at = Column(DateTime, default=datetime.utcnow)
