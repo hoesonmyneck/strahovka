@@ -15,7 +15,7 @@ const fmtNumber = (v, decimals = 0) => {
 }
 
 const EMPTY = {
-  region: '', bin: '', oked_name: '', gender: '', oked_name_low: '',
+  region: '', bin: '', gender: '', oked_name_low: '',
 }
 
 // ─── Раздел «Пенсионные взносы работников» (ОПВР) ────────────────────────────
@@ -33,10 +33,8 @@ const OppvSection = () => {
   const columnDefs = useMemo(() => [
     { field: 'region', headerName: 'Регион', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 160, pinned: 'left' },
     { field: 'bin', headerName: 'БИН', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 150, pinned: 'left' },
-    { field: 'oked_code', headerName: 'Код ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 120 },
-    { field: 'oked_name', headerName: 'ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 280 },
-    { field: 'oked_name_low', headerName: 'ОКЭД (нижний уровень)', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 300 },
-    { field: 'oked_code_low', headerName: 'Код ОКЭД (ниж.)', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'oked_code_low', headerName: 'Код ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'oked_name_low', headerName: 'ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 300 },
     { field: 'age', headerName: 'Возраст', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'gender', headerName: 'Пол', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'experience', headerName: 'Стаж', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 100 },
@@ -163,20 +161,9 @@ const OppvSection = () => {
             </select>
           </div>
 
-          {/* Справочники ОКЭД — по половине ряда, стоят рядом в одном ряду */}
+          {/* Справочник ОКЭД (по нижнему уровню, отображается как «ОКЭД») */}
           <div className="filter-group filter-group--half">
             <label>ОКЭД</label>
-            <SuggestInput
-              endpoint="/api/oppv/suggestions"
-              field="oked_name"
-              value={filters.oked_name}
-              onChange={(v) => setFilters({ ...filters, oked_name: v })}
-              placeholder="Выберите или введите..."
-              openOnFocus
-            />
-          </div>
-          <div className="filter-group filter-group--half">
-            <label>ОКЭД (нижний уровень)</label>
             <SuggestInput
               endpoint="/api/oppv/suggestions"
               field="oked_name_low"

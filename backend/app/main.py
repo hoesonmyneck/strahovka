@@ -1169,10 +1169,10 @@ def get_oppv(
 
 
 OPPV_EXPORT_HEADERS = [
-    'Регион', 'БИН', 'Код ОКЭД', 'ОКЭД', 'ОКЭД (нижний уровень)', 'Код ОКЭД (ниж.)',
-    'Возраст', 'Пол', 'Стаж', 'Количество сотрудников', 'ФОТ', 'СМЗ',
+    'Регион', 'БИН', 'Код ОКЭД', 'ОКЭД', 'Возраст', 'Пол',
+    'Стаж', 'Количество сотрудников', 'ФОТ', 'СМЗ',
 ]
-OPPV_EXPORT_WIDTHS = [22, 16, 12, 40, 40, 16, 10, 10, 10, 20, 16, 16]
+OPPV_EXPORT_WIDTHS = [22, 16, 14, 40, 10, 10, 10, 20, 16, 16]
 
 # Готовый файл полной выгрузки — как суточные файлы в страховании. Сборка всех
 # 271к строк занимает ~18 с (13 с уходит на запись ячеек), поэтому файл делается
@@ -1183,8 +1183,9 @@ _oppv_export_lock = threading.Lock()
 
 def oppv_export_query(db, params: dict):
     O = models.OppvRecord
-    cols = (O.region, O.bin, O.oked_code, O.oked_name, O.oked_name_low,
-            O.oked_code_low, O.age, O.gender, O.experience, O.count, O.fot, O.smz)
+    # Верхний уровень ОКЭД скрыт; нижний уровень идёт как «Код ОКЭД» / «ОКЭД».
+    cols = (O.region, O.bin, O.oked_code_low, O.oked_name_low,
+            O.age, O.gender, O.experience, O.count, O.fot, O.smz)
     return apply_oppv_filters(db.query(*cols), params).order_by(O.id)
 
 
@@ -1205,8 +1206,8 @@ def write_oppv_xlsx(query, path: str):
     for r in query.yield_per(5000):
         row_idx += 1
         ws.write_row(row_idx, 0, [
-            r[0] or '', r[1] or '', r[2] or '', r[3] or '', r[4] or '', r[5] or '',
-            r[6], r[7], r[8], r[9], r[10], r[11],
+            r[0] or '', r[1] or '', r[2] or '', r[3] or '',
+            r[4], r[5] or '', r[6], r[7], r[8], r[9],
         ])
     if row_idx:
         ws.autofilter(0, 0, row_idx, len(OPPV_EXPORT_HEADERS) - 1)
