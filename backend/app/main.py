@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from starlette.background import BackgroundTask
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import func, and_, or_, not_, String, case, distinct
+from sqlalchemy import func, and_, or_, not_, String, case, distinct, text
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -55,6 +55,33 @@ with engine.connect() as _conn:
                uploaded_by   VARCHAR(50),
                uploaded_at   TIMESTAMP DEFAULT NOW()
            )""",
+        # -- ОПВР: индексы под реальные запросы -------------------------------
+        # Фильтры идут подстрокой (ILIKE '%...%'), btree такое не обслуживает —
+        # без триграммных индексов каждый запрос сканировал все 270к строк.
+        "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_oked_name_trgm "
+        "    ON oppv_records USING gin (oked_name gin_trgm_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_oked_name_low_trgm "
+        "    ON oppv_records USING gin (oked_name_low gin_trgm_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_region_trgm "
+        "    ON oppv_records USING gin (region gin_trgm_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_bin_trgm "
+        "    ON oppv_records USING gin (bin gin_trgm_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_oked_code_low_trgm "
+        "    ON oppv_records USING gin (oked_code_low gin_trgm_ops)",
+        # Сортировка по деньгам без полной сортировки таблицы
+        "CREATE INDEX IF NOT EXISTS idx_oppv_fot ON oppv_records (fot)",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_smz ON oppv_records (smz)",
+        # Дубли: эти колонки уже проиндексированы через index=True (ix_oppv_records_*)
+        "DROP INDEX IF EXISTS idx_oppv_bin",
+        "DROP INDEX IF EXISTS idx_oppv_region",
+        # Справочник значений для автоподсказок и списка регионов
+        """CREATE TABLE IF NOT EXISTS oppv_dict (
+               field VARCHAR(40)  NOT NULL,
+               value VARCHAR(300) NOT NULL,
+               cnt   INTEGER,
+               PRIMARY KEY (field, value)
+           )""",
     ]:
         try:
             _conn.execute(__import__('sqlalchemy').text(_sql))
@@ -77,6 +104,7 @@ def startup_event():
     db = SessionLocal()
     try:
         auth.init_default_users(db)
+        _ensure_oppv_dict(db)      # справочник ОПВР для автоподсказок
     finally:
         db.close()
 
@@ -627,10 +655,10 @@ EXPORT_HEADERS = [
     'Дата расторжения', 'Сумма', 'Застрахованных сотр.', 'Всего сотрудников',
     'Кол-во 12 мес.', 'ФОТ 12 мес.', 'ESUTD акт. ТД', 'Область', 'Район',
     'Адрес', 'Телефон', 'Руководитель', 'ОПФ', 'Код ОКЭД',
-    'Вид деятельности (ОКЭД)', 'ИП', 'Флаг', 'Застрахован',
+    'Вид деятельности (ОКЭД)', 'Форма предприятия', 'Застрахован',
 ]
 EXPORT_COL_WIDTHS = [15, 40, 18, 40, 18, 13, 13, 13, 15, 14, 12, 12, 13, 14, 12,
-                     22, 22, 40, 16, 30, 22, 10, 30, 6, 8, 12]
+                     22, 22, 40, 16, 30, 22, 10, 30, 18, 12]
 
 EXPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "exports")
 os.makedirs(EXPORT_DIR, exist_ok=True)
@@ -699,8 +727,7 @@ def write_records_xlsx(query, path: str):
             r.opf_name,
             r.id_oked,
             r.name_oked,
-            r.ip,
-            r.flag_head,
+            ('ИП' if r.ip == 1 else 'ЮЛ' if r.ip == 0 else ''),
             status_label.get(status, '—'),
         ])
 
@@ -789,6 +816,10 @@ def _export_scheduler():
             rebuild_cached_exports(only_missing=True)
         except Exception as e:
             print(f"Initial export build failed: {e}")
+    try:
+        rebuild_oppv_export(only_missing=True)      # готовый файл ОПВР
+    except Exception as e:
+        print(f"Initial OPPV export build failed: {e}")
     # 3) Ежесуточно 06:00 — пересобрать предрасчёт (даты могли сдвинуться) и файлы.
     while True:
         now = datetime.now()
@@ -799,6 +830,7 @@ def _export_scheduler():
         try:
             rebuild_company_summary_safe()
             rebuild_cached_exports()
+            rebuild_oppv_export()
         except Exception as e:
             print(f"Scheduled rebuild failed: {e}")
 
@@ -1137,10 +1169,83 @@ def get_oppv(
 
 
 OPPV_EXPORT_HEADERS = [
-    'Регион', 'БИН', 'Код ОКЭД', 'ОКЭД', 'Возраст', 'Пол', 'Кол-во',
-    'Стаж', 'ФОТ', 'СМЗ', 'Код ОКЭД (нижний уровень)', 'ОКЭД (нижний уровень)',
+    'Регион', 'БИН', 'Код ОКЭД', 'ОКЭД', 'ОКЭД (нижний уровень)', 'Код ОКЭД (ниж.)',
+    'Возраст', 'Пол', 'Стаж', 'Количество сотрудников', 'ФОТ', 'СМЗ',
 ]
-OPPV_EXPORT_WIDTHS = [22, 16, 12, 40, 10, 10, 10, 8, 16, 16, 20, 40]
+OPPV_EXPORT_WIDTHS = [22, 16, 12, 40, 40, 16, 10, 10, 10, 20, 16, 16]
+
+# Готовый файл полной выгрузки — как суточные файлы в страховании. Сборка всех
+# 271к строк занимает ~18 с (13 с уходит на запись ячеек), поэтому файл делается
+# заранее в фоне, а запрос без фильтров просто отдаёт его.
+OPPV_EXPORT_FILE = "oppv_svod.xlsx"
+_oppv_export_lock = threading.Lock()
+
+
+def oppv_export_query(db, params: dict):
+    O = models.OppvRecord
+    cols = (O.region, O.bin, O.oked_code, O.oked_name, O.oked_name_low,
+            O.oked_code_low, O.age, O.gender, O.experience, O.count, O.fot, O.smz)
+    return apply_oppv_filters(db.query(*cols), params).order_by(O.id)
+
+
+def write_oppv_xlsx(query, path: str):
+    """Пишет выгрузку ОПВР в xlsx потоково (constant_memory) в файл path."""
+    wb = xlsxwriter.Workbook(path, {'constant_memory': True})
+    ws = wb.add_worksheet('ОПВР')
+    header_fmt = wb.add_format({'bold': True})
+    for col, w in enumerate(OPPV_EXPORT_WIDTHS):
+        ws.set_column(col, col, w)
+    for col, name in enumerate(OPPV_EXPORT_HEADERS):
+        ws.write_string(0, col, name, header_fmt)
+    ws.freeze_panes(1, 0)
+
+    row_idx = 0
+    # Одна запись строки вместо двенадцати вызовов на ячейку. Текстовые поля
+    # отдаём как str — БИН с ведущими нулями должен остаться текстом.
+    for r in query.yield_per(5000):
+        row_idx += 1
+        ws.write_row(row_idx, 0, [
+            r[0] or '', r[1] or '', r[2] or '', r[3] or '', r[4] or '', r[5] or '',
+            r[6], r[7], r[8], r[9], r[10], r[11],
+        ])
+    if row_idx:
+        ws.autofilter(0, 0, row_idx, len(OPPV_EXPORT_HEADERS) - 1)
+    wb.close()
+
+
+def oppv_cached_export_path(params: dict):
+    """Путь к готовому файлу, если запрос без фильтров, иначе None."""
+    if any(params.get(k) not in (None, "") for k in params):
+        return None
+    return os.path.join(EXPORT_DIR, OPPV_EXPORT_FILE)
+
+
+def rebuild_oppv_export(wait: bool = False, only_missing: bool = False):
+    """Пересобирает готовый файл ОПВР. Атомарно (temp -> os.replace).
+
+    wait=False — пропустить, если сборка уже идёт (планировщик);
+    wait=True  — дождаться и собрать (после загрузки новой выгрузки).
+    """
+    if not _oppv_export_lock.acquire(blocking=wait):
+        return
+    try:
+        dest = os.path.join(EXPORT_DIR, OPPV_EXPORT_FILE)
+        if only_missing and os.path.exists(dest):
+            return
+        db = SessionLocal()
+        try:
+            if not db.execute(text("SELECT 1 FROM oppv_records LIMIT 1")).first():
+                return                       # данных нет — собирать нечего
+            tmp = dest + ".tmp"
+            write_oppv_xlsx(oppv_export_query(db, {}), tmp)
+            os.replace(tmp, dest)
+            print(f"Rebuilt cached export: {OPPV_EXPORT_FILE}", flush=True)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"OPPV export rebuild failed: {e}", flush=True)
+    finally:
+        _oppv_export_lock.release()
 
 
 @app.get("/api/oppv/download")
@@ -1155,36 +1260,22 @@ def download_oppv(
     current_user: models.User = Depends(auth.require_appvr),
     db: Session = Depends(database.get_db)
 ):
-    O = models.OppvRecord
     params = {k: v for k, v in locals().items() if k not in ("current_user", "db")}
-    query = apply_oppv_filters(db.query(O), params).order_by(O.id)
 
+    # Без фильтров — отдаём готовый файл, собранный в фоне.
+    cached = oppv_cached_export_path(params)
+    if cached and os.path.exists(cached):
+        return FileResponse(
+            cached,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=OPPV_EXPORT_FILE,
+        )
+
+    # С фильтрами — собираем на лету во временный файл (отфильтрованных строк
+    # на порядки меньше, это быстро) и удаляем после отдачи.
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     tmp.close()
-    wb = xlsxwriter.Workbook(tmp.name, {'constant_memory': True})
-    ws = wb.add_worksheet('ОПВР')
-    header_fmt = wb.add_format({'bold': True})
-    for col, w in enumerate(OPPV_EXPORT_WIDTHS):
-        ws.set_column(col, col, w)
-    for col, name in enumerate(OPPV_EXPORT_HEADERS):
-        ws.write_string(0, col, name, header_fmt)
-    ws.freeze_panes(1, 0)
-
-    row_idx = 0
-    for r in query.yield_per(2000):
-        row_idx += 1
-        ws.write_string(row_idx, 0, r.region or '')
-        ws.write_string(row_idx, 1, r.bin or '')
-        ws.write_string(row_idx, 2, r.oked_code or '')
-        ws.write_row(row_idx, 3, [
-            r.oked_name, r.age, r.gender, r.count, r.experience,
-            r.fot, r.smz,
-        ])
-        ws.write_string(row_idx, 10, r.oked_code_low or '')
-        ws.write_string(row_idx, 11, r.oked_name_low or '')
-    if row_idx:
-        ws.autofilter(0, 0, row_idx, len(OPPV_EXPORT_HEADERS) - 1)
-    wb.close()
+    write_oppv_xlsx(oppv_export_query(db, params), tmp.name)
 
     return FileResponse(
         tmp.name,
@@ -1192,6 +1283,43 @@ def download_oppv(
         filename="oppv_svod.xlsx",
         background=BackgroundTask(os.unlink, tmp.name),
     )
+
+
+# Поля, по которым собираем справочник уникальных значений
+OPPV_DICT_FIELDS = ('region', 'oked_code', 'oked_name',
+                    'oked_code_low', 'oked_name_low', 'gender')
+
+
+def rebuild_oppv_dict(db):
+    """Пересобирает oppv_dict — уникальные значения полей ОПВР с частотой.
+
+    Без него автоподсказки и список регионов делали DISTINCT по всей таблице
+    (270к строк на каждое нажатие клавиши). В справочнике меньше тысячи строк.
+    """
+    db.execute(text("DELETE FROM oppv_dict"))
+    for f in OPPV_DICT_FIELDS:           # имена полей из константы, не из запроса
+        db.execute(text(
+            "INSERT INTO oppv_dict (field, value, cnt) "
+            "SELECT :f, {c}, count(*) FROM oppv_records "
+            "WHERE {c} IS NOT NULL AND {c} <> '' GROUP BY {c} "
+            "ON CONFLICT (field, value) DO NOTHING".format(c=f)
+        ), {"f": f})
+    db.commit()
+    total = db.execute(text("SELECT count(*) FROM oppv_dict")).scalar() or 0
+    print(f"Rebuilt oppv_dict: {total} rows", flush=True)
+
+
+def _ensure_oppv_dict(db):
+    """Собирает справочник, если он пуст, а данные ОПВР уже загружены."""
+    try:
+        have = db.execute(text("SELECT count(*) FROM oppv_dict")).scalar() or 0
+        if have:
+            return
+        if db.execute(text("SELECT 1 FROM oppv_records LIMIT 1")).first():
+            rebuild_oppv_dict(db)
+    except Exception as e:
+        db.rollback()
+        print(f"oppv_dict init skipped: {e}", flush=True)
 
 
 @app.get("/api/oppv/suggestions")
@@ -1202,19 +1330,20 @@ def get_oppv_suggestions(
     current_user: models.User = Depends(auth.require_appvr),
     db: Session = Depends(database.get_db)
 ):
-    """Справочник значений для фильтров ОПВР (ОКЭД и нижний уровень)."""
-    allowed = {
-        'oked_name': models.OppvRecord.oked_name,
-        'oked_name_low': models.OppvRecord.oked_name_low,
-        'region': models.OppvRecord.region,
-    }
-    if field not in allowed:
+    """Справочник значений для фильтров ОПВР (ОКЭД и нижний уровень).
+
+    Читаем из предрасчётного oppv_dict, а не DISTINCT по всей таблице.
+    """
+    if field not in OPPV_DICT_FIELDS:
         raise HTTPException(400, "Invalid field")
-    col = allowed[field]
-    q = db.query(col).filter(col.isnot(None))
+    _ensure_oppv_dict(db)
+    sql = "SELECT value FROM oppv_dict WHERE field = :f"
+    params = {"f": field, "lim": limit}
     if query:
-        q = q.filter(col.ilike(f"%{query}%"))
-    rows = q.distinct().order_by(col).limit(limit).all()
+        sql += " AND value ILIKE :like"
+        params["like"] = f"%{query}%"
+    sql += " ORDER BY value LIMIT :lim"
+    rows = db.execute(text(sql), params).fetchall()
     return [str(r[0]) for r in rows if r[0] is not None]
 
 
@@ -1223,13 +1352,10 @@ def get_oppv_regions(
     current_user: models.User = Depends(auth.require_appvr),
     db: Session = Depends(database.get_db)
 ):
-    rows = (
-        db.query(models.OppvRecord.region)
-        .filter(models.OppvRecord.region.isnot(None))
-        .distinct()
-        .order_by(models.OppvRecord.region)
-        .all()
-    )
+    _ensure_oppv_dict(db)
+    rows = db.execute(text(
+        "SELECT value FROM oppv_dict WHERE field = 'region' ORDER BY value"
+    )).fetchall()
     return [r[0] for r in rows if r[0]]
 
 
@@ -1333,6 +1459,16 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
 
         wb.close()
         count = db.query(models.OppvRecord).count()
+        try:
+            rebuild_oppv_dict(db)          # значения изменились — обновляем подсказки
+            db.execute(text("ANALYZE oppv_records"))
+            db.commit()
+        except Exception as de:
+            db.rollback()
+            print(f"oppv_dict rebuild failed: {de}")
+        threading.Thread(                  # готовый Excel — в фоне, ~18 с
+            target=lambda: rebuild_oppv_export(wait=True), daemon=True
+        ).start()
         _set_job(job_id, status="done", processed=processed,
                  message=f"Загружено записей ОПВР: {count}", finished_at=time.time())
 

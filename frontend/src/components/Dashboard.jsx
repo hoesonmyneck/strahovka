@@ -285,7 +285,11 @@ const Dashboard = () => {
     { field: 'id_oked', headerName: 'Код ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 120 },
     { field: 'name_oked', headerName: 'Вид деятельности (ОКЭД)', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 280 },
     // Доп. поля
-    { field: 'ip', headerName: 'ИП', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 90 },
+    {
+      field: 'ip', headerName: 'Форма предприятия',
+      sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150,
+      valueGetter: (p) => p.data ? (p.data.ip === 1 ? 'ИП' : (p.data.ip === 0 ? 'ЮЛ' : '')) : '',
+    },
     // ТИП и Флаг скрыты в таблице, но экспортируются в Excel
     { field: 'tip', headerName: 'ТИП', hide: true },
     { field: 'flag_head', headerName: 'Флаг', hide: true },

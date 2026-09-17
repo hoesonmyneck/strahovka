@@ -40,7 +40,7 @@ const OppvSection = () => {
     { field: 'age', headerName: 'Возраст', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'gender', headerName: 'Пол', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'experience', headerName: 'Стаж', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 100 },
-    { field: 'count', headerName: 'Кол-во', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
+    { field: 'count', headerName: 'Количество сотрудников', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'fot', headerName: 'ФОТ', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
     { field: 'smz', headerName: 'СМЗ', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
   ], [])

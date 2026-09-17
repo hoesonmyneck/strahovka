@@ -127,10 +127,8 @@ class OppvRecord(Base):
     oked_name_low = Column(String(300))                    # ОКЭД (нижний уровень)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        Index('idx_oppv_bin', 'bin'),
-        Index('idx_oppv_region', 'region'),
-    )
+    # Отдельные Index() не нужны: bin и region проиндексированы через index=True,
+    # а поиск подстрокой обслуживают триграммные GIN-индексы из автомиграций.
 
 
 class AppSetting(Base):
