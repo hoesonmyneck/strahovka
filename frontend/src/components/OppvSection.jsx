@@ -155,6 +155,16 @@ const OppvSection = () => {
               onChange={(e) => setFilters({ ...filters, bin: e.target.value })} />
           </div>
           <div className="filter-group">
+            <label>Пол</label>
+            <select value={filters.gender} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>
+              <option value="">Все</option>
+              <option value="Мужской">Мужской</option>
+              <option value="Женский">Женский</option>
+            </select>
+          </div>
+
+          {/* Справочники ОКЭД — широкие, на отдельных (нижних) рядах */}
+          <div className="filter-group filter-group--wide">
             <label>ОКЭД</label>
             <SuggestInput
               endpoint="/api/oppv/suggestions"
@@ -165,7 +175,7 @@ const OppvSection = () => {
               openOnFocus
             />
           </div>
-          <div className="filter-group">
+          <div className="filter-group filter-group--wide">
             <label>ОКЭД (нижний уровень)</label>
             <SuggestInput
               endpoint="/api/oppv/suggestions"
@@ -175,14 +185,6 @@ const OppvSection = () => {
               placeholder="Выберите или введите..."
               openOnFocus
             />
-          </div>
-          <div className="filter-group">
-            <label>Пол</label>
-            <select value={filters.gender} onChange={(e) => setFilters({ ...filters, gender: e.target.value })}>
-              <option value="">Все</option>
-              <option value="Мужской">Мужской</option>
-              <option value="Женский">Женский</option>
-            </select>
           </div>
         </div>
 

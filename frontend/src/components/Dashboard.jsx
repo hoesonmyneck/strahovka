@@ -1242,18 +1242,6 @@ const Dashboard = () => {
             />
           </div>
 
-          <div className="filter-group">
-            <label>Страховая компания</label>
-            <SuggestInput
-              field="system_delimiter_bin_name"
-              value={filters.system_delimiter_bin_name}
-              onChange={(v) => setFilters({ ...filters, system_delimiter_bin_name: v })}
-              placeholder="Выберите или введите..."
-              openOnFocus
-            />
-          </div>
-
-
           {/* Для admin — выбор области; для регионального пользователя — скрыто */}
           {isAdmin() && (
             <div className="filter-group">
@@ -1320,6 +1308,18 @@ const Dashboard = () => {
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+          </div>
+
+          {/* Справочник страховых компаний — широкий, на отдельном (нижнем) ряду */}
+          <div className="filter-group filter-group--wide">
+            <label>Страховая компания</label>
+            <SuggestInput
+              field="system_delimiter_bin_name"
+              value={filters.system_delimiter_bin_name}
+              onChange={(v) => setFilters({ ...filters, system_delimiter_bin_name: v })}
+              placeholder="Выберите или введите..."
+              openOnFocus
+            />
           </div>
 
         </div>
