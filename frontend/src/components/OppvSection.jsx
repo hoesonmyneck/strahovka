@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import api from '../utils/api.js'
 import { toast } from 'react-toastify'
-import { Search, Filter, Download } from 'lucide-react'
+import { Search, Filter } from 'lucide-react'
 import SuggestInput from './SuggestInput.jsx'
 
 // Форматирование числа с пробелами: 1000000 → "1 000 000"
@@ -114,24 +114,6 @@ const OppvSection = () => {
     setTimeout(() => fetchData(1, {}), 0)
   }
 
-  const downloadExcel = async () => {
-    try {
-      const params = buildParams()
-      const res = await api.get('/api/oppv/download', { params, responseType: 'blob' })
-      const url = window.URL.createObjectURL(new Blob([res.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `oppv_${new Date().toISOString().split('T')[0]}.xlsx`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-      toast.success('Файл скачан')
-    } catch {
-      toast.error('Ошибка при скачивании')
-    }
-  }
-
   const totalPages = Math.ceil(total / pageSize) || 1
   const goToPage = (p) => { if (p >= 1 && p <= totalPages) fetchData(p) }
 
@@ -180,9 +162,6 @@ const OppvSection = () => {
             <Search size={18} /> Применить фильтры
           </button>
           <button onClick={resetFilters} className="reset-btn">Сбросить</button>
-          <button onClick={downloadExcel} className="download-btn">
-            <Download size={18} /> Скачать Excel
-          </button>
         </div>
       </div>
 

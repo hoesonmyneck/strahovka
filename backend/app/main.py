@@ -165,6 +165,22 @@ def company_status(obl: int, act: int, ins_old: int) -> int:
     return 2
 
 
+# Фильтр по ESUTD акт. ТД: оператор (>, >=, <, <=, =) + число.
+def _apply_esutd_filter(query, col, params: dict):
+    op = params.get("esutd_op")
+    val = params.get("esutd_val")
+    if not op or val is None:
+        return query
+    conds = {
+        "gt": col > val, "gte": col >= val,
+        "lt": col < val, "lte": col <= val, "eq": col == val,
+    }
+    cond = conds.get(op)
+    if cond is not None:
+        query = query.filter(cond)
+    return query
+
+
 def apply_filters(query, model, params: dict, force_region: str = None):
     """Применяет все фильтры к запросу. force_region — обязательный регион для региональных пользователей."""
     M = model
@@ -233,6 +249,8 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     # Форма предприятия: ip=0 → ЮЛ, ip=1 → ИП (0 «falsy», поэтому проверяем на None)
     if params.get("ip") is not None:
         query = query.filter(M.ip == params["ip"])
+
+    query = _apply_esutd_filter(query, M.esutd_akt_td, params)
 
     # is_insured сознательно НЕ фильтруется здесь: статус застрахованности —
     # свойство компании (БИН), поэтому он применяется в дедуп-пути
@@ -386,6 +404,7 @@ def apply_summary_filters(query, params: dict, force_region: str = None):
         query = query.filter(S.name_oked.ilike(f"%{params['name_oked']}%"))
     if params.get("ip") is not None:
         query = query.filter(S.ip == params["ip"])
+    query = _apply_esutd_filter(query, S.esutd_akt_td, params)
     return query
 
 
@@ -554,6 +573,8 @@ def get_metrics(
     is_insured: Optional[int] = None,
     ip: Optional[int] = None,
     expires_in_months: Optional[int] = None,
+    esutd_op: Optional[str] = None,
+    esutd_val: Optional[float] = None,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
 ):
@@ -629,6 +650,8 @@ def get_records(
     is_insured: Optional[int] = None,
     ip: Optional[int] = None,
     expires_in_months: Optional[int] = None,
+    esutd_op: Optional[str] = None,
+    esutd_val: Optional[float] = None,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
 ):
@@ -871,6 +894,8 @@ def download_records(
     is_insured: Optional[int] = None,
     ip: Optional[int] = None,
     expires_in_months: Optional[int] = None,
+    esutd_op: Optional[str] = None,
+    esutd_val: Optional[float] = None,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
 ):

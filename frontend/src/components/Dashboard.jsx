@@ -155,6 +155,8 @@ const Dashboard = () => {
     contract_number: '', contract_date_from: null, contract_date_to: null,
     date_end_from: null, date_end_to: null,
     obl_name: '', rai_name: '', opf_name: '', is_insured: '', ip: '',
+    // ESUTD акт. ТД — оператор сравнения + число
+    esutd_op: 'gte', esutd_val: '',
     // Срок истечения — конкретный месяц (date_end_from/to считаем отдельно)
     expires_month: '',   // хранит date_end_from первого дня выбранного месяца
     expires_month_to: '', // хранит date_end_to последнего дня выбранного месяца
@@ -333,6 +335,11 @@ const Dashboard = () => {
     if (filters.opf_name) params.opf_name = filters.opf_name
     if (filters.is_insured !== '') params.is_insured = parseInt(filters.is_insured)
     if (filters.ip !== '') params.ip = parseInt(filters.ip)
+    // ESUTD акт. ТД: применяем только когда указано число
+    if (filters.esutd_val !== '' && filters.esutd_val != null) {
+      params.esutd_op = filters.esutd_op
+      params.esutd_val = Number(filters.esutd_val)
+    }
     // Фильтр по конкретному месяцу истечения (перекрывает date_end_from/to если заданы)
     if (filters.expires_month) {
       params.date_end_from = filters.expires_month
@@ -629,26 +636,6 @@ const Dashboard = () => {
     if (gridRef.current?.api) gridRef.current.api.setFilterModel(null)
     setFilters(EMPTY_FILTERS)
     setTimeout(() => fetchAll(1), 0)
-  }
-
-  const downloadExcel = async () => {
-    try {
-      const params = buildFilterParams()
-      const response = await api.get('/api/records/download', { params, responseType: 'blob' })
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      })
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `insurance_records_${new Date().toISOString().split('T')[0]}.xlsx`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      toast.success('Файл скачан')
-    } catch {
-      toast.error('Ошибка при скачивании')
-    }
   }
 
   // Отправка файла + опрос фоновой задачи.
@@ -1310,6 +1297,30 @@ const Dashboard = () => {
           </div>
 
           <div className="filter-group">
+            <label>ESUTD акт. ТД</label>
+            <div className="esutd-filter">
+              <select
+                value={filters.esutd_op}
+                onChange={(e) => setFilters({ ...filters, esutd_op: e.target.value })}
+                className="esutd-op"
+              >
+                <option value="gt">&gt;</option>
+                <option value="gte">&ge;</option>
+                <option value="lt">&lt;</option>
+                <option value="lte">&le;</option>
+                <option value="eq">=</option>
+              </select>
+              <input
+                type="number"
+                value={filters.esutd_val}
+                onChange={(e) => setFilters({ ...filters, esutd_val: e.target.value })}
+                placeholder="число"
+                className="esutd-val"
+              />
+            </div>
+          </div>
+
+          <div className="filter-group">
             <label>Срок истечения</label>
             <select
               value={filters.expires_month}
@@ -1349,9 +1360,6 @@ const Dashboard = () => {
           </button>
           <button onClick={resetFilters} className="reset-btn">
             Сбросить
-          </button>
-          <button onClick={downloadExcel} className="download-btn">
-            <Download size={18} /> Скачать Excel
           </button>
         </div>
       </div>

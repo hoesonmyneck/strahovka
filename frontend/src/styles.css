@@ -624,6 +624,20 @@ body {
   border-color: #667eea;
 }
 
+/* Фильтр ESUTD: оператор сравнения + число в одну строку */
+.esutd-filter {
+  display: flex;
+  gap: 8px;
+}
+.esutd-filter .esutd-op {
+  flex: 0 0 72px;
+  text-align: center;
+}
+.esutd-filter .esutd-val {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .filter-group.date-range .date-inputs {
   display: flex;
   gap: 8px;
