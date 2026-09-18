@@ -131,6 +131,7 @@ class OppvRecordResponse(BaseModel):
     id: int
     region: Optional[str] = None
     bin: Optional[str] = None
+    bin_name: Optional[str] = None
     oked_code: Optional[str] = None
     oked_name: Optional[str] = None
     age: Optional[int] = None

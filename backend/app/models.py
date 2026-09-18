@@ -115,6 +115,7 @@ class OppvRecord(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     region = Column(String(200), index=True)              # Регион
     bin = Column(String(20), index=True)                  # БИН (строка, ведущие нули)
+    bin_name = Column(String(500))                         # Наименование организации
     oked_code = Column(String(20))                         # Код ОКЭД
     oked_name = Column(String(300))                        # ОКЭД
     age = Column(Integer)                                  # Возраст

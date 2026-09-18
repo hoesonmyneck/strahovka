@@ -58,7 +58,11 @@ with engine.connect() as _conn:
         # -- ОПВР: индексы под реальные запросы -------------------------------
         # Фильтры идут подстрокой (ILIKE '%...%'), btree такое не обслуживает —
         # без триграммных индексов каждый запрос сканировал все 270к строк.
+        # Новая колонка «Наименование организации» (появилась в OPPV_SVOD_4)
+        "ALTER TABLE oppv_records ADD COLUMN IF NOT EXISTS bin_name VARCHAR(500)",
         "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+        "CREATE INDEX IF NOT EXISTS idx_oppv_bin_name_trgm "
+        "    ON oppv_records USING gin (bin_name gin_trgm_ops)",
         "CREATE INDEX IF NOT EXISTS idx_oppv_oked_name_trgm "
         "    ON oppv_records USING gin (oked_name gin_trgm_ops)",
         "CREATE INDEX IF NOT EXISTS idx_oppv_oked_name_low_trgm "
@@ -1153,11 +1157,11 @@ def upload_status(
 
 # Поля, по которым разрешена серверная сортировка/фильтрация ОПВР
 OPPV_SORT_FIELDS = {
-    'id', 'region', 'bin', 'oked_code', 'oked_name', 'age', 'gender',
+    'id', 'region', 'bin', 'bin_name', 'oked_code', 'oked_name', 'age', 'gender',
     'count', 'experience', 'fot', 'smz', 'oked_code_low', 'oked_name_low',
 }
 OPPV_TEXT_FILTERS = (
-    'region', 'bin', 'oked_code', 'oked_name', 'gender',
+    'region', 'bin', 'bin_name', 'oked_code', 'oked_name', 'gender',
     'oked_code_low', 'oked_name_low',
 )
 
@@ -1179,6 +1183,7 @@ def get_oppv(
     sort_order: Optional[str] = "asc",
     region: Optional[str] = None,
     bin: Optional[str] = None,
+    bin_name: Optional[str] = None,
     oked_code: Optional[str] = None,
     oked_name: Optional[str] = None,
     gender: Optional[str] = None,
@@ -1286,6 +1291,7 @@ def rebuild_oppv_export(wait: bool = False, only_missing: bool = False):
 def download_oppv(
     region: Optional[str] = None,
     bin: Optional[str] = None,
+    bin_name: Optional[str] = None,
     oked_code: Optional[str] = None,
     oked_name: Optional[str] = None,
     gender: Optional[str] = None,
@@ -1433,6 +1439,7 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
         OPPV_COL_ALIASES = {
             'region': ['Регион'],
             'bin': ['БИН'],
+            'bin_name': ['Наименование организации', 'Наименование', 'Название компании'],
             'oked_code': ['Код ОКЭД'],
             'oked_name': ['ОКЭД'],
             'oked_code_low': ['Код ОКЭД (нижний уровень)', 'Код ОКЭД'],
@@ -1475,6 +1482,7 @@ def _run_oppv_upload(tmp_path: str, job_id: str):
                 records.append({
                     'region': s_str(cell(row, 'region')),
                     'bin': s_str(cell(row, 'bin')),
+                    'bin_name': s_str(cell(row, 'bin_name')),
                     'oked_code': s_str(cell(row, 'oked_code')),
                     'oked_name': s_str(cell(row, 'oked_name')),
                     'age': s_int(cell(row, 'age')),

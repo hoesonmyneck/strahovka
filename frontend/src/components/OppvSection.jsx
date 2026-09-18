@@ -15,7 +15,7 @@ const fmtNumber = (v, decimals = 0) => {
 }
 
 const EMPTY = {
-  region: '', bin: '', gender: '', oked_name_low: '',
+  region: '', bin: '', bin_name: '', gender: '', oked_name_low: '',
 }
 
 // ─── Раздел «Пенсионные взносы работников» (ОПВР) ────────────────────────────
@@ -33,6 +33,7 @@ const OppvSection = () => {
   const columnDefs = useMemo(() => [
     { field: 'region', headerName: 'Регион', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 160, pinned: 'left' },
     { field: 'bin', headerName: 'БИН', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 150, pinned: 'left' },
+    { field: 'bin_name', headerName: 'Наименование организации', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 320, pinned: 'left' },
     { field: 'oked_code_low', headerName: 'Код ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'oked_name_low', headerName: 'ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 300 },
     { field: 'age', headerName: 'Возраст', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
@@ -133,6 +134,11 @@ const OppvSection = () => {
             <label>БИН</label>
             <input type="text" value={filters.bin} placeholder="Поиск по БИН..."
               onChange={(e) => setFilters({ ...filters, bin: e.target.value })} />
+          </div>
+          <div className="filter-group">
+            <label>Наименование организации</label>
+            <input type="text" value={filters.bin_name} placeholder="Поиск по названию..."
+              onChange={(e) => setFilters({ ...filters, bin_name: e.target.value })} />
           </div>
           <div className="filter-group">
             <label>Пол</label>
