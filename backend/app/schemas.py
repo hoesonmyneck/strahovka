@@ -100,6 +100,7 @@ class UserResponse(UserBase):
     appvr_access: int = 0
     iin: Optional[str] = None
     eds_disabled: int = 0
+    full_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -127,6 +128,7 @@ class TokenData(BaseModel):
 class LoginLogResponse(BaseModel):
     id: int
     username: str
+    full_name: Optional[str] = None
     role: Optional[str] = None
     region: Optional[str] = None
     ip_address: Optional[str] = None

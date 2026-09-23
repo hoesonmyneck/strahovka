@@ -32,6 +32,9 @@ with engine.connect() as _conn:
         # ЭЦП-вход: ИИН аккаунта + флаг отключения ЭЦП
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS iin VARCHAR(32)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS eds_disabled INTEGER DEFAULT 0",
+        # ФИО из ЭЦП (заполняется автоматически при входе)
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(300)",
+        "ALTER TABLE login_logs ADD COLUMN IF NOT EXISTS full_name VARCHAR(300)",
         # ИИН уникален, но NULL допускаем у нескольких (частичный уникальный индекс)
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_iin ON users (iin) WHERE iin IS NOT NULL",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
@@ -527,6 +530,7 @@ def _log_login(request: Request, user: models.User, db: Session):
         ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
         db.add(models.LoginLog(
             username=user.username,
+            full_name=user.full_name,
             role=user.role,
             region=user.region,
             ip_address=ip,
@@ -595,6 +599,11 @@ def login_2fa(request: Request, data: schemas.Login2faRequest, db: Session = Dep
             status_code=401,
             detail=f"ИИН в ЭЦП ({info['iin']}) не совпадает с аккаунтом",
         )
+
+    # ФИО берём из сертификата и сохраняем в аккаунт (вручную не вводим)
+    if info.get("full_name"):
+        user.full_name = info["full_name"]
+        db.commit()
 
     _log_login(request, user, db)
     return _issue_token(user)

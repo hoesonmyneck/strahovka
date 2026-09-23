@@ -153,6 +153,8 @@ class User(Base):
     # ЭЦП отключена, аккаунт заходит только по логину/паролю.
     iin = Column(String(32), unique=True, nullable=True, index=True)
     eds_disabled = Column(Integer, default=0)
+    # ФИО из сертификата ЭЦП — заполняется автоматически при входе, вручную не вводим
+    full_name = Column(String(300), nullable=True)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -176,6 +178,7 @@ class LoginLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), index=True)
+    full_name = Column(String(300), nullable=True)   # ФИО из ЭЦП на момент входа
     role = Column(String(20))
     region = Column(String(200), nullable=True)
     ip_address = Column(String(64), nullable=True)

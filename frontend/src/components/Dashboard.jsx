@@ -984,12 +984,13 @@ const Dashboard = () => {
 
                 <table className="users-table">
                   <thead>
-                    <tr><th>Логин</th><th>Роль</th><th>Регион</th><th>ИИН (ЭЦП)</th><th>Без ЭЦП</th><th>Доступ к ОПВР</th><th></th></tr>
+                    <tr><th>Логин</th><th>ФИО (из ЭЦП)</th><th>Роль</th><th>Регион</th><th>ИИН (ЭЦП)</th><th>Без ЭЦП</th><th>Доступ к ОПВР</th><th></th></tr>
                   </thead>
                   <tbody>
                     {usersList.map(u => (
                       <tr key={u.id}>
                         <td>{u.username}</td>
+                        <td>{u.full_name || '—'}</td>
                         <td>{u.role}</td>
                         <td>{u.region || '— все регионы —'}</td>
                         <td style={{ textAlign: 'center' }}>
@@ -1221,7 +1222,7 @@ const Dashboard = () => {
                     {logs.map(l => (
                       <tr key={l.id}>
                         <td>{new Date(l.logged_at).toLocaleString('ru-RU')}</td>
-                        <td><b>{l.username}</b></td>
+                        <td><b>{l.username}</b>{l.full_name ? ` (${l.full_name})` : ''}</td>
                         <td>{l.role}</td>
                         <td>{l.region || '— все регионы —'}</td>
                         <td>{l.ip_address || '—'}</td>
