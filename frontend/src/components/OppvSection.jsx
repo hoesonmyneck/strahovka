@@ -76,8 +76,9 @@ const OppvSection = () => {
       setRowData(res.data.items)
       setTotal(res.data.total)
       setPage(toPage)
-    } catch {
-      toast.error('Ошибка загрузки данных ОПВР')
+    } catch (e) {
+      // 403 — нет доступа к разделу (задумано), не показываем ошибку
+      if (e.response?.status !== 403) toast.error('Ошибка загрузки данных ОПВР')
     } finally {
       setIsLoading(false)
     }

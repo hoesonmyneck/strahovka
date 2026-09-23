@@ -82,18 +82,24 @@ class UserBase(BaseModel):
     role: str = "user"
     region: Optional[str] = None
     appvr_access: int = 0
+    iin: Optional[str] = None
+    eds_disabled: int = 0
 
 class UserCreate(UserBase):
     password: str
 
 class UserUpdate(BaseModel):
     appvr_access: Optional[int] = None
+    iin: Optional[str] = None
+    eds_disabled: Optional[int] = None
 
 class UserResponse(UserBase):
     id: int
     is_active: int
     region: Optional[str] = None
     appvr_access: int = 0
+    iin: Optional[str] = None
+    eds_disabled: int = 0
 
     class Config:
         from_attributes = True
@@ -101,6 +107,17 @@ class UserResponse(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class LoginResponse(BaseModel):
+    # Либо сразу токен (вход по паролю), либо запрос ЭЦП-подписи (2FA)
+    requires_2fa: bool = False
+    access_token: Optional[str] = None
+    token_type: Optional[str] = None
+    challenge: Optional[str] = None
+
+class Login2faRequest(BaseModel):
+    challenge: str
+    signature: str
 
 class TokenData(BaseModel):
     username: Optional[str] = None

@@ -17,6 +17,11 @@ frontend/tmp/
 uploads/
 postgres_data/
 
+# TLS-сертификаты (приватные ключи) — не коммитим
+certs/
+*.pem
+*.key
+
 # IDE
 .vscode/
 .idea/

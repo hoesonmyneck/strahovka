@@ -12,20 +12,232 @@ body {
 
 /* Login */
 .login-container {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
   background: #ffffff;
+  overflow: hidden;
 }
 
 .login-box {
+  position: relative;
+  z-index: 1;
   background: white;
   padding: 40px;
   border-radius: 12px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.2);
   width: 100%;
   max-width: 400px;
+}
+
+/* ─── Анимированный фон авторизации (декоративный «живой дашборд») ─────────── */
+.auth-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Мягкие цветные пятна */
+.auth-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  opacity: .38;
+  will-change: transform;
+}
+.auth-blob--1 {
+  width: 440px; height: 440px; left: -130px; top: -110px;
+  background: #a9b6f5;
+  animation: auth-blob-float 19s ease-in-out infinite;
+}
+.auth-blob--2 {
+  width: 500px; height: 500px; right: -150px; bottom: -150px;
+  background: #d0b8f0;
+  animation: auth-blob-float 24s ease-in-out infinite reverse;
+}
+
+/* Плавающие карточки-графики */
+.auth-card {
+  position: absolute;
+  background: rgba(255, 255, 255, .62);
+  border: 1px solid rgba(102, 126, 234, .16);
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgba(102, 126, 234, .14);
+  backdrop-filter: blur(2px);
+  padding: 14px;
+  will-change: transform;
+}
+.auth-card svg { display: block; width: 100%; height: 100%; }
+
+.auth-card--bars { top: 13%; left: 7%;  width: 158px; height: 104px; animation: auth-float-a 11s ease-in-out infinite; }
+.auth-card--line { bottom: 15%; left: 10%; width: 184px; height: 108px; animation: auth-float-b 13s ease-in-out infinite; }
+.auth-card--ring { top: 17%; right: 8%; width: 112px; height: 112px; animation: auth-float-b 12s ease-in-out infinite; }
+.auth-card--kpi  { bottom: 17%; right: 10%; width: 150px; height: 96px; animation: auth-float-a 14s ease-in-out infinite; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+
+/* Столбчатый график */
+.auth-card .axis { stroke: rgba(102, 126, 234, .2); stroke-width: 1.5; }
+.auth-card .bar {
+  fill: #667eea;
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: auth-bar 3.2s ease-in-out infinite;
+}
+.auth-card .bar.b2 { fill: #7c8cf0; animation-delay: .25s; }
+.auth-card .bar.b3 { fill: #667eea; animation-delay: .5s; }
+.auth-card .bar.b4 { fill: #8a6fd6; animation-delay: .75s; }
+.auth-card .bar.b5 { fill: #7c8cf0; animation-delay: 1s; }
+
+/* Линейный график */
+.auth-card .line-path {
+  stroke: #667eea; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 320; stroke-dashoffset: 320;
+  animation: auth-line-draw 7s ease-in-out infinite;
+}
+.auth-card .line-area {
+  fill: rgba(102, 126, 234, .14); opacity: 0;
+  animation: auth-area-fade 7s ease-in-out infinite;
+}
+.auth-card .line-dot { fill: #764ba2; opacity: 0; }
+.auth-card .line-dot.d1 { animation: auth-dot 7s ease-in-out infinite; animation-delay: 2.4s; }
+.auth-card .line-dot.d2 { animation: auth-dot 7s ease-in-out infinite; animation-delay: 3.4s; }
+
+/* Кольцо */
+.auth-card .ring-bg { fill: none; stroke: rgba(102, 126, 234, .16); stroke-width: 9; }
+.auth-card .ring-fg {
+  fill: none; stroke: #764ba2; stroke-width: 9; stroke-linecap: round;
+  stroke-dasharray: 188.5; stroke-dashoffset: 188.5;
+  transform: rotate(-90deg); transform-origin: center;
+  animation: auth-ring 6s ease-in-out infinite;
+}
+
+/* KPI-плитка */
+.auth-card--kpi .kpi-value { font-size: 30px; font-weight: 700; color: #4a4a6a; line-height: 1; }
+.auth-card--kpi .kpi-pct { font-size: 16px; color: #8a6fd6; margin-left: 2px; }
+.auth-card--kpi .kpi-spark { display: flex; align-items: flex-end; gap: 5px; height: 26px; }
+.auth-card--kpi .kpi-spark i {
+  flex: 1; background: #667eea;
+  border-radius: 3px; transform-origin: bottom;
+  animation: auth-spark 2.6s ease-in-out infinite;
+}
+.auth-card--kpi .kpi-spark .s1 { height: 40%; animation-delay: 0s; }
+.auth-card--kpi .kpi-spark .s2 { height: 70%; animation-delay: .18s; }
+.auth-card--kpi .kpi-spark .s3 { height: 50%; animation-delay: .36s; }
+.auth-card--kpi .kpi-spark .s4 { height: 90%; animation-delay: .54s; }
+.auth-card--kpi .kpi-spark .s5 { height: 60%; animation-delay: .72s; }
+.auth-card--kpi .kpi-spark .s6 { height: 80%; animation-delay: .9s; }
+
+/* Позиции новых карточек */
+.auth-card--pie   { top: 6%;  left: 39%; width: 104px; height: 104px; animation: auth-float-b 15s ease-in-out infinite; }
+.auth-card--area  { bottom: 7%; left: 37%; width: 190px; height: 112px; animation: auth-float-a 16s ease-in-out infinite; }
+.auth-card--prog  { top: 42%; left: 3%;  width: 150px; height: 84px; animation: auth-float-a 12s ease-in-out infinite; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+.auth-card--gauge { top: 45%; right: 3%; width: 140px; height: 96px; animation: auth-float-b 13s ease-in-out infinite; }
+
+/* Круговая диаграмма */
+.auth-card .pie-rot { transform-origin: center; animation: auth-pie-spin 26s linear infinite; }
+.auth-card .pie-seg {
+  fill: none; stroke-width: 12;
+  transform: rotate(-90deg); transform-origin: center;
+}
+.auth-card .pie-seg.p1 { stroke: #667eea; stroke-dasharray: 85 103.5;  stroke-dashoffset: 0; }
+.auth-card .pie-seg.p2 { stroke: #8a6fd6; stroke-dasharray: 56.5 132;  stroke-dashoffset: -85; }
+.auth-card .pie-seg.p3 { stroke: #b3a0e6; stroke-dasharray: 47 141.5;  stroke-dashoffset: -141.5; }
+
+/* Двойной график с областями */
+.auth-card .area2 { opacity: 0; animation: auth-area-fade 8s ease-in-out infinite; }
+.auth-card .a-back  { fill: rgba(138, 111, 214, .16); }
+.auth-card .a-front { fill: rgba(102, 126, 234, .18); animation-delay: .4s; }
+.auth-card .area2-line { stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 340; stroke-dashoffset: 340; animation: auth-line-draw 8s ease-in-out infinite; }
+.auth-card .l-back  { stroke: #8a6fd6; }
+.auth-card .l-front { stroke: #667eea; animation-delay: .4s; }
+
+/* Горизонтальные прогресс-бары */
+.auth-card--prog .prog-row { height: 12px; background: rgba(102, 126, 234, .12); border-radius: 6px; overflow: hidden; }
+.auth-card--prog .prog-fill { display: block; height: 100%; border-radius: 6px; background: #667eea; }
+.auth-card--prog .pf1 { width: 82%; animation: auth-prog 4.5s ease-in-out infinite; }
+.auth-card--prog .pf2 { width: 64%; background: #8a6fd6; animation: auth-prog 4.5s ease-in-out infinite .5s; }
+.auth-card--prog .pf3 { width: 48%; background: #7c8cf0; animation: auth-prog 4.5s ease-in-out infinite 1s; }
+
+/* Спидометр */
+.auth-card .gauge-bg { stroke: rgba(102, 126, 234, .16); stroke-width: 8; stroke-linecap: round; }
+.auth-card .gauge-fg {
+  stroke: #667eea; stroke-width: 8; stroke-linecap: round;
+  stroke-dasharray: 126; stroke-dashoffset: 126;
+  animation: auth-gauge-arc 5s ease-in-out infinite;
+}
+.auth-card .gauge-needle {
+  stroke: #764ba2; stroke-width: 3; stroke-linecap: round;
+  transform-origin: 50px 54px;
+  animation: auth-gauge-needle 5s ease-in-out infinite;
+}
+.auth-card .gauge-hub { fill: #764ba2; }
+
+@keyframes auth-blob-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(30px, 24px) scale(1.08); }
+}
+@keyframes auth-float-a {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-18px) rotate(-2deg); }
+}
+@keyframes auth-float-b {
+  0%, 100% { transform: translateY(0) rotate(2deg); }
+  50%      { transform: translateY(-14px) rotate(2deg); }
+}
+@keyframes auth-bar {
+  0%, 100% { transform: scaleY(.6); }
+  50%      { transform: scaleY(1); }
+}
+@keyframes auth-line-draw {
+  0%   { stroke-dashoffset: 320; }
+  45%  { stroke-dashoffset: 0; }
+  80%  { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 320; }
+}
+@keyframes auth-area-fade {
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
+}
+@keyframes auth-dot {
+  0%, 100% { opacity: 0; transform: scale(.4); }
+  55%, 80% { opacity: 1; transform: scale(1); }
+}
+@keyframes auth-ring {
+  0%   { stroke-dashoffset: 188.5; }
+  55%  { stroke-dashoffset: 40; }
+  100% { stroke-dashoffset: 188.5; }
+}
+@keyframes auth-spark {
+  0%, 100% { transform: scaleY(.7); }
+  50%      { transform: scaleY(1); }
+}
+@keyframes auth-pie-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes auth-prog {
+  0%   { transform: scaleX(0); transform-origin: left; }
+  55%  { transform: scaleX(1); transform-origin: left; }
+  80%  { transform: scaleX(1); transform-origin: left; }
+  100% { transform: scaleX(0); transform-origin: left; }
+}
+@keyframes auth-gauge-arc {
+  0%   { stroke-dashoffset: 126; }
+  50%  { stroke-dashoffset: 46; }
+  100% { stroke-dashoffset: 126; }
+}
+@keyframes auth-gauge-needle {
+  0%, 100% { transform: rotate(-78deg); }
+  50%      { transform: rotate(78deg); }
+}
+
+/* На узких экранах фон-карточки прячем, чтобы не мешали форме */
+@media (max-width: 900px) {
+  .auth-card { display: none; }
+  .auth-card--kpi { display: none; }
 }
 
 .login-box h1 {
@@ -65,7 +277,7 @@ body {
 .login-box button {
   width: 100%;
   padding: 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #667eea;
   color: white;
   border: none;
   border-radius: 8px;
@@ -872,7 +1084,43 @@ body {
   border-radius: 6px;
   font-size: 13px;
   min-width: 160px;
+  height: 36px;
+  box-sizing: border-box;
 }
+
+/* Чекбокс «Без ЭЦП» оформлен как поле, выровнен по высоте с инпутами */
+.user-create-form .eds-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #444;
+  white-space: nowrap;
+  cursor: pointer;
+  background: #fafbfc;
+}
+.user-create-form .eds-toggle input {
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Кнопка «Создать» — та же высота, что и поля */
+.user-create-form .create-user-btn {
+  height: 36px;
+  padding: 0 20px;
+  font-size: 13px;
+}
+
+.user-create-form .user-mgmt-msg { margin-left: 4px; font-size: 13px; }
+.user-create-form .user-mgmt-msg.ok  { color: #1a7f37; }
+.user-create-form .user-mgmt-msg.err { color: #c0392b; }
 
 .users-table {
   width: 100%;
@@ -907,7 +1155,7 @@ body {
 .loading-bar-inner {
   height: 100%;
   width: 40%;
-  background: linear-gradient(90deg, #4a6fa5, #667eea);
+  background: #667eea;
   border-radius: 2px;
   animation: loading-slide 1.2s ease-in-out infinite;
 }
@@ -1031,4 +1279,65 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   .dashboard, .login-box, .logs-overlay, .logs-modal, .metric-card { animation: none; }
   .login-container { transition: none; }
+  .auth-blob, .auth-card, .auth-card * { animation: none !important; }
+}
+
+/* ─── Логотип на странице входа (прорисовка контур → заливка) ─────────────── */
+.auth-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 22px;
+}
+#auth-logo {
+  display: block;
+  width: 228px;
+  height: auto;
+  margin: 2px auto;
+  overflow: visible;   /* чтобы обводка по краям не обрезалась */
+}
+
+/* ─── Шаг подтверждения входа по ЭЦП ──────────────────────────────────────── */
+.eds-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 8px 0;
+}
+.eds-icon { color: #667eea; }
+.eds-title { font-size: 17px; font-weight: 600; color: #333; margin: 0; }
+.eds-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #555;
+  font-size: 14px;
+}
+.spinner--dark {
+  border: 2px solid rgba(102, 126, 234, .3);
+  border-top-color: #667eea;
+  margin-right: 0;
+}
+.eds-error {
+  color: #c0392b;
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.4;
+}
+.eds-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto !important;
+  padding: 10px 18px !important;
+}
+.eds-back {
+  width: auto !important;
+  background: transparent !important;
+  color: #667eea !important;
+  padding: 6px 10px !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
 }

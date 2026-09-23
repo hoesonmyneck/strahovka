@@ -148,6 +148,11 @@ class User(Base):
     role = Column(String(20), default="user")  # admin или user
     region = Column(String(200), nullable=True)  # None = без ограничений, иначе = значение obl_name
     appvr_access = Column(Integer, default=0)  # 1 = доступ к разделу ОПВР (Пенсионные взносы)
+    # ЭЦП-аутентификация (второй фактор). iin — ИИН, привязанный админом; вход
+    # по ЭЦП разрешён только с сертификатом с таким же ИИН. eds_disabled=1 —
+    # ЭЦП отключена, аккаунт заходит только по логину/паролю.
+    iin = Column(String(32), unique=True, nullable=True, index=True)
+    eds_disabled = Column(Integer, default=0)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 

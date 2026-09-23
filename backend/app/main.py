@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import io
 import os
+import re
 import tempfile
 import shutil
 import uuid
@@ -18,7 +19,7 @@ import time
 import openpyxl
 import xlsxwriter
 
-from . import models, schemas, database, auth
+from . import models, schemas, database, auth, eds
 from .database import SessionLocal, engine
 
 models.Base.metadata.create_all(bind=engine)
@@ -28,6 +29,11 @@ with engine.connect() as _conn:
     for _sql in [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS appvr_access INTEGER DEFAULT 0",
+        # ЭЦП-вход: ИИН аккаунта + флаг отключения ЭЦП
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS iin VARCHAR(32)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS eds_disabled INTEGER DEFAULT 0",
+        # ИИН уникален, но NULL допускаем у нескольких (частичный уникальный индекс)
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_iin ON users (iin) WHERE iin IS NOT NULL",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         """CREATE TABLE IF NOT EXISTS app_settings (
@@ -512,7 +518,43 @@ def rebuild_company_summary_safe():
 SYSTEM_ACCOUNTS = ("admin", "user")
 
 
-@app.post("/api/auth/login", response_model=schemas.Token)
+def _log_login(request: Request, user: models.User, db: Session):
+    """Журналирует вход. Ошибка логирования не должна блокировать вход."""
+    if user.username in SYSTEM_ACCOUNTS:
+        return
+    try:
+        fwd = request.headers.get("x-forwarded-for")
+        ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
+        db.add(models.LoginLog(
+            username=user.username,
+            role=user.role,
+            region=user.region,
+            ip_address=ip,
+            user_agent=(request.headers.get("user-agent") or "")[:500] or None,
+            logged_at=datetime.now(),
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Failed to write login log: {e}")
+
+
+def _issue_token(user: models.User) -> dict:
+    access_token = auth.create_access_token(data={"sub": user.username, "role": user.role})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+def _requires_eds(user: models.User) -> bool:
+    """ЭЦП обязательна для не-админов, у которых привязан ИИН и не отключена ЭЦП.
+    admin, аккаунты без ИИН и аккаунты с eds_disabled=1 входят по паролю."""
+    return (
+        user.role != "admin"
+        and not user.eds_disabled
+        and bool(user.iin)
+    )
+
+
+@app.post("/api/auth/login", response_model=schemas.LoginResponse)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     user = auth.authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -522,28 +564,40 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Журналируем вход. Ошибка логирования не должна блокировать вход.
-    if user.username not in SYSTEM_ACCOUNTS:
-        try:
-            fwd = request.headers.get("x-forwarded-for")
-            ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
-            db.add(models.LoginLog(
-                username=user.username,
-                role=user.role,
-                region=user.region,
-                ip_address=ip,
-                user_agent=(request.headers.get("user-agent") or "")[:500] or None,
-                logged_at=datetime.now(),
-            ))
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print(f"Failed to write login log: {e}")
+    # Второй фактор — ЭЦП. Токен пока НЕ выдаём и вход не журналируем: это
+    # произойдёт после успешной проверки подписи в /api/auth/login-2fa.
+    if _requires_eds(user):
+        return {"requires_2fa": True, "challenge": eds.create_challenge(user.id)}
 
-    access_token = auth.create_access_token(
-        data={"sub": user.username, "role": user.role}
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    _log_login(request, user, db)
+    return {"requires_2fa": False, **_issue_token(user)}
+
+
+@app.post("/api/auth/login-2fa", response_model=schemas.Token)
+def login_2fa(request: Request, data: schemas.Login2faRequest, db: Session = Depends(database.get_db)):
+    # 1. challenge → uid
+    try:
+        payload = eds.decode_challenge(data.challenge)
+    except eds.EdsError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    user = db.query(models.User).filter(models.User.id == payload["uid"]).first()
+    if not user or not user.is_active or not user.iin:
+        raise HTTPException(status_code=401, detail="Пользователь недоступен для входа по ЭЦП")
+
+    # 2. Разбор подписи и сверка ИИН
+    try:
+        info = eds.verify_eds_signature(data.challenge, data.signature)
+    except eds.EdsError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    if info["iin"] != user.iin:
+        raise HTTPException(
+            status_code=401,
+            detail=f"ИИН в ЭЦП ({info['iin']}) не совпадает с аккаунтом",
+        )
+
+    _log_login(request, user, db)
+    return _issue_token(user)
 
 
 @app.get("/api/auth/me", response_model=schemas.UserResponse)
@@ -1612,6 +1666,28 @@ def list_users(
     return db.query(models.User).order_by(models.User.id).all()
 
 
+def _normalize_iin(raw):
+    """Пустая строка/None → None; иначе ровно 12 цифр, иначе ошибка 400."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if s == "":
+        return None
+    if not re.fullmatch(r"\d{12}", s):
+        raise HTTPException(400, "ИИН должен состоять ровно из 12 цифр")
+    return s
+
+
+def _check_iin_unique(db, iin, exclude_user_id=None):
+    if not iin:
+        return
+    q = db.query(models.User).filter(models.User.iin == iin)
+    if exclude_user_id is not None:
+        q = q.filter(models.User.id != exclude_user_id)
+    if q.first():
+        raise HTTPException(400, "Этот ИИН уже привязан к другому аккаунту")
+
+
 @app.post("/api/users", response_model=schemas.UserResponse)
 def create_user(
     data: schemas.UserCreate,
@@ -1620,12 +1696,16 @@ def create_user(
 ):
     if db.query(models.User).filter(models.User.username == data.username).first():
         raise HTTPException(400, "Пользователь с таким логином уже существует")
+    iin = _normalize_iin(data.iin)
+    _check_iin_unique(db, iin)
     user = models.User(
         username=data.username,
         hashed_password=auth.get_password_hash(data.password),
         role=data.role,
         region=data.region,
         appvr_access=1 if data.appvr_access else 0,
+        iin=iin,
+        eds_disabled=1 if data.eds_disabled else 0,
         is_active=1,
     )
     db.add(user)
@@ -1646,6 +1726,13 @@ def update_user(
         raise HTTPException(404, "Пользователь не найден")
     if data.appvr_access is not None:
         user.appvr_access = 1 if data.appvr_access else 0
+    if data.eds_disabled is not None:
+        user.eds_disabled = 1 if data.eds_disabled else 0
+    # iin присылается только когда админ его редактирует; "" → отвязать ИИН
+    if data.iin is not None:
+        iin = _normalize_iin(data.iin)
+        _check_iin_unique(db, iin, exclude_user_id=user.id)
+        user.iin = iin
     db.commit()
     db.refresh(user)
     return user

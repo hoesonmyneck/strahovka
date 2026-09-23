@@ -184,7 +184,7 @@ const Dashboard = () => {
 
   // ─── Управление пользователями (только admin) ─────────────────────────────
   const [usersList, setUsersList] = useState([])
-  const [newUser, setNewUser] = useState({ username: '', password: '', region: '' })
+  const [newUser, setNewUser] = useState({ username: '', password: '', region: '', iin: '', eds_disabled: false })
   const [userMgmtMsg, setUserMgmtMsg] = useState('')
 
   // ─── Админ-панель (вкладки: пользователи / загрузка / логи) ───────────────
@@ -473,9 +473,20 @@ const Dashboard = () => {
       setUserMgmtMsg('Заполните все поля')
       return
     }
+    if (newUser.iin && !/^\d{12}$/.test(newUser.iin.trim())) {
+      setUserMgmtMsg('ИИН должен состоять из 12 цифр')
+      return
+    }
     try {
-      await api.post('/api/users', { ...newUser, role: 'user', region: newUser.region || null })
-      setNewUser({ username: '', password: '', region: '' })
+      await api.post('/api/users', {
+        username: newUser.username,
+        password: newUser.password,
+        role: 'user',
+        region: newUser.region || null,
+        iin: newUser.iin.trim() || null,
+        eds_disabled: newUser.eds_disabled ? 1 : 0,
+      })
+      setNewUser({ username: '', password: '', region: '', iin: '', eds_disabled: false })
       setUserMgmtMsg('Пользователь создан')
       fetchUsers()
     } catch (e) {
@@ -730,6 +741,36 @@ const Dashboard = () => {
     }
   }
 
+  // Отключить/включить вход по ЭЦП для аккаунта
+  const toggleEds = async (u) => {
+    try {
+      await api.patch(`/api/users/${u.id}`, { eds_disabled: u.eds_disabled ? 0 : 1 })
+      fetchUsers()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Ошибка')
+    }
+  }
+
+  // ИИН аккаунта: редактируется прямо в таблице, сохраняется по потере фокуса/Enter
+  const [iinDraft, setIinDraft] = useState({})   // { [userId]: 'строка' }
+
+  const saveIin = async (u) => {
+    const raw = (iinDraft[u.id] ?? u.iin ?? '')
+    const val = raw.trim()
+    if (val === (u.iin || '')) return          // не изменилось — не дёргаем сервер
+    if (val && !/^\d{12}$/.test(val)) {
+      toast.error('ИИН должен состоять из 12 цифр')
+      return
+    }
+    try {
+      await api.patch(`/api/users/${u.id}`, { iin: val })
+      setIinDraft((d) => { const n = { ...d }; delete n[u.id]; return n })
+      fetchUsers()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Ошибка')
+    }
+  }
+
   const totalPages = Math.ceil(totalRecords / pageSize)
   const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchAll(page) }
 
@@ -920,15 +961,30 @@ const Dashboard = () => {
                     value={newUser.password}
                     onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                   />
-                  <button onClick={createRegionalUser} className="apply-btn" style={{ padding: '8px 16px' }}>
+                  <input
+                    type="text"
+                    placeholder="ИИН (12 цифр, для ЭЦП)"
+                    value={newUser.iin}
+                    maxLength={12}
+                    onChange={(e) => setNewUser({ ...newUser, iin: e.target.value.replace(/\D/g, '') })}
+                  />
+                  <label className="eds-toggle" title="Аккаунт сможет входить без ЭЦП, только по логину и паролю">
+                    <input
+                      type="checkbox"
+                      checked={newUser.eds_disabled}
+                      onChange={(e) => setNewUser({ ...newUser, eds_disabled: e.target.checked })}
+                    />
+                    Без ЭЦП
+                  </label>
+                  <button onClick={createRegionalUser} className="apply-btn create-user-btn">
                     Создать
                   </button>
-                  {userMgmtMsg && <span style={{ marginLeft: 8, color: userMgmtMsg.includes('создан') ? 'green' : 'red' }}>{userMgmtMsg}</span>}
+                  {userMgmtMsg && <span className={`user-mgmt-msg ${userMgmtMsg.includes('создан') ? 'ok' : 'err'}`}>{userMgmtMsg}</span>}
                 </div>
 
                 <table className="users-table">
                   <thead>
-                    <tr><th>Логин</th><th>Роль</th><th>Регион</th><th>Доступ к ОПВР</th><th></th></tr>
+                    <tr><th>Логин</th><th>Роль</th><th>Регион</th><th>ИИН (ЭЦП)</th><th>Без ЭЦП</th><th>Доступ к ОПВР</th><th></th></tr>
                   </thead>
                   <tbody>
                     {usersList.map(u => (
@@ -936,6 +992,35 @@ const Dashboard = () => {
                         <td>{u.username}</td>
                         <td>{u.role}</td>
                         <td>{u.region || '— все регионы —'}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          {u.role === 'admin' ? (
+                            <span style={{ color: '#999' }}>—</span>
+                          ) : (
+                            <input
+                              type="text"
+                              value={iinDraft[u.id] ?? u.iin ?? ''}
+                              placeholder="12 цифр"
+                              maxLength={12}
+                              onChange={(e) => setIinDraft({ ...iinDraft, [u.id]: e.target.value.replace(/\D/g, '') })}
+                              onBlur={() => saveIin(u)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              style={{ width: 120, fontSize: 13, padding: '3px 6px', borderRadius: 4, border: '1px solid #ccc', textAlign: 'center' }}
+                            />
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {u.role === 'admin' ? (
+                            <span style={{ color: '#999' }} title="Админ всегда входит без ЭЦП">—</span>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={!!u.eds_disabled}
+                              onChange={() => toggleEds(u)}
+                              title="Разрешить вход без ЭЦП (только логин/пароль)"
+                              style={{ width: 18, height: 18, cursor: 'pointer' }}
+                            />
+                          )}
+                        </td>
                         <td style={{ textAlign: 'center' }}>
                           {u.role === 'admin' ? (
                             <span title="Админам доступ открыт всегда">✓</span>
@@ -1172,7 +1257,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {section === 'oppv' && <OppvSection />}
+      {section === 'oppv' && canAppvr && <OppvSection />}
 
       {section === 'insurance' && (
       <>

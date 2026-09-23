@@ -28,22 +28,34 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
+  const applyToken = async (access_token) => {
+    localStorage.setItem('token', access_token)
+    api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
+    await fetchUser()
+  }
+
+  // Шаг 1: логин/пароль. Возвращает {requires2fa:true, challenge} для аккаунтов
+  // с ЭЦП, либо {requires2fa:false} когда токен уже получен (вход по паролю).
   const login = async (username, password) => {
     const formData = new URLSearchParams()
     formData.append('username', username)
     formData.append('password', password)
 
-    const response = await api.post('/api/auth/login', formData, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+    const { data } = await api.post('/api/auth/login', formData, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
 
-    const { access_token } = response.data
-    localStorage.setItem('token', access_token)
-    api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
-    
-    await fetchUser()
+    if (data.requires_2fa) {
+      return { requires2fa: true, challenge: data.challenge }
+    }
+    await applyToken(data.access_token)
+    return { requires2fa: false }
+  }
+
+  // Шаг 2: подпись challenge через ЭЦП уже получена — меняем её на токен.
+  const loginWith2fa = async (challenge, signature) => {
+    const { data } = await api.post('/api/auth/login-2fa', { challenge, signature })
+    await applyToken(data.access_token)
     return true
   }
 
@@ -58,7 +70,7 @@ export const AuthProvider = ({ children }) => {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAdmin, loading }}>
+    <AuthContext.Provider value={{ user, login, loginWith2fa, logout, isAdmin, loading }}>
       {children}
     </AuthContext.Provider>
   )

@@ -10,7 +10,10 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // 401 на самих эндпоинтах входа (неверный пароль, неудачная ЭЦП) обрабатывает
+    // форма входа — не выкидываем и не редиректим, иначе теряется текст ошибки.
+    const url = error.config?.url || ''
+    if (error.response?.status === 401 && !url.includes('/api/auth/')) {
       localStorage.removeItem('token')
       window.location.href = '/login'
     }
