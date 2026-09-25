@@ -160,6 +160,7 @@ const OppvSection = () => {
               onChange={(v) => setFilters({ ...filters, oked_name_low: v })}
               placeholder="Выберите или введите..."
               openOnFocus
+              maxSuggestions={2000}
             />
           </div>
         </div>

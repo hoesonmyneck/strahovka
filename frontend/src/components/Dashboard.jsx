@@ -264,7 +264,7 @@ const Dashboard = () => {
     { field: 'total_employees_count', headerName: 'Всего сотр.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 130 },
     { field: 'kol_12mes', headerName: 'Кол-во 12 мес.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'fot_12mes', headerName: 'ФОТ 12 мес.', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 140 },
-    { field: 'esutd_akt_td', headerName: 'ESUTD акт. ТД', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 145 },
+    { field: 'esutd_akt_td', headerName: 'Активные трудовые договора', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 160 },
     // Местоположение
     { field: 'obl_name', headerName: 'Область', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 180 },
     { field: 'rai_name', headerName: 'Район', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 180 },
@@ -1383,7 +1383,7 @@ const Dashboard = () => {
           </div>
 
           <div className="filter-group">
-            <label>ESUTD акт. ТД</label>
+            <label>Активные трудовые договора</label>
             <div className="esutd-filter">
               <select
                 value={filters.esutd_op}

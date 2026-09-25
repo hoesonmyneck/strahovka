@@ -4,7 +4,7 @@ import api from '../utils/api.js'
 // Поле с автодополнением / справочник.
 //  - endpoint: откуда брать значения (по умолчанию /api/suggestions)
 //  - openOnFocus: показывать список сразу при клике (режим «справочник»)
-const SuggestInput = ({ field, value, onChange, placeholder, endpoint = '/api/suggestions', openOnFocus = false }) => {
+const SuggestInput = ({ field, value, onChange, placeholder, endpoint = '/api/suggestions', openOnFocus = false, maxSuggestions = 20 }) => {
   const [inputValue, setInputValue] = useState(value)
   const [suggestions, setSuggestions] = useState([])
   const [open, setOpen] = useState(false)
@@ -15,7 +15,7 @@ const SuggestInput = ({ field, value, onChange, placeholder, endpoint = '/api/su
 
   const fetchSuggestions = async (q) => {
     try {
-      const res = await api.get(endpoint, { params: { field, query: q, limit: openOnFocus ? 20 : 10 } })
+      const res = await api.get(endpoint, { params: { field, query: q, limit: openOnFocus ? maxSuggestions : 10 } })
       setSuggestions(res.data)
       setOpen(res.data.length > 0)
     } catch {
