@@ -1125,12 +1125,6 @@ const Dashboard = () => {
                   {userMgmtMsg && <span className={`user-mgmt-msg ${userMgmtMsg.includes('создан') ? 'ok' : 'err'}`}>{userMgmtMsg}</span>}
                 </div>
 
-                {isManager() && (
-                  <p style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
-                    Менеджер создаёт только аккаунты с ЭЦП (ИИН обязателен). Управление существующими аккаунтами доступно администратору.
-                  </p>
-                )}
-
                 {isAdmin() && (
                 <table className="users-table">
                   <thead>
