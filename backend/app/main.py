@@ -694,6 +694,110 @@ def get_metrics(
     )
 
 
+# ============ DASHBOARD (KPI для руководства) ============
+
+@app.get("/api/dashboard/kpis")
+def dashboard_kpis(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    """Сводные показатели по страхованию и ОППВ для HUD-дашборда.
+    Для регионального пользователя — только его регион."""
+    S = models.CompanySummary
+    region = current_user.region
+
+    def scope(q):
+        return q.filter(S.obl_name == region) if region else q
+
+    # ── Страхование (по предрасчёту company_summary) ──
+    tot = scope(db.query(
+        func.count().label("total"),
+        func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("insured"),
+        func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("not_insured"),
+        func.coalesce(func.sum(S.calculated_amount), 0).label("sum_amount"),
+        func.coalesce(func.sum(S.count_employees), 0).label("ins_emp"),
+        func.coalesce(func.sum(S.total_employees_count), 0).label("tot_emp"),
+        func.coalesce(func.sum(case((S.ip == 1, 1), else_=0)), 0).label("ip_cnt"),
+        func.coalesce(func.sum(case((S.ip == 0, 1), else_=0)), 0).label("ul_cnt"),
+    )).one()
+
+    total = tot.total or 0
+    insured = tot.insured or 0
+    not_insured = tot.not_insured or 0
+    coverage = round(insured * 100.0 / (insured + not_insured), 1) if (insured + not_insured) else 0.0
+
+    by_region = [
+        {"label": r.obl_name or "—", "insured": r.ins or 0, "not_insured": r.nins or 0, "total": r.cnt or 0}
+        for r in scope(db.query(
+            S.obl_name,
+            func.count().label("cnt"),
+            func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
+            func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("nins"),
+        )).group_by(S.obl_name).order_by(func.count().desc()).limit(10).all()
+    ]
+
+    # Ручные статусы (глобально; привязка к региону — через join, для простоты опускаем)
+    by_status = [
+        {"label": r[0], "value": r[1]}
+        for r in db.query(models.BinStatus.status, func.count())
+        .group_by(models.BinStatus.status).order_by(func.count().desc()).all()
+    ]
+
+    insurance = {
+        "total_bins": total,
+        "insured_bins": insured,
+        "not_insured_bins": not_insured,
+        "coverage_pct": coverage,
+        "sum_amount": float(tot.sum_amount or 0),
+        "ins_emp": int(tot.ins_emp or 0),
+        "tot_emp": int(tot.tot_emp or 0),
+        "ip_cnt": tot.ip_cnt or 0,
+        "ul_cnt": tot.ul_cnt or 0,
+        "by_region": by_region,
+        "by_status": by_status,
+    }
+
+    # ── ОППВ (по oppv_records) ──
+    oppv = None
+    try:
+        if db.execute(text("SELECT 1 FROM oppv_records LIMIT 1")).first():
+            O = models.OppvRecord
+            def oscope(q):
+                return q.filter(O.region == region) if region else q
+            orow = oscope(db.query(
+                func.count().label("rows"),
+                func.coalesce(func.sum(O.fot), 0).label("sum_fot"),
+                func.coalesce(func.avg(O.smz), 0).label("avg_smz"),
+                func.coalesce(func.sum(O.count), 0).label("sum_cnt"),
+                func.coalesce(func.sum(case((O.gender == "Мужской", O.count), else_=0)), 0).label("male"),
+                func.coalesce(func.sum(case((O.gender == "Женский", O.count), else_=0)), 0).label("female"),
+            )).one()
+
+            o_by_region = [{"label": r[0] or "—", "value": int(r[1] or 0)}
+                           for r in oscope(db.query(O.region, func.coalesce(func.sum(O.count), 0).label("c")))
+                           .group_by(O.region).order_by(func.sum(O.count).desc()).limit(10).all()]
+
+            o_by_oked = [{"label": r[0] or "—", "value": int(r[1] or 0)}
+                         for r in oscope(db.query(O.oked_name_low, func.coalesce(func.sum(O.count), 0).label("c")))
+                         .group_by(O.oked_name_low).order_by(func.sum(O.count).desc()).limit(8).all()]
+
+            oppv = {
+                "rows": orow.rows or 0,
+                "sum_fot": float(orow.sum_fot or 0),
+                "avg_smz": float(orow.avg_smz or 0),
+                "sum_cnt": int(orow.sum_cnt or 0),
+                "male": int(orow.male or 0),
+                "female": int(orow.female or 0),
+                "by_region": o_by_region,
+                "by_oked": o_by_oked,
+            }
+    except Exception as e:
+        print(f"dashboard oppv kpis failed: {e}", flush=True)
+        oppv = None
+
+    return {"insurance": insurance, "oppv": oppv}
+
+
 # ============ RECORDS ============
 
 # Справочник ручных статусов по БИН (выбирается в таблице страхования)

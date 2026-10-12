@@ -19,10 +19,12 @@ import {
   Trash2,
   Settings,
   Coins,
+  LayoutDashboard,
   X
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
+import DashboardHud from './DashboardHud.jsx'
 import SuggestInput from './SuggestInput.jsx'
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
@@ -193,6 +195,17 @@ const Dashboard = () => {
   const [section, setSection] = useState(() => localStorage.getItem('section') || 'insurance')
 
   useEffect(() => { localStorage.setItem('section', section) }, [section])
+
+  // Переход в/из «Дашборда» сопровождаем анимацией-перелистыванием
+  const [hudTransition, setHudTransition] = useState(false)
+  const switchSection = (next) => {
+    if (next === section) return
+    if (next === 'dashboard' || section === 'dashboard') {
+      setHudTransition(true)
+      setTimeout(() => setHudTransition(false), 550)
+    }
+    setSection(next)
+  }
 
   // Если пользователь без доступа к ОПВР — не оставляем его в этом разделе
   useEffect(() => {
@@ -970,22 +983,28 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="user-info">
-          {canAppvr && (
-            <div className="section-toggle">
-              <button
-                className={section === 'insurance' ? 'active' : ''}
-                onClick={() => setSection('insurance')}
-              >
-                <Shield size={16} /> Страхование
-              </button>
+          <div className="section-toggle">
+            <button
+              className={section === 'insurance' ? 'active' : ''}
+              onClick={() => switchSection('insurance')}
+            >
+              <Shield size={16} /> Страхование
+            </button>
+            {canAppvr && (
               <button
                 className={section === 'oppv' ? 'active' : ''}
-                onClick={() => setSection('oppv')}
+                onClick={() => switchSection('oppv')}
               >
                 <Coins size={16} /> Анализ ОППВ
               </button>
-            </div>
-          )}
+            )}
+            <button
+              className={'hud-tab ' + (section === 'dashboard' ? 'active' : '')}
+              onClick={() => switchSection('dashboard')}
+            >
+              <LayoutDashboard size={16} /> Дашборд
+            </button>
+          </div>
           <span>{user?.username}</span>
           {!isAdmin() && !isManager() && (
             <button onClick={openFiles} className="files-btn">
@@ -1510,7 +1529,11 @@ const Dashboard = () => {
         </div>
       )}
 
+      {hudTransition && <div className="hud-transition" />}
+
       {section === 'oppv' && canAppvr && <OppvSection />}
+
+      {section === 'dashboard' && <DashboardHud />}
 
       {section === 'insurance' && (
       <>
