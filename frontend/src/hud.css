@@ -273,6 +273,45 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* полярная роза (лепестки) */
+.hud-rose { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.hud-rose svg { width: 280px; height: 280px; flex: 0 0 auto; overflow: visible; }
+.hud-rose-grid { fill: none; stroke: rgba(56, 189, 248, .12); stroke-dasharray: 2 4; }
+.hud-rose-petal {
+  transform: scale(0); transform-box: view-box; transform-origin: 150px 150px;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, .35));
+  animation: hud-rose-grow .7s cubic-bezier(.22, 1, .36, 1) var(--d, 0ms) forwards;
+  transition: filter .2s, opacity .2s; opacity: .92; cursor: default;
+}
+.hud-rose-petal:hover { opacity: 1; filter: brightness(1.2) drop-shadow(0 0 12px rgba(34, 211, 238, .6)); }
+@keyframes hud-rose-grow { to { transform: scale(1); } }
+.hud-rose-legend { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 7px; }
+.hud-rose-leg { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; font-size: 13px; color: var(--h-dim); }
+.hud-rose-leg i { width: 11px; height: 11px; border-radius: 3px; }
+.hud-rose-leg-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-rose-leg b { color: var(--h-tx); font-variant-numeric: tabular-nums; }
+
+/* пузырьки */
+.hud-bubbles { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; justify-content: center; padding: 14px 0 6px; }
+.hud-bubble-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.hud-bubble {
+  position: relative; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; text-align: center; color: #fff;
+  background: radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--c) 85%, #fff 18%), color-mix(in srgb, var(--c) 52%, transparent));
+  border: 1px solid color-mix(in srgb, var(--c) 70%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--c) 45%, transparent), inset 0 2px 10px rgba(255, 255, 255, .22);
+  transform: scale(0);
+  animation: hud-bubble-pop .6s cubic-bezier(.34, 1.56, .4, 1) var(--d, 0ms) forwards,
+             hud-bubble-float 6s ease-in-out infinite;
+  animation-delay: var(--d, 0ms), calc(var(--d, 0ms) + .6s);
+  transition: box-shadow .2s;
+}
+.hud-bubble:hover { transform: scale(1.08) !important; box-shadow: 0 0 30px color-mix(in srgb, var(--c) 70%, transparent), inset 0 2px 10px rgba(255, 255, 255, .3); }
+@keyframes hud-bubble-pop { to { transform: scale(1); } }
+@keyframes hud-bubble-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+.hud-bubble-v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 1px 4px rgba(0, 0, 0, .4); }
+.hud-bubble-l { font-size: 11px; color: var(--h-dim); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+
 /* донат */
 .hud-chart-card { display: flex; flex-direction: column; }
 .hud-donut-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; min-height: 230px; }
@@ -398,5 +437,7 @@
   .kpi-spark .ks-runner { display: none; }
   .hud-gauge-fg { animation: none; stroke-dashoffset: var(--off); }
   .hud-donut-arc { animation: none; }
+  .hud-rose-petal { animation: none; transform: scale(1); }
+  .hud-bubble { animation: none; transform: scale(1); }
   .hud-transition { display: none; }
 }

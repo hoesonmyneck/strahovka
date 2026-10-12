@@ -62,6 +62,70 @@ function KpiPanel({ tiles, cols }) {
   )
 }
 
+// Полярная роза: лепестки из центра, радиус = значение
+function HudRose({ items }) {
+  const data = items.slice(0, 10)
+  const max = Math.max(1, ...data.map((d) => d.value))
+  const cx = 150, cy = 150, maxR = 120, minR = 24
+  const n = data.length || 1
+  const slice = (Math.PI * 2) / n
+  const gap = n > 1 ? 0.045 : 0
+  const polar = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)]
+  return (
+    <div className="hud-rose">
+      <svg viewBox="0 0 300 300">
+        {[0.34, 0.67, 1].map((f, i) => (
+          <circle key={i} cx={cx} cy={cy} r={minR + (maxR - minR) * f} className="hud-rose-grid" />
+        ))}
+        {data.map((d, i) => {
+          const r = minR + (d.value / max) * (maxR - minR)
+          const a0 = i * slice - Math.PI / 2 + gap
+          const a1 = (i + 1) * slice - Math.PI / 2 - gap
+          const [x0, y0] = polar(r, a0), [x1, y1] = polar(r, a1)
+          const large = (a1 - a0) > Math.PI ? 1 : 0
+          const dpath = `M${cx},${cy} L${x0.toFixed(2)},${y0.toFixed(2)} A${r.toFixed(2)},${r.toFixed(2)} 0 ${large},1 ${x1.toFixed(2)},${y1.toFixed(2)} Z`
+          return (
+            <path key={d.label + i} className="hud-rose-petal" d={dpath} fill={C[i % C.length]}
+              style={{ '--d': `${i * 80}ms` }}>
+              <title>{d.label}: {fmtNum(d.value)}</title>
+            </path>
+          )
+        })}
+      </svg>
+      <div className="hud-rose-legend">
+        {data.map((d, i) => (
+          <div key={d.label + i} className="hud-rose-leg" title={`${d.label}: ${fmtNum(d.value)}`}>
+            <i style={{ background: C[i % C.length] }} />
+            <span className="hud-rose-leg-l">{d.label}</span>
+            <b>{fmtNum(d.value)}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Пузырьки: размер = значение, плотная облачная раскладка
+function HudBubbles({ items }) {
+  const data = items.slice(0, 8)
+  const max = Math.max(1, ...data.map((d) => d.value))
+  return (
+    <div className="hud-bubbles">
+      {data.map((d, i) => {
+        const size = Math.round(52 + Math.sqrt(d.value / max) * 94)
+        return (
+          <div className="hud-bubble-cell" key={d.label + i} title={`${d.label}: ${fmtNum(d.value)}`}>
+            <div className="hud-bubble" style={{ width: size, height: size, '--c': C[i % C.length], '--d': `${i * 110}ms` }}>
+              <span className="hud-bubble-v">{fmtShort(d.value)}</span>
+            </div>
+            <span className="hud-bubble-l">{d.label}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Карточка-обёртка для графиков ───────────────────────────────────────────
 function HudCard({ title, children, wide }) {
   return (
@@ -242,7 +306,7 @@ const DashboardHud = () => {
           <KpiPanel tiles={opTiles} cols={3} />
           <div className="hud-charts">
             <HudCard title="Сотрудники по регионам">
-              <HudGauges items={op.by_region} color="var(--h-cyan)" />
+              <HudRose items={op.by_region} />
             </HudCard>
             <HudCard title="Гендерный состав">
               <HudDonut a={op.male} b={op.female} labelA="Мужчины" labelB="Женщины" />
@@ -250,7 +314,7 @@ const DashboardHud = () => {
           </div>
           <div className="hud-charts">
             <HudCard title="Топ видов деятельности (ОКЭД) по сотрудникам" wide>
-              <HudGauges items={op.by_oked} color="var(--h-teal)" />
+              <HudBubbles items={op.by_oked} />
             </HudCard>
           </div>
         </>
