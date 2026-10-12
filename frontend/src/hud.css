@@ -265,13 +265,15 @@
 .hud-bar-val { text-align: right; color: var(--h-tx); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* донат */
-.hud-donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.hud-donut { width: 150px; height: 150px; filter: drop-shadow(0 0 10px rgba(34, 211, 238, .3)); }
-.hud-donut-arc { stroke-dasharray: 0 999; animation: hud-donut-draw 1.1s cubic-bezier(.22, 1, .36, 1) .2s both; }
-@keyframes hud-donut-draw { from { opacity: .2; } to { opacity: 1; } }
+.hud-chart-card { display: flex; flex-direction: column; }
+.hud-donut-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; min-height: 230px; }
+.hud-donut { width: 210px; height: 210px; filter: drop-shadow(0 0 12px rgba(34, 211, 238, .35)); }
+/* рисуется из инлайнового stroke-dasharray — в CSS его НЕ переопределяем */
+.hud-donut-arc { animation: hud-donut-draw 1.1s cubic-bezier(.22, 1, .36, 1) .2s both; }
+@keyframes hud-donut-draw { from { opacity: .25; } to { opacity: 1; } }
 .hud-donut-num { fill: #fff; font-size: 26px; font-weight: 700; text-anchor: middle; filter: drop-shadow(0 0 8px rgba(34, 211, 238, .45)); }
-.hud-donut-sub { fill: var(--h-dim); font-size: 11px; text-anchor: middle; text-transform: uppercase; letter-spacing: .08em; }
-.hud-donut-legend { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--h-dim); }
+.hud-donut-sub { fill: var(--h-dim); font-size: 10px; text-anchor: middle; text-transform: uppercase; letter-spacing: .08em; }
+.hud-donut-legend { display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--h-dim); }
 .hud-donut-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: middle; }
 .hud-donut-legend b { color: var(--h-tx); font-variant-numeric: tabular-nums; }
 
