@@ -260,9 +260,16 @@
   height: 100%; border-radius: 6px; box-shadow: 0 0 10px rgba(34, 211, 238, .5);
   transform-origin: left; animation: hud-bar-grow .8s cubic-bezier(.22, 1, .36, 1) var(--d, 0ms) both;
 }
-.hud-bar-fill--2 { border-radius: 0 6px 6px 0; box-shadow: 0 0 10px rgba(255, 179, 71, .4); }
+.hud-bar-fill--2 { box-shadow: 0 0 10px rgba(255, 179, 71, .4); }
+/* в сплит-баре скругление даёт трек (overflow:hidden) — у сегментов края ровные,
+   без острых углов и просветов на стыке */
+.hud-bar-track--split .hud-bar-fill { border-radius: 0; box-shadow: none; }
 @keyframes hud-bar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .hud-bar-val { text-align: right; color: var(--h-tx); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* охват: шире колонка значения под «застрах. / всего (％)» */
+.hud-bars--cov .hud-bar-row { grid-template-columns: 150px 1fr 200px; }
+.hud-bar-val--cov { font-size: 12px; }
 
 /* донат */
 .hud-chart-card { display: flex; flex-direction: column; }

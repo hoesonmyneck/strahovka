@@ -93,7 +93,7 @@ function HudBars({ items, color = 'var(--h-cyan)', format = fmtNum }) {
 // Регионы: доля застрахованных (split-бар insured/not_insured)
 function HudСoverageBars({ items }) {
   return (
-    <div className="hud-bars">
+    <div className="hud-bars hud-bars--cov">
       {items.map((it, i) => {
         const t = it.insured + it.not_insured || 1
         const cov = (it.insured / t) * 100
@@ -104,7 +104,9 @@ function HudСoverageBars({ items }) {
               <span className="hud-bar-fill" style={{ width: `${cov}%`, background: 'var(--h-cyan)', '--d': `${i * 70}ms` }} />
               <span className="hud-bar-fill hud-bar-fill--2" style={{ width: `${100 - cov}%`, background: 'var(--h-amber)', '--d': `${i * 70}ms` }} />
             </span>
-            <span className="hud-bar-val">{cov.toFixed(0)}%</span>
+            <span className="hud-bar-val hud-bar-val--cov">
+              {fmtNum(it.insured)} / {fmtNum(it.insured + it.not_insured)} ({cov.toFixed(0)}%)
+            </span>
           </div>
         )
       })}
