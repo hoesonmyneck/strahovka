@@ -72,43 +72,52 @@ function HudCard({ title, children, wide }) {
   )
 }
 
-// Горизонтальные столбцы: регион/название — бар — число
-function HudBars({ items, color = 'var(--h-cyan)', format = fmtNum }) {
-  const max = Math.max(1, ...items.map((i) => i.value))
+// Короткий формат для центра кольца: 53К, 1,2М
+const fmtShort = (v) => {
+  if (v == null || !Number.isFinite(v)) return '—'
+  const a = Math.abs(v)
+  if (a >= 1e9) return (v / 1e9).toFixed(1).replace('.', ',') + 'Б'
+  if (a >= 1e6) return (v / 1e6).toFixed(1).replace('.', ',') + 'М'
+  if (a >= 1e3) return Math.round(v / 1e3) + 'К'
+  return String(Math.round(v))
+}
+
+const R_G = 46, CIRC_G = 2 * Math.PI * R_G
+
+// Одно радиальное кольцо-гейдж
+function Gauge({ arc, center, label, tip, color, idx }) {
+  const off = CIRC_G - Math.max(0, Math.min(100, arc)) / 100 * CIRC_G
   return (
-    <div className="hud-bars">
-      {items.map((it, i) => (
-        <div className="hud-bar-row" key={it.label + i}>
-          <span className="hud-bar-label" title={it.label}>{it.label}</span>
-          <span className="hud-bar-track">
-            <span className="hud-bar-fill" style={{ width: `${(it.value / max) * 100}%`, background: color, '--d': `${i * 70}ms` }} />
-          </span>
-          <span className="hud-bar-val">{format(it.value)}</span>
-        </div>
-      ))}
+    <div className="hud-gauge" title={tip}>
+      <svg viewBox="0 0 120 120">
+        <circle className="hud-gauge-bg" cx="60" cy="60" r={R_G} />
+        <circle className="hud-gauge-fg" cx="60" cy="60" r={R_G} stroke="currentColor"
+          strokeDasharray={CIRC_G}
+          style={{ color, '--circ': CIRC_G, '--off': off, '--d': `${idx * 90}ms` }} />
+        <text className="hud-gauge-num" x="60" y="60" dominantBaseline="central">{center}</text>
+      </svg>
+      <div className="hud-gauge-label" title={label}>{label}</div>
     </div>
   )
 }
 
-// Регионы: доля застрахованных (split-бар insured/not_insured)
-function HudСoverageBars({ items }) {
+// Сетка радиальных колец. Если есть insured/not_insured — кольцо = охват %;
+// иначе кольцо = доля от максимума, в центре — само значение.
+function HudGauges({ items, color = 'var(--h-cyan)', coverage = false }) {
+  const max = coverage ? 100 : Math.max(1, ...items.map((i) => i.value))
   return (
-    <div className="hud-bars hud-bars--cov">
+    <div className="hud-gauges">
       {items.map((it, i) => {
-        const t = it.insured + it.not_insured || 1
-        const cov = (it.insured / t) * 100
-        return (
-          <div className="hud-bar-row" key={it.label + i}>
-            <span className="hud-bar-label" title={it.label}>{it.label}</span>
-            <span className="hud-bar-track hud-bar-track--split">
-              <span className="hud-bar-fill" style={{ width: `${cov}%`, background: 'var(--h-cyan)', '--d': `${i * 70}ms` }} />
-              <span className="hud-bar-fill hud-bar-fill--2" style={{ width: `${100 - cov}%`, background: 'var(--h-amber)', '--d': `${i * 70}ms` }} />
-            </span>
-            <span className="hud-bar-val hud-bar-val--cov">
-              {fmtNum(it.insured)} / {fmtNum(it.insured + it.not_insured)} ({cov.toFixed(0)}%)
-            </span>
-          </div>
-        )
+        if (coverage) {
+          const tot = it.insured + it.not_insured || 1
+          const cov = (it.insured / tot) * 100
+          return <Gauge key={it.label + i} idx={i} color={color} arc={cov}
+            center={`${cov.toFixed(0)}%`} label={it.label}
+            tip={`${it.label}: ${fmtNum(it.insured)} из ${fmtNum(tot)} застрахованы`} />
+        }
+        return <Gauge key={it.label + i} idx={i} color={color} arc={(it.value / max) * 100}
+          center={fmtShort(it.value)} label={it.label}
+          tip={`${it.label}: ${fmtNum(it.value)}`} />
       })}
     </div>
   )
@@ -212,8 +221,8 @@ const DashboardHud = () => {
       <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
       <KpiPanel tiles={insTiles} cols={4} />
       <div className="hud-charts">
-        <HudCard title="Охват по регионам (застрахованы / нет)" wide>
-          <HudСoverageBars items={ins.by_region} />
+        <HudCard title="Охват по регионам" wide>
+          <HudGauges items={ins.by_region} coverage color="var(--h-cyan)" />
         </HudCard>
         <HudCard title="Форма предприятия">
           <HudDonut a={ins.ul_cnt} b={ins.ip_cnt} labelA="ЮЛ" labelB="ИП" />
@@ -222,7 +231,7 @@ const DashboardHud = () => {
       {ins.by_status && ins.by_status.length > 0 && (
         <div className="hud-charts">
           <HudCard title="Проставленные статусы" wide>
-            <HudBars items={ins.by_status} color="var(--h-blue)" />
+            <HudGauges items={ins.by_status} color="var(--h-blue)" />
           </HudCard>
         </div>
       )}
@@ -233,7 +242,7 @@ const DashboardHud = () => {
           <KpiPanel tiles={opTiles} cols={3} />
           <div className="hud-charts">
             <HudCard title="Сотрудники по регионам">
-              <HudBars items={op.by_region} color="var(--h-cyan)" />
+              <HudGauges items={op.by_region} color="var(--h-cyan)" />
             </HudCard>
             <HudCard title="Гендерный состав">
               <HudDonut a={op.male} b={op.female} labelA="Мужчины" labelB="Женщины" />
@@ -241,7 +250,7 @@ const DashboardHud = () => {
           </div>
           <div className="hud-charts">
             <HudCard title="Топ видов деятельности (ОКЭД) по сотрудникам" wide>
-              <HudBars items={op.by_oked} color="var(--h-teal)" />
+              <HudGauges items={op.by_oked} color="var(--h-teal)" />
             </HudCard>
           </div>
         </>

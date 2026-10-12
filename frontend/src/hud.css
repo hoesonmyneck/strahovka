@@ -246,30 +246,32 @@
   text-shadow: 0 0 14px rgba(34, 211, 238, .25);
 }
 
-/* горизонтальные столбцы */
-.hud-bars { display: flex; flex-direction: column; gap: 10px; }
-.hud-bar-row { display: grid; grid-template-columns: 170px 1fr 90px; align-items: center; gap: 10px; }
-.hud-bar-label { color: var(--h-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hud-bar-track {
-  height: 12px; border-radius: 6px; background: rgba(10, 24, 60, .9);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(56, 189, 248, .14);
-  overflow: hidden; display: flex;
+/* радиальные кольца-гейджи */
+.hud-gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 16px 10px; }
+.hud-gauge {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  transition: transform .2s;
 }
-.hud-bar-track--split { box-shadow: inset 0 1px 3px rgba(0, 0, 0, .5); }
-.hud-bar-fill {
-  height: 100%; border-radius: 6px; box-shadow: 0 0 10px rgba(34, 211, 238, .5);
-  transform-origin: left; animation: hud-bar-grow .8s cubic-bezier(.22, 1, .36, 1) var(--d, 0ms) both;
+.hud-gauge:hover { transform: translateY(-3px); }
+.hud-gauge svg { width: 112px; height: 112px; overflow: visible; }
+.hud-gauge-bg { fill: none; stroke: rgba(56, 189, 248, .14); stroke-width: 9; }
+.hud-gauge-fg {
+  fill: none; stroke-width: 9; stroke-linecap: round;
+  transform: rotate(-90deg); transform-origin: center;
+  stroke-dashoffset: var(--circ);
+  filter: drop-shadow(0 0 5px currentColor);
+  animation: hud-gauge-fill 1.2s cubic-bezier(.22, 1, .36, 1) var(--d, 0ms) forwards;
 }
-.hud-bar-fill--2 { box-shadow: 0 0 10px rgba(255, 179, 71, .4); }
-/* в сплит-баре скругление даёт трек (overflow:hidden) — у сегментов края ровные,
-   без острых углов и просветов на стыке */
-.hud-bar-track--split .hud-bar-fill { border-radius: 0; box-shadow: none; }
-@keyframes hud-bar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-.hud-bar-val { text-align: right; color: var(--h-tx); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-
-/* охват: шире колонка значения под «застрах. / всего (％)» */
-.hud-bars--cov .hud-bar-row { grid-template-columns: 150px 1fr 200px; }
-.hud-bar-val--cov { font-size: 12px; }
+@keyframes hud-gauge-fill { to { stroke-dashoffset: var(--off); } }
+.hud-gauge:hover .hud-gauge-fg { filter: drop-shadow(0 0 9px currentColor) brightness(1.1); }
+.hud-gauge-num {
+  fill: #fff; font-size: 23px; font-weight: 700; text-anchor: middle;
+  font-variant-numeric: tabular-nums; filter: drop-shadow(0 0 8px rgba(34, 211, 238, .45));
+}
+.hud-gauge-label {
+  color: var(--h-dim); font-size: 12px; text-align: center; max-width: 128px; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* донат */
 .hud-chart-card { display: flex; flex-direction: column; }
@@ -394,6 +396,7 @@
   .kpi-spark .ks-area, .kpi-spark .ks-dot { opacity: 1; }
   .kpi-spark .ks-bar { transform: none; }
   .kpi-spark .ks-runner { display: none; }
-  .hud-bar-fill, .hud-donut-arc { animation: none; }
+  .hud-gauge-fg { animation: none; stroke-dashoffset: var(--off); }
+  .hud-donut-arc { animation: none; }
   .hud-transition { display: none; }
 }
