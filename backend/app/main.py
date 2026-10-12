@@ -846,6 +846,44 @@ def set_bin_status(
     return {"bin": data.bin, "status": status_val}
 
 
+@app.get("/api/insurance/status/export")
+def export_bin_status(
+    current_user: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
+    """Выгрузка проставленных статусов (только админ): два столбца — БИН и Статус.
+    Пишем потоково (xlsxwriter constant_memory + yield_per), память не грузим."""
+    def bin12(v):
+        return str(int(v)).zfill(12) if v is not None else ''
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    wb = xlsxwriter.Workbook(tmp.name, {'constant_memory': True})
+    ws = wb.add_worksheet('Статусы')
+    header_fmt = wb.add_format({'bold': True})
+    ws.set_column(0, 0, 16)
+    ws.set_column(1, 1, 60)
+    ws.write_string(0, 0, 'БИН', header_fmt)
+    ws.write_string(0, 1, 'Статус', header_fmt)
+    ws.freeze_panes(1, 0)
+
+    row = 0
+    q = (db.query(models.BinStatus.bin, models.BinStatus.status)
+         .order_by(models.BinStatus.bin))
+    for b, s in q.yield_per(5000):
+        row += 1
+        ws.write_string(row, 0, bin12(b))
+        ws.write_string(row, 1, s or '')
+    wb.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="bin_status.xlsx",
+        background=BackgroundTask(os.unlink, tmp.name),
+    )
+
+
 @app.get("/api/records", response_model=schemas.InsuranceRecordList)
 def get_records(
     page: int = Query(1, ge=1),

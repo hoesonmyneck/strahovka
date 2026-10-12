@@ -685,6 +685,24 @@ const Dashboard = () => {
     }
   }
 
+  // Выгрузка проставленных статусов (только админ): БИН + Статус
+  const downloadStatuses = async () => {
+    try {
+      const res = await api.get('/api/insurance/status/export', { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `статусы_${new Date().toISOString().split('T')[0]}.xlsx`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Файл скачан')
+    } catch {
+      toast.error('Ошибка при скачивании')
+    }
+  }
+
   // Выгрузка таблицы логов (сколько раз какой аккаунт заходил)
   const downloadLogStats = async () => {
     try {
@@ -1722,6 +1740,11 @@ const Dashboard = () => {
           <button onClick={resetFilters} className="reset-btn">
             Сбросить
           </button>
+          {isAdmin() && (
+            <button onClick={downloadStatuses} className="download-btn" title="Excel: БИН и проставленный статус">
+              <Download size={18} /> Скачать статусы
+            </button>
+          )}
         </div>
       </div>
 
