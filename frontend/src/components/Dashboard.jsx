@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { AgGridReact } from 'ag-grid-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import api from '../utils/api.js'
@@ -63,20 +64,59 @@ const binFormatter = (params) => {
   return String(params.value).padStart(12, '0')
 }
 
-// ─── Ячейка «Статусы»: выпадающий справочник, сохраняется при выборе ──────────
+// ─── Ячейка «Статусы»: кастомный справочник (меню в портале той же ширины,
+// что и поле — нативный <select> так не умеет, его список шире поля). ──────────
 const StatusCellRenderer = (params) => {
   const opts = params.context?.statusOptions || []
   const value = params.value || ''
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
+  const btnRef = useRef(null)
+  const menuRef = useRef(null)
+
+  const openMenu = (e) => {
+    e.stopPropagation()
+    const r = btnRef.current.getBoundingClientRect()
+    setRect({ left: r.left, top: r.bottom + 2, width: r.width })
+    setOpen(true)
+  }
+  const close = () => setOpen(false)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return
+      close()
+    }
+    const onScroll = () => close()
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open])
+
+  const pick = (v) => { close(); params.context.onStatusChange(params.data, v) }
+
   return (
-    <select
-      className="status-select"
-      value={value}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => params.context.onStatusChange(params.data, e.target.value)}
-    >
-      <option value="">— нет —</option>
-      {opts.map((s) => <option key={s} value={s}>{s}</option>)}
-    </select>
+    <>
+      <div ref={btnRef} className="status-trigger" onClick={(e) => (open ? (e.stopPropagation(), close()) : openMenu(e))}>
+        <span className="status-trigger-text">{value || '— нет —'}</span>
+        <span className="status-caret">▾</span>
+      </div>
+      {open && rect && createPortal(
+        <div ref={menuRef} className="status-menu" style={{ left: rect.left, top: rect.top, width: rect.width }}>
+          <div className={`status-opt${!value ? ' sel' : ''}`} onClick={() => pick('')}>— нет —</div>
+          {opts.map((s) => (
+            <div key={s} className={`status-opt${s === value ? ' sel' : ''}`} onClick={() => pick(s)}>{s}</div>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
 
