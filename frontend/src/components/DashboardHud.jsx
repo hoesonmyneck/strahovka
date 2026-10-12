@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api.js'
-import { RefreshCw, Shield, Coins } from 'lucide-react'
+import { Shield, Coins } from 'lucide-react'
 import { KpiSpark, CountUp } from './KpiSpark.jsx'
 
 // ─── Форматирование ──────────────────────────────────────────────────────────
@@ -207,9 +207,6 @@ const DashboardHud = () => {
     <div className="hud-view">
       <div className="hud-topline">
         <div className="hud-topline-title">Аналитический дашборд</div>
-        <button className="hud-refresh" onClick={load} title="Обновить">
-          <RefreshCw size={16} /> Обновить
-        </button>
       </div>
 
       <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
