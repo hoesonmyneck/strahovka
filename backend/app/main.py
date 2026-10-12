@@ -37,6 +37,13 @@ with engine.connect() as _conn:
         "ALTER TABLE login_logs ADD COLUMN IF NOT EXISTS full_name VARCHAR(300)",
         # ИИН уникален, но NULL допускаем у нескольких (частичный уникальный индекс)
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_iin ON users (iin) WHERE iin IS NOT NULL",
+        # Ручные статусы по БИН (хранятся отдельно, переживают перезаливку данных)
+        """CREATE TABLE IF NOT EXISTS bin_status (
+               bin        BIGINT PRIMARY KEY,
+               status     VARCHAR(200),
+               updated_by VARCHAR(50),
+               updated_at TIMESTAMP DEFAULT NOW()
+           )""",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         """CREATE TABLE IF NOT EXISTS app_settings (
@@ -689,6 +696,52 @@ def get_metrics(
 
 # ============ RECORDS ============
 
+# Справочник ручных статусов по БИН (выбирается в таблице страхования)
+INSURANCE_STATUSES = [
+    "Контактный номер некорректный/отключен/отсутствует",
+    "Заключил/планирует заключить договор ОСНС в другом КСЖ",
+    "Отказ от заключения договора ОСНС",
+    "Отсутствие наемных работников",
+    "Ликвидация/закрытие предприятия",
+    "Иное",
+]
+
+
+@app.get("/api/insurance/statuses")
+def get_insurance_statuses(current_user: models.User = Depends(auth.get_current_active_user)):
+    """Список допустимых статусов для справочника в таблице страхования."""
+    return INSURANCE_STATUSES
+
+
+@app.patch("/api/insurance/status")
+def set_bin_status(
+    data: schemas.BinStatusUpdate,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db)
+):
+    """Установить/снять ручной статус по БИН. Пустая строка — снять статус."""
+    status_val = (data.status or "").strip()
+    if status_val and status_val not in INSURANCE_STATUSES:
+        raise HTTPException(400, "Неизвестный статус")
+    row = db.query(models.BinStatus).filter(models.BinStatus.bin == data.bin).first()
+    if not status_val:
+        if row:
+            db.delete(row)
+            db.commit()
+        return {"bin": data.bin, "status": ""}
+    if row:
+        row.status = status_val
+        row.updated_by = current_user.username
+        row.updated_at = datetime.now()
+    else:
+        db.add(models.BinStatus(
+            bin=data.bin, status=status_val,
+            updated_by=current_user.username, updated_at=datetime.now(),
+        ))
+    db.commit()
+    return {"bin": data.bin, "status": status_val}
+
+
 @app.get("/api/records", response_model=schemas.InsuranceRecordList)
 def get_records(
     page: int = Query(1, ge=1),
@@ -740,6 +793,16 @@ def get_records(
         item = schemas.InsuranceRecordResponse.model_validate(rep)
         item.is_insured = company_status(obl, act, ins_old)
         items.append(item)
+
+    # Подтягиваем ручные статусы по БИН одним запросом для текущей страницы
+    bins = [it.bin for it in items if it.bin is not None]
+    if bins:
+        st = dict(
+            db.query(models.BinStatus.bin, models.BinStatus.status)
+            .filter(models.BinStatus.bin.in_(bins)).all()
+        )
+        for it in items:
+            it.manual_status = st.get(it.bin)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
@@ -1669,7 +1732,7 @@ def get_districts(
 
 @app.get("/api/users", response_model=List[schemas.UserResponse])
 def list_users(
-    current_user: models.User = Depends(auth.require_admin),
+    current_user: models.User = Depends(auth.require_admin_or_manager),
     db: Session = Depends(database.get_db)
 ):
     return db.query(models.User).order_by(models.User.id).all()
@@ -1697,24 +1760,38 @@ def _check_iin_unique(db, iin, exclude_user_id=None):
         raise HTTPException(400, "Этот ИИН уже привязан к другому аккаунту")
 
 
+ALLOWED_ROLES = ("user", "manager", "admin")
+
+
 @app.post("/api/users", response_model=schemas.UserResponse)
 def create_user(
     data: schemas.UserCreate,
-    current_user: models.User = Depends(auth.require_admin),
+    current_user: models.User = Depends(auth.require_admin_or_manager),
     db: Session = Depends(database.get_db)
 ):
     if db.query(models.User).filter(models.User.username == data.username).first():
         raise HTTPException(400, "Пользователь с таким логином уже существует")
+
+    role = data.role if data.role in ALLOWED_ROLES else "user"
     iin = _normalize_iin(data.iin)
+    eds_disabled = 1 if data.eds_disabled else 0
+
+    # Менеджер может создавать только обычные аккаунты и только с ЭЦП
+    if current_user.role == "manager":
+        role = "user"
+        eds_disabled = 0
+        if not iin:
+            raise HTTPException(400, "Менеджер может создавать только аккаунты с ЭЦП — укажите ИИН")
+
     _check_iin_unique(db, iin)
     user = models.User(
         username=data.username,
         hashed_password=auth.get_password_hash(data.password),
-        role=data.role,
+        role=role,
         region=data.region,
         appvr_access=1 if data.appvr_access else 0,
         iin=iin,
-        eds_disabled=1 if data.eds_disabled else 0,
+        eds_disabled=eds_disabled,
         is_active=1,
     )
     db.add(user)
@@ -1772,7 +1849,7 @@ def get_login_logs(
     username: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
-    current_user: models.User = Depends(auth.require_admin),
+    current_user: models.User = Depends(auth.require_admin_or_manager),
     db: Session = Depends(database.get_db)
 ):
     query = db.query(models.LoginLog).filter(
@@ -1795,6 +1872,48 @@ def get_login_logs(
         .all()
     )
     return schemas.LoginLogList(items=items, total=total, page=page, page_size=page_size)
+
+
+@app.get("/api/logs/stats", response_model=schemas.LogStatList)
+def login_stats_table(
+    username: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    current_user: models.User = Depends(auth.require_admin_or_manager),
+    db: Session = Depends(database.get_db)
+):
+    """Таблица: сколько раз каждый аккаунт заходил (всего или за период).
+    Поиск по логину. Включает аккаунты, которые ни разу не заходили (0)."""
+    L = models.LoginLog
+    stats_q = db.query(
+        L.username,
+        func.count().label("logins"),
+        func.max(L.logged_at).label("last_login"),
+    ).filter(L.username.notin_(SYSTEM_ACCOUNTS))
+    if date_from:
+        stats_q = stats_q.filter(L.logged_at >= date_from)
+    if date_to:
+        stats_q = stats_q.filter(L.logged_at < date_to + timedelta(days=1))
+    stats = {r.username: r for r in stats_q.group_by(L.username).all()}
+
+    uq = db.query(models.User).filter(models.User.username.notin_(SYSTEM_ACCOUNTS))
+    if username:
+        uq = uq.filter(models.User.username.ilike(f"%{username}%"))
+    users = uq.all()
+
+    rows = []
+    for u in users:
+        s = stats.get(u.username)
+        rows.append(schemas.LogStatRow(
+            username=u.username,
+            full_name=u.full_name,
+            role=u.role,
+            region=u.region,
+            logins=(s.logins if s else 0),
+            last_login=(s.last_login if s else None),
+        ))
+    rows.sort(key=lambda r: (r.logins, r.last_login or datetime.min), reverse=True)
+    return schemas.LogStatList(items=rows, total=len(rows))
 
 
 NO_REGION_LABEL = "АО КСЖ ГАК"
@@ -1824,10 +1943,10 @@ def _period_caption(date_from: Optional[date], date_to: Optional[date]) -> str:
 
 
 @app.get("/api/logs/export")
-def export_login_stats(
+def export_login_stats_xlsx(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
-    current_user: models.User = Depends(auth.require_admin),
+    current_user: models.User = Depends(auth.require_admin_or_manager),
     db: Session = Depends(database.get_db)
 ):
     """Excel: статистика авторизаций по регионам. Без дат — за всё время."""

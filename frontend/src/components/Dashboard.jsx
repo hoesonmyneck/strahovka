@@ -63,6 +63,23 @@ const binFormatter = (params) => {
   return String(params.value).padStart(12, '0')
 }
 
+// ─── Ячейка «Статусы»: выпадающий справочник, сохраняется при выборе ──────────
+const StatusCellRenderer = (params) => {
+  const opts = params.context?.statusOptions || []
+  const value = params.value || ''
+  return (
+    <select
+      className="status-select"
+      value={value}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => params.context.onStatusChange(params.data, e.target.value)}
+    >
+      <option value="">— нет —</option>
+      {opts.map((s) => <option key={s} value={s}>{s}</option>)}
+    </select>
+  )
+}
+
 // ─── Зона загрузки: клик по кнопке ИЛИ перетаскивание файла ──────────────────
 const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = '', progress = 0, phase = null }) => {
   const [drag, setDrag] = useState(false)
@@ -124,7 +141,9 @@ const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = 
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 const Dashboard = () => {
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, isManager } = useAuth()
+  // Админ-панель доступна админу и менеджеру (у менеджера — урезанный набор вкладок)
+  const canAdminPanel = isAdmin() || isManager()
   const gridRef = useRef()
 
   // Доступ к разделу ОПВР: админ или пользователь с флагом appvr_access
@@ -169,6 +188,7 @@ const Dashboard = () => {
 
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
+  const [statusOptions, setStatusOptions] = useState([])
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 100
 
@@ -184,7 +204,7 @@ const Dashboard = () => {
 
   // ─── Управление пользователями (только admin) ─────────────────────────────
   const [usersList, setUsersList] = useState([])
-  const [newUser, setNewUser] = useState({ username: '', password: '', region: '', iin: '', eds_disabled: false })
+  const [newUser, setNewUser] = useState({ username: '', password: '', region: '', iin: '', eds_disabled: false, role: 'user' })
   const [userMgmtMsg, setUserMgmtMsg] = useState('')
 
   // ─── Админ-панель (вкладки: пользователи / загрузка / логи) ───────────────
@@ -200,6 +220,13 @@ const Dashboard = () => {
   const [logsDateFrom, setLogsDateFrom] = useState(null)
   const [logsDateTo, setLogsDateTo] = useState(null)
   const LOGS_PAGE_SIZE = 50
+
+  // ─── Таблица логов (сколько раз какой аккаунт заходил) ────────────────────
+  const [logStats, setLogStats] = useState([])
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsUserFilter, setStatsUserFilter] = useState('')
+  const [statsDateFrom, setStatsDateFrom] = useState(null)
+  const [statsDateTo, setStatsDateTo] = useState(null)
 
   // ─── Общие файлы ──────────────────────────────────────────────────────────
   const [showFiles, setShowFiles] = useState(false)
@@ -305,6 +332,17 @@ const Dashboard = () => {
         if (params.value === 0) return '❌ Нет'
         return '—'
       },
+    },
+    // Ручной статус (справочник) — выбор сохраняется автоматически, живёт по БИН
+    {
+      field: 'manual_status',
+      headerName: 'Статусы',
+      pinned: 'right',
+      width: 300,
+      sortable: false,
+      filter: false,
+      cellRenderer: StatusCellRenderer,
+      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
   ], [])  // useMemo — колонки не пересоздаются при ре-рендере
 
@@ -473,22 +511,28 @@ const Dashboard = () => {
       setUserMgmtMsg('Заполните все поля')
       return
     }
-    if (newUser.iin && !/^\d{12}$/.test(newUser.iin.trim())) {
+    const iin = newUser.iin.trim()
+    if (iin && !/^\d{12}$/.test(iin)) {
       setUserMgmtMsg('ИИН должен состоять из 12 цифр')
+      return
+    }
+    // Менеджер создаёт только аккаунты с ЭЦП — ИИН обязателен
+    if (isManager() && !iin) {
+      setUserMgmtMsg('Укажите ИИН — менеджер создаёт только аккаунты с ЭЦП')
       return
     }
     try {
       await api.post('/api/users', {
         username: newUser.username,
         password: newUser.password,
-        role: 'user',
+        role: isManager() ? 'user' : newUser.role,
         region: newUser.region || null,
-        iin: newUser.iin.trim() || null,
-        eds_disabled: newUser.eds_disabled ? 1 : 0,
+        iin: iin || null,
+        eds_disabled: isManager() ? 0 : (newUser.eds_disabled ? 1 : 0),
       })
-      setNewUser({ username: '', password: '', region: '', iin: '', eds_disabled: false })
+      setNewUser({ username: '', password: '', region: '', iin: '', eds_disabled: false, role: 'user' })
       setUserMgmtMsg('Пользователь создан')
-      fetchUsers()
+      if (isAdmin()) fetchUsers()
     } catch (e) {
       setUserMgmtMsg(e.response?.data?.detail || 'Ошибка')
     }
@@ -534,6 +578,24 @@ const Dashboard = () => {
     }
   }, [])
 
+  const fetchLogStats = useCallback(async (username = '', from = null, to = null) => {
+    setStatsLoading(true)
+    try {
+      const res = await api.get('/api/logs/stats', {
+        params: {
+          username: username || undefined,
+          date_from: toLocalISODate(from),
+          date_to: toLocalISODate(to),
+        }
+      })
+      setLogStats(res.data.items)
+    } catch (e) {
+      toast.error('Ошибка загрузки таблицы логов')
+    } finally {
+      setStatsLoading(false)
+    }
+  }, [])
+
   const openAdminPanel = () => {
     setShowAdmin(true)
     setAdminTab('users')
@@ -544,6 +606,7 @@ const Dashboard = () => {
     setAdminTab(tab)
     if (tab === 'users') fetchUsers()
     if (tab === 'logs') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo)
+    if (tab === 'logstable') fetchLogStats(statsUserFilter, statsDateFrom, statsDateTo)
     if (tab === 'files') fetchFiles()
   }
 
@@ -774,12 +837,31 @@ const Dashboard = () => {
   const totalPages = Math.ceil(totalRecords / pageSize)
   const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchAll(page) }
 
+  // Сохранение ручного статуса по БИН (выбор в выпадашке столбца «Статусы»)
+  const onStatusChange = useCallback(async (row, status) => {
+    const bin = row?.bin
+    if (bin == null) return
+    try {
+      await api.patch('/api/insurance/status', { bin, status })
+      setRowData((prev) => prev.map((r) => (r.bin === bin ? { ...r, manual_status: status } : r)))
+    } catch (e) {
+      toast.error('Не удалось сохранить статус')
+    }
+  }, [])
+
+  // Контекст для AG Grid: справочник статусов + обработчик (без пересоздания колонок)
+  const gridContext = useMemo(() => ({ statusOptions, onStatusChange }), [statusOptions, onStatusChange])
+
   useEffect(() => {
     fetchAll(1)
     fetchLastUpdate()
+    api.get('/api/insurance/statuses').then((r) => setStatusOptions(r.data)).catch(() => {})
     if (isAdmin()) {
       fetchRegions()
       fetchUsers()
+    } else if (isManager()) {
+      // Менеджеру регионы нужны для выпадашки при создании аккаунта
+      fetchRegions()
     } else if (user?.region) {
       // Региональный пользователь — загружаем только его районы
       fetchDistricts(user.region)
@@ -838,14 +920,14 @@ const Dashboard = () => {
             </div>
           )}
           <span>{user?.username}</span>
-          {!isAdmin() && (
+          {!isAdmin() && !isManager() && (
             <button onClick={openFiles} className="files-btn">
               <FolderOpen size={18} /> Файлы
             </button>
           )}
-          {isAdmin() && (
+          {canAdminPanel && (
             <button onClick={openAdminPanel} className="logs-btn">
-              <Settings size={18} /> Админ панель
+              <Settings size={18} /> {isManager() ? 'Панель' : 'Админ панель'}
             </button>
           )}
           <button onClick={logout} className="logout-btn">
@@ -922,20 +1004,29 @@ const Dashboard = () => {
 
             <div className="admin-tabs">
               <button className={adminTab === 'users' ? 'active' : ''} onClick={() => selectAdminTab('users')}>
-                <Users size={16} /> Пользователи
+                <Users size={16} /> {isManager() ? 'Создать аккаунт' : 'Пользователи'}
               </button>
-              <button className={adminTab === 'upload' ? 'active' : ''} onClick={() => selectAdminTab('upload')}>
-                <Upload size={16} /> Обновить страхование
-              </button>
-              <button className={adminTab === 'oppv' ? 'active' : ''} onClick={() => selectAdminTab('oppv')}>
-                <Coins size={16} /> Обновить ОППВ
-              </button>
+              {isAdmin() && (
+                <button className={adminTab === 'upload' ? 'active' : ''} onClick={() => selectAdminTab('upload')}>
+                  <Upload size={16} /> Обновить страхование
+                </button>
+              )}
+              {isAdmin() && (
+                <button className={adminTab === 'oppv' ? 'active' : ''} onClick={() => selectAdminTab('oppv')}>
+                  <Coins size={16} /> Обновить ОППВ
+                </button>
+              )}
               <button className={adminTab === 'logs' ? 'active' : ''} onClick={() => selectAdminTab('logs')}>
                 <ScrollText size={16} /> Логи входов
               </button>
-              <button className={adminTab === 'files' ? 'active' : ''} onClick={() => selectAdminTab('files')}>
-                <FolderOpen size={16} /> Файлы
+              <button className={adminTab === 'logstable' ? 'active' : ''} onClick={() => selectAdminTab('logstable')}>
+                <ScrollText size={16} /> Таблица логов
               </button>
+              {isAdmin() && (
+                <button className={adminTab === 'files' ? 'active' : ''} onClick={() => selectAdminTab('files')}>
+                  <FolderOpen size={16} /> Файлы
+                </button>
+              )}
             </div>
 
             {/* Вкладка: региональные пользователи */}
@@ -949,6 +1040,16 @@ const Dashboard = () => {
                     <option value="">— Весь Казахстан —</option>
                     {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
+                  {isAdmin() && (
+                    <select
+                      value={newUser.role}
+                      onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                      title="Роль аккаунта"
+                    >
+                      <option value="user">Пользователь</option>
+                      <option value="manager">Менеджер</option>
+                    </select>
+                  )}
                   <input
                     type="text"
                     placeholder="Логин (латиница)"
@@ -963,25 +1064,34 @@ const Dashboard = () => {
                   />
                   <input
                     type="text"
-                    placeholder="ИИН (12 цифр, для ЭЦП)"
+                    placeholder={isManager() ? 'ИИН (12 цифр, обязательно)' : 'ИИН (12 цифр, для ЭЦП)'}
                     value={newUser.iin}
                     maxLength={12}
                     onChange={(e) => setNewUser({ ...newUser, iin: e.target.value.replace(/\D/g, '') })}
                   />
-                  <label className="eds-toggle" title="Аккаунт сможет входить без ЭЦП, только по логину и паролю">
-                    <input
-                      type="checkbox"
-                      checked={newUser.eds_disabled}
-                      onChange={(e) => setNewUser({ ...newUser, eds_disabled: e.target.checked })}
-                    />
-                    Без ЭЦП
-                  </label>
+                  {isAdmin() && (
+                    <label className="eds-toggle" title="Аккаунт сможет входить без ЭЦП, только по логину и паролю">
+                      <input
+                        type="checkbox"
+                        checked={newUser.eds_disabled}
+                        onChange={(e) => setNewUser({ ...newUser, eds_disabled: e.target.checked })}
+                      />
+                      Без ЭЦП
+                    </label>
+                  )}
                   <button onClick={createRegionalUser} className="apply-btn create-user-btn">
                     Создать
                   </button>
                   {userMgmtMsg && <span className={`user-mgmt-msg ${userMgmtMsg.includes('создан') ? 'ok' : 'err'}`}>{userMgmtMsg}</span>}
                 </div>
 
+                {isManager() && (
+                  <p style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
+                    Менеджер создаёт только аккаунты с ЭЦП (ИИН обязателен). Управление существующими аккаунтами доступно администратору.
+                  </p>
+                )}
+
+                {isAdmin() && (
                 <table className="users-table">
                   <thead>
                     <tr><th>Логин</th><th>ФИО (из ЭЦП)</th><th>Роль</th><th>Регион</th><th>ИИН (ЭЦП)</th><th>Без ЭЦП</th><th>Доступ к ОПВР</th><th></th></tr>
@@ -1045,6 +1155,7 @@ const Dashboard = () => {
                     ))}
                   </tbody>
                 </table>
+                )}
               </div>
             )}
 
@@ -1252,6 +1363,88 @@ const Dashboard = () => {
                 </button>
               </div>
             )}
+            </>
+            )}
+
+            {/* Вкладка: таблица логов (сколько раз какой аккаунт заходил) */}
+            {adminTab === 'logstable' && (
+            <>
+            <div className="logs-toolbar">
+              <input
+                type="text"
+                placeholder="Поиск по логину..."
+                value={statsUserFilter}
+                onChange={(e) => setStatsUserFilter(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') fetchLogStats(statsUserFilter, statsDateFrom, statsDateTo) }}
+              />
+              <DatePicker
+                selected={statsDateFrom}
+                onChange={(d) => setStatsDateFrom(d)}
+                dateFormat="dd.MM.yyyy"
+                placeholderText="Дата с"
+                isClearable
+                className="logs-date-input"
+              />
+              <DatePicker
+                selected={statsDateTo}
+                onChange={(d) => setStatsDateTo(d)}
+                dateFormat="dd.MM.yyyy"
+                placeholderText="Дата по"
+                isClearable
+                className="logs-date-input"
+              />
+              <button
+                onClick={() => fetchLogStats(statsUserFilter, statsDateFrom, statsDateTo)}
+                className="apply-btn"
+                style={{ padding: '8px 16px' }}
+              >
+                <Search size={16} /> Показать
+              </button>
+            </div>
+
+            <div className="logs-subbar">
+              <span>
+                {statsDateFrom || statsDateTo
+                  ? 'Количество входов за выбранный период'
+                  : 'Количество входов за всё время — выберите даты, чтобы ограничить период'}
+              </span>
+              <span style={{ marginLeft: 'auto' }}>
+                Аккаунтов: <b>{logStats.length}</b>
+              </span>
+            </div>
+
+            <div className="logs-table-wrap">
+              {statsLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
+              ) : logStats.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Нет данных</div>
+              ) : (
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Логин</th>
+                      <th>ФИО</th>
+                      <th>Роль</th>
+                      <th>Регион</th>
+                      <th>Кол-во входов</th>
+                      <th>Последний вход</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logStats.map((s) => (
+                      <tr key={s.username}>
+                        <td><b>{s.username}</b></td>
+                        <td>{s.full_name || '—'}</td>
+                        <td>{s.role}</td>
+                        <td>{s.region || '— все регионы —'}</td>
+                        <td style={{ textAlign: 'center' }}><b>{s.logins}</b></td>
+                        <td>{s.last_login ? new Date(s.last_login).toLocaleString('ru-RU') : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
             </>
             )}
           </div>
@@ -1472,6 +1665,8 @@ const Dashboard = () => {
             rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
+            context={gridContext}
+            getRowId={(p) => String(p.data.id)}
             pagination={false}
             domLayout="normal"
             enableCellTextSelection={true}

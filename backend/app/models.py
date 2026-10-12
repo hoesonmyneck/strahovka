@@ -188,3 +188,15 @@ class LoginLog(Base):
     __table_args__ = (
         Index('idx_login_logs_logged_at', 'logged_at'),
     )
+
+
+class BinStatus(Base):
+    """Ручной статус по БИН (справочник в таблице страхования). Хранится
+    отдельно от insurance_records/company_summary, поэтому переживает
+    перезаливку данных — статус остаётся за тем же БИН."""
+    __tablename__ = "bin_status"
+
+    bin = Column(BigInteger, primary_key=True)
+    status = Column(String(200))
+    updated_by = Column(String(50), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)

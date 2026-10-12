@@ -38,9 +38,15 @@ class InsuranceRecordBase(BaseModel):
 class InsuranceRecordResponse(InsuranceRecordBase):
     id: int
     created_at: Optional[datetime] = None
-    
+    manual_status: Optional[str] = None   # ручной статус по БИН (справочник)
+
     class Config:
         from_attributes = True
+
+
+class BinStatusUpdate(BaseModel):
+    bin: int
+    status: Optional[str] = None
 
 class InsuranceRecordList(BaseModel):
     items: List[InsuranceRecordResponse]
@@ -144,6 +150,20 @@ class LoginLogList(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class LogStatRow(BaseModel):
+    username: str
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    region: Optional[str] = None
+    logins: int = 0
+    last_login: Optional[datetime] = None
+
+
+class LogStatList(BaseModel):
+    items: List[LogStatRow]
+    total: int
 
 
 class OppvRecordResponse(BaseModel):
