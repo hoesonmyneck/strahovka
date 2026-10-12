@@ -848,10 +848,13 @@ def set_bin_status(
 
 @app.get("/api/insurance/status/export")
 def export_bin_status(
+    only_set: bool = False,
     current_user: models.User = Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    """Выгрузка проставленных статусов (только админ): два столбца — БИН и Статус.
+    """Выгрузка статусов (только админ): два столбца — БИН и Статус.
+    По умолчанию — весь реестр организаций (по одной строке на БИН), статус
+    пустой у неотмеченных. only_set=1 — только БИНы с проставленным статусом.
     Пишем потоково (xlsxwriter constant_memory + yield_per), память не грузим."""
     def bin12(v):
         return str(int(v)).zfill(12) if v is not None else ''
@@ -867,9 +870,16 @@ def export_bin_status(
     ws.write_string(0, 1, 'Статус', header_fmt)
     ws.freeze_panes(1, 0)
 
+    S, B = models.CompanySummary, models.BinStatus
+    if only_set:
+        q = db.query(B.bin, B.status).order_by(B.bin)
+    else:
+        # Весь реестр: одна строка на БИН + левый джойн статуса (пустой у неотмеченных)
+        q = (db.query(S.bin, B.status)
+             .outerjoin(B, B.bin == S.bin)
+             .order_by(S.bin))
+
     row = 0
-    q = (db.query(models.BinStatus.bin, models.BinStatus.status)
-         .order_by(models.BinStatus.bin))
     for b, s in q.yield_per(5000):
         row += 1
         ws.write_string(row, 0, bin12(b))
