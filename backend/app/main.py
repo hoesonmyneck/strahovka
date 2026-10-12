@@ -1916,6 +1916,67 @@ def login_stats_table(
     return schemas.LogStatList(items=rows, total=len(rows))
 
 
+@app.get("/api/logs/stats/export")
+def export_login_stats_table(
+    username: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    current_user: models.User = Depends(auth.require_admin_or_manager),
+    db: Session = Depends(database.get_db)
+):
+    """Excel-выгрузка таблицы логов (сколько раз какой аккаунт заходил)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, Side
+    from openpyxl.utils import get_column_letter
+
+    data = login_stats_table(username=username, date_from=date_from, date_to=date_to,
+                             current_user=current_user, db=db)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Таблица логов"
+
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    headers = ["Логин", "ФИО", "Роль", "Регион", "Кол-во входов", "Последний вход"]
+    for col, name in enumerate(headers, start=1):
+        c = ws.cell(row=1, column=col, value=name)
+        c.font = Font(bold=True)
+        c.alignment = center
+        c.border = border
+
+    for i, r in enumerate(data.items, start=2):
+        vals = [
+            r.username, r.full_name or "", r.role or "",
+            r.region or NO_REGION_LABEL, r.logins,
+            r.last_login,
+        ]
+        for col, v in enumerate(vals, start=1):
+            c = ws.cell(row=i, column=col, value=v)
+            c.border = border
+            c.alignment = center if col in (3, 5) else left
+            if col == 6 and r.last_login:
+                c.number_format = "DD.MM.YYYY, HH:MM:SS"
+
+    widths = [22, 32, 12, 26, 15, 24]
+    for col, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col)].width = w
+    ws.freeze_panes = "A2"
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    wb.save(tmp.name)
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="login_stats_table.xlsx",
+        background=BackgroundTask(os.unlink, tmp.name),
+    )
+
+
 NO_REGION_LABEL = "АО КСЖ ГАК"
 
 _MONTHS_GEN = (

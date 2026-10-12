@@ -672,6 +672,33 @@ const Dashboard = () => {
     }
   }
 
+  // Выгрузка таблицы логов (сколько раз какой аккаунт заходил)
+  const downloadLogStats = async () => {
+    try {
+      const res = await api.get('/api/logs/stats/export', {
+        params: {
+          username: statsUserFilter || undefined,
+          date_from: toLocalISODate(statsDateFrom),
+          date_to: toLocalISODate(statsDateTo),
+        },
+        responseType: 'blob',
+      })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const from = statsDateFrom ? toLocalISODate(statsDateFrom) : 'весь-период'
+      const to = statsDateTo ? toLocalISODate(statsDateTo) : ''
+      link.setAttribute('download', `таблица_логов_${from}${to ? '_' + to : ''}.xlsx`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Файл скачан')
+    } catch {
+      toast.error('Ошибка при скачивании')
+    }
+  }
+
   // ─── Общие файлы ──────────────────────────────────────────────────────────
   const formatBytes = (bytes) => {
     if (!bytes) return '—'
@@ -1337,11 +1364,6 @@ const Dashboard = () => {
             </div>
 
             <div className="logs-subbar">
-              <span>
-                {logsDateFrom || logsDateTo
-                  ? 'Выгрузка за выбранный период'
-                  : 'Выгрузка за всё время — выберите даты, чтобы ограничить период'}
-              </span>
               <span style={{ marginLeft: 'auto' }}>
                 Всего записей: <b>{logsTotal.toLocaleString()}</b>
               </span>
@@ -1434,14 +1456,17 @@ const Dashboard = () => {
               >
                 <Search size={16} /> Показать
               </button>
+              <button
+                onClick={downloadLogStats}
+                className="download-btn"
+                style={{ padding: '8px 16px' }}
+                title="Excel: сколько раз каждый аккаунт заходил"
+              >
+                <Download size={16} /> Выгрузка
+              </button>
             </div>
 
             <div className="logs-subbar">
-              <span>
-                {statsDateFrom || statsDateTo
-                  ? 'Количество входов за выбранный период'
-                  : 'Количество входов за всё время — выберите даты, чтобы ограничить период'}
-              </span>
               <span style={{ marginLeft: 'auto' }}>
                 Аккаунтов: <b>{logStats.length}</b>
               </span>
