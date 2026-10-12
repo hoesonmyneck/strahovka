@@ -954,7 +954,7 @@ const Dashboard = () => {
   }, [])
 
   return (
-    <div className="dashboard">
+    <div className={'dashboard' + (section === 'dashboard' ? ' hud-active' : '')}>
       <header className="dashboard-header">
         <div>
           <h1>Государственная компания по страхованию жизни</h1>

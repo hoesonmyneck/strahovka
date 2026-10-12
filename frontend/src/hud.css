@@ -293,7 +293,92 @@
   100% { opacity: 0; }
 }
 
+/* ═══════════════ HUD-шапка (когда активен раздел «Дашборд») ═══════════════ */
+.dashboard.hud-active {
+  --h-cyan: #22d3ee;
+  --h-line: rgba(56, 189, 248, .22);
+  --h-line-hi: rgba(56, 189, 248, .48);
+  --h-dim: #8fa8d4;
+  --h-glow: 0 0 22px rgba(34, 211, 238, .20);
+  background: #04081a;
+}
+.hud-active .dashboard-header {
+  position: relative;
+  background: linear-gradient(180deg, rgba(12, 28, 70, .92) 0%, rgba(8, 18, 48, .72) 100%);
+  box-shadow: 0 8px 34px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(14px);
+}
+/* светящаяся линия под шапкой с бегущим бликом */
+.hud-active .dashboard-header::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, .9), transparent) no-repeat,
+    linear-gradient(90deg, transparent, var(--h-cyan) 22%, rgba(59, 130, 246, .9) 58%, transparent);
+  background-size: 18% 100%, 100% 100%;
+  animation: hud-header-run 7s linear infinite;
+  opacity: .85;
+  pointer-events: none;
+}
+@keyframes hud-header-run {
+  from { background-position: -20% 0, 0 0; }
+  to   { background-position: 120% 0, 0 0; }
+}
+.hud-active .dashboard-header h1 {
+  color: #fff;
+  text-shadow: 0 0 18px rgba(34, 211, 238, .35);
+  letter-spacing: .2px;
+}
+.hud-active .last-update-line,
+.hud-active .last-update-line span { color: var(--h-dim) !important; }
+.hud-active .last-update-line b { color: #eaf4ff !important; }
+.hud-active .last-update-line button,
+.hud-active .last-update-line input {
+  background: rgba(8, 20, 52, .7) !important;
+  border: 1px solid var(--h-line-hi) !important;
+  color: #eaf4ff !important;
+  border-radius: 6px !important;
+}
+.hud-active .user-info span { color: #c9dcff; }
+
+/* кнопки в шапке — HUD-капсулы */
+.hud-active .logout-btn,
+.hud-active .logs-btn,
+.hud-active .files-btn {
+  background: rgba(10, 24, 60, .7) !important;
+  border: 1px solid var(--h-line) !important;
+  color: #eaf4ff !important;
+  border-radius: 999px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+  transition: background .2s, border-color .2s, box-shadow .2s;
+}
+.hud-active .logout-btn:hover,
+.hud-active .logs-btn:hover,
+.hud-active .files-btn:hover {
+  background: rgba(34, 211, 238, .14) !important;
+  border-color: var(--h-line-hi) !important;
+  color: #fff !important;
+  box-shadow: var(--h-glow);
+}
+
+/* переключатель разделов — тёмная капсула */
+.hud-active .section-toggle {
+  background: rgba(8, 20, 52, .72);
+  border: 1px solid var(--h-line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 4px 18px rgba(0, 0, 0, .35);
+}
+.hud-active .section-toggle button { color: var(--h-dim); }
+.hud-active .section-toggle button:hover { color: #fff; background: rgba(34, 211, 238, .1); }
+.hud-active .section-toggle button.active {
+  background: linear-gradient(135deg, #22d3ee, #3b82f6) !important;
+  color: #04162a !important;
+  box-shadow: 0 0 18px rgba(34, 211, 238, .45), inset 0 1px 0 rgba(255, 255, 255, .3);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .hud-active .dashboard-header::after { animation: none; }
   .hud-view, .hud-view > *, .hud-view::before, .hud-view::after,
   .hud-card::after, .kpi-value--accent { animation: none; }
   .kpi-spark .ks-line { stroke-dashoffset: 0; }
