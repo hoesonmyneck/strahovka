@@ -213,6 +213,37 @@ function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
   )
 }
 
+// Разбивка по размеру предприятия: всего, застраховано, охват (бар)
+function HudSizeBreakdown({ items }) {
+  const maxTotal = Math.max(1, ...items.map((i) => i.total || 0))
+  return (
+    <div className="hud-size">
+      {items.map((it, i) => {
+        const tot = it.total || 0
+        const ins = it.insured || 0
+        const cov = tot ? Math.round((ins / tot) * 100) : 0
+        return (
+          <div className="hud-size-row" key={it.label + i}>
+            <div className="hud-size-head">
+              <span className="hud-size-label">{it.label}</span>
+              <span className="hud-size-tot"><b>{fmtNum(tot)}</b> орг.</span>
+            </div>
+            <div className="hud-size-track" title={`Застраховано ${fmtNum(ins)} из ${fmtNum(tot)} (${cov}%)`}>
+              <span className="hud-size-bar" style={{ width: `${(tot / maxTotal) * 100}%`, '--d': `${i * 60}ms` }}>
+                <span className="hud-size-ins" style={{ width: `${cov}%` }} />
+              </span>
+            </div>
+            <div className="hud-size-sub">
+              <span><i style={{ background: 'var(--h-cyan)' }} /> застрах. <b>{fmtNum(ins)}</b></span>
+              <span className="hud-size-cov">{cov}%</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Донат из двух сегментов + легенда
 function HudDonut({ a, b, labelA, labelB }) {
   const total = a + b || 1
@@ -391,6 +422,13 @@ const DashboardHud = () => {
           </div>
         </HudCard>
       </div>
+      {ins.by_size && ins.by_size.length > 0 && (
+        <div className="hud-charts">
+          <HudCard title="Разбивка по размеру предприятия" wide>
+            <HudSizeBreakdown items={ins.by_size} />
+          </HudCard>
+        </div>
+      )}
       {ins.by_status && ins.by_status.length > 0 && (
         <div className="hud-charts">
           <HudCard title="Рейтинг статусов" wide>

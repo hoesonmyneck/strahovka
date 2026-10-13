@@ -33,6 +33,7 @@ class InsuranceRecordBase(BaseModel):
     esutd_akt_td: Optional[int] = None
     ip: Optional[int] = None
     tip: Optional[int] = None
+    org_size: Optional[str] = None
     is_insured: Optional[int] = 1
 
 class InsuranceRecordResponse(InsuranceRecordBase):

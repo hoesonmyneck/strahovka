@@ -230,6 +230,7 @@ const Dashboard = () => {
     contract_number: '', contract_date_from: null, contract_date_to: null,
     date_end_from: null, date_end_to: null,
     obl_name: '', rai_name: '', opf_name: '', is_insured: '', ip: '',
+    org_size: '',
     // ESUTD акт. ТД — оператор сравнения + число
     esutd_op: 'gte', esutd_val: '',
     // Срок истечения — конкретный месяц (date_end_from/to считаем отдельно)
@@ -375,6 +376,7 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150,
       valueGetter: (p) => p.data ? (p.data.ip === 1 ? 'ИП' : (p.data.ip === 0 ? 'ЮЛ' : '')) : '',
     },
+    { field: 'org_size', headerName: 'Размер предприятия', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 170 },
     // ТИП и Флаг скрыты в таблице, но экспортируются в Excel
     { field: 'tip', headerName: 'ТИП', hide: true },
     { field: 'flag_head', headerName: 'Флаг', hide: true },
@@ -430,6 +432,7 @@ const Dashboard = () => {
     if (filters.opf_name) params.opf_name = filters.opf_name
     if (filters.is_insured !== '') params.is_insured = parseInt(filters.is_insured)
     if (filters.ip !== '') params.ip = parseInt(filters.ip)
+    if (filters.org_size) params.org_size = filters.org_size
     // ESUTD акт. ТД: применяем только когда указано число
     if (filters.esutd_val !== '' && filters.esutd_val != null) {
       params.esutd_op = filters.esutd_op
@@ -1720,6 +1723,19 @@ const Dashboard = () => {
               <option value="">Все</option>
               <option value="0">ЮЛ</option>
               <option value="1">ИП</option>
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>Размер предприятия</label>
+            <select
+              value={filters.org_size}
+              onChange={(e) => setFilters({ ...filters, org_size: e.target.value })}
+            >
+              <option value="">Все</option>
+              <option value="Малое">Малое</option>
+              <option value="Среднее">Среднее</option>
+              <option value="Крупное">Крупное</option>
             </select>
           </div>
 

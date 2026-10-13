@@ -44,6 +44,7 @@ class InsuranceRecord(Base):
     esutd_akt_td = Column(BigInteger)
     ip = Column(BigInteger)
     tip = Column(BigInteger)
+    org_size = Column(String(20))  # Размер предприятия: Малое/Среднее/Крупное
     is_passport = Column(Integer, index=True)  # 1 = есть паспорт (для правила «обязан»)
 
     # Дополнительные поля для фильтрации
@@ -93,6 +94,7 @@ class CompanySummary(Base):
     esutd_akt_td = Column(BigInteger)
     ip = Column(BigInteger)
     tip = Column(BigInteger)
+    org_size = Column(String(20), index=True)  # Размер предприятия: Малое/Среднее/Крупное
     # Флаги статуса (агрегированы по БИН на момент пересборки)
     obl = Column(Integer)       # обязан
     act = Column(Integer)       # есть действующий договор

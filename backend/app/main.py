@@ -47,6 +47,10 @@ with engine.connect() as _conn:
            )""",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
+        # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
+        "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS org_size VARCHAR(20)",
+        "ALTER TABLE company_summary ADD COLUMN IF NOT EXISTS org_size VARCHAR(20)",
+        "CREATE INDEX IF NOT EXISTS idx_cs_org_size ON company_summary (org_size)",
         """CREATE TABLE IF NOT EXISTS app_settings (
                key   VARCHAR(100) PRIMARY KEY,
                value VARCHAR(500)
@@ -271,6 +275,9 @@ def apply_filters(query, model, params: dict, force_region: str = None):
     if params.get("ip") is not None:
         query = query.filter(M.ip == params["ip"])
 
+    if params.get("org_size"):
+        query = query.filter(M.org_size == params["org_size"])
+
     query = _apply_esutd_filter(query, M.esutd_akt_td, params)
 
     # is_insured сознательно НЕ фильтруется здесь: статус застрахованности —
@@ -425,6 +432,8 @@ def apply_summary_filters(query, params: dict, force_region: str = None):
         query = query.filter(S.name_oked.ilike(f"%{params['name_oked']}%"))
     if params.get("ip") is not None:
         query = query.filter(S.ip == params["ip"])
+    if params.get("org_size"):
+        query = query.filter(S.org_size == params["org_size"])
     query = _apply_esutd_filter(query, S.esutd_akt_td, params)
     return query
 
@@ -487,7 +496,7 @@ def rebuild_company_summary(db):
                 'leader_middlename': rep.leader_middlename,
                 'opf_name': rep.opf_name, 'id_oked': rep.id_oked, 'name_oked': rep.name_oked,
                 'kol_12mes': rep.kol_12mes, 'fot_12mes': rep.fot_12mes, 'esutd_akt_td': rep.esutd_akt_td,
-                'ip': rep.ip, 'tip': rep.tip,
+                'ip': rep.ip, 'tip': rep.tip, 'org_size': rep.org_size,
                 'obl': obl, 'act': act, 'ins_old': ins_old,
                 'status': company_status(obl, act, ins_old),
             })
@@ -739,6 +748,18 @@ def dashboard_kpis(
         )).group_by(S.obl_name).order_by(func.count().desc()).limit(10).all()
     ]
 
+    # Разбивка по размеру предприятия (Малое/Среднее/Крупное)
+    by_size = [
+        {"label": r.org_size or "Не указан", "insured": r.ins or 0,
+         "not_insured": r.nins or 0, "total": r.cnt or 0}
+        for r in scope(db.query(
+            S.org_size,
+            func.count().label("cnt"),
+            func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
+            func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("nins"),
+        )).group_by(S.org_size).order_by(func.count().desc()).all()
+    ]
+
     # Ручные статусы (глобально; привязка к региону — через join, для простоты опускаем)
     by_status = [
         {"label": r[0], "value": r[1]}
@@ -760,6 +781,7 @@ def dashboard_kpis(
         "ul_ins": tot.ul_ins or 0,
         "by_region": by_region,
         "by_status": by_status,
+        "by_size": by_size,
     }
 
     # ── ОППВ (по oppv_records) ──
@@ -926,6 +948,7 @@ def get_records(
     name_oked: Optional[str] = None,
     is_insured: Optional[int] = None,
     ip: Optional[int] = None,
+    org_size: Optional[str] = None,
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
@@ -1328,7 +1351,7 @@ def _run_insurance_upload(tmp_path: str, job_id: str):
                     'idrai': safe_int(row.get('IDRAI')),
                     'rai_name': safe_str(row.get('RAI_NAME')),
                     'address': safe_str(row.get('ADDRESS')),
-                    'phone': safe_str(row.get('PHONE')),
+                    'phone': safe_str(row.get('PHONE_LEADER')) or safe_str(row.get('PHONE')),
                     'mail': safe_float(row.get('MAIL')),
                     'leader_surname': safe_str(row.get('LEADER_SURNAME')),
                     'leader_name': safe_str(row.get('LEADER_NAME')),
@@ -1342,6 +1365,7 @@ def _run_insurance_upload(tmp_path: str, job_id: str):
                     'esutd_akt_td': safe_int(row.get('ESUTD_AKT_TD')),
                     'ip': safe_int(row.get('IP')),
                     'tip': safe_int(row.get('TIP')),
+                    'org_size': safe_str(row.get('ORG_SIZE')),
                     'is_passport': safe_int(row.get('IS_PASSPORT')),
                     'is_insured': 1 if (effective_end and effective_end > now) else 0,
                     'created_at': now,
