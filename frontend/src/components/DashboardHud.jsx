@@ -187,6 +187,25 @@ function HudGauges({ items, color = 'var(--h-cyan)', coverage = false }) {
   )
 }
 
+// Рейтинг-лидерборд: место, название, бар, значение (топ-3 подсвечены)
+function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
+  const max = Math.max(1, ...items.map((i) => i.value))
+  return (
+    <div className="hud-rank">
+      {items.map((it, i) => (
+        <div className="hud-rank-row" key={it.label + i} title={`${it.label}: ${format(it.value)}`}>
+          <span className={'hud-rank-pos' + (i < 3 ? ' top top' + (i + 1) : '')}>{i + 1}</span>
+          <span className="hud-rank-label">{it.label}</span>
+          <span className="hud-rank-track">
+            <span className="hud-rank-fill" style={{ width: `${(it.value / max) * 100}%`, background: color, '--d': `${i * 55}ms` }} />
+          </span>
+          <span className="hud-rank-val">{format(it.value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Донат из двух сегментов + легенда
 function HudDonut({ a, b, labelA, labelB }) {
   const total = a + b || 1
@@ -249,12 +268,12 @@ const DashboardHud = () => {
       spark: barSpark(ins.by_region.map((r) => ({ label: r.label, value: r.not_insured })), C[3], fmtNum) },
     { label: 'Охват', value: ins.coverage_pct, format: fmtPct, note: 'доля застрахованных',
       spark: barSpark(ins.by_region.map((r) => ({ label: r.label, value: Math.round((r.insured / (r.insured + r.not_insured || 1)) * 100) })), C[1], (v) => v + '%') },
-    { label: 'Сумма премий', value: ins.sum_amount, format: fmtCompact, note: 'по действующим',
+    { label: 'Сумма застрахованных', value: ins.sum_amount, format: fmtCompact, note: 'по действующим',
       spark: barSpark(ins.by_region.map((r) => ({ label: r.label, value: r.total })), C[0], fmtNum) },
-    { label: 'Застрах. сотрудников', value: ins.ins_emp, note: 'человек',
-      spark: lineSpark(ins.by_region.map((r) => ({ label: r.label, value: r.insured })), C[2], fmtNum) },
     { label: 'Всего сотрудников', value: ins.tot_emp, note: 'по организациям',
       spark: lineSpark(ins.by_region.map((r) => ({ label: r.label, value: r.total })), C[1], fmtNum) },
+    { label: 'Застрах. сотрудников', value: ins.ins_emp, note: 'человек',
+      spark: lineSpark(ins.by_region.map((r) => ({ label: r.label, value: r.insured })), C[2], fmtNum) },
     { label: 'Форма предприятия', pair: [
         { label: 'ЮЛ', value: ins.ul_cnt, note: fmtPct((ins.ul_cnt / (ins.ul_cnt + ins.ip_cnt || 1)) * 100) },
         { label: 'ИП', value: ins.ip_cnt, note: fmtPct((ins.ip_cnt / (ins.ul_cnt + ins.ip_cnt || 1)) * 100) },
@@ -285,17 +304,24 @@ const DashboardHud = () => {
       <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
       <KpiPanel tiles={insTiles} cols={4} />
       <div className="hud-charts">
-        <HudCard title="Охват по регионам" wide>
-          <HudGauges items={ins.by_region} coverage color="var(--h-cyan)" />
+        <HudCard title="Рейтинг регионов по застрахованным" wide>
+          <HudRanking
+            items={[...ins.by_region].sort((a, b) => b.insured - a.insured).map((r) => ({ label: r.label, value: r.insured }))}
+            color="var(--h-cyan)" />
         </HudCard>
         <HudCard title="Форма предприятия">
           <HudDonut a={ins.ul_cnt} b={ins.ip_cnt} labelA="ЮЛ" labelB="ИП" />
+          <div className="hud-donut-extra">
+            <div className="hud-donut-extra-title">Застрахованы</div>
+            <div><i style={{ background: 'var(--h-cyan)' }} /> ЮЛ: <b>{fmtNum(ins.ul_ins)}</b> <span className="dim">из {fmtNum(ins.ul_cnt)}</span></div>
+            <div><i style={{ background: 'var(--h-amber)' }} /> ИП: <b>{fmtNum(ins.ip_ins)}</b> <span className="dim">из {fmtNum(ins.ip_cnt)}</span></div>
+          </div>
         </HudCard>
       </div>
       {ins.by_status && ins.by_status.length > 0 && (
         <div className="hud-charts">
-          <HudCard title="Проставленные статусы" wide>
-            <HudGauges items={ins.by_status} color="var(--h-blue)" />
+          <HudCard title="Рейтинг статусов" wide>
+            <HudRanking items={ins.by_status} color="var(--h-blue)" />
           </HudCard>
         </div>
       )}
@@ -305,16 +331,8 @@ const DashboardHud = () => {
           <h2 className="hud-h2"><Coins size={18} /> Анализ ОППВ</h2>
           <KpiPanel tiles={opTiles} cols={3} />
           <div className="hud-charts">
-            <HudCard title="Сотрудники по регионам">
-              <HudRose items={op.by_region} />
-            </HudCard>
-            <HudCard title="Гендерный состав">
-              <HudDonut a={op.male} b={op.female} labelA="Мужчины" labelB="Женщины" />
-            </HudCard>
-          </div>
-          <div className="hud-charts">
-            <HudCard title="Топ видов деятельности (ОКЭД) по сотрудникам" wide>
-              <HudBubbles items={op.by_oked} />
+            <HudCard title="Рейтинг ОКЭД по сотрудникам" wide>
+              <HudRanking items={op.by_oked} color="var(--h-teal)" />
             </HudCard>
           </div>
         </>

@@ -190,6 +190,8 @@ const Dashboard = () => {
 
   // Доступ к разделу ОПВР: админ или пользователь с флагом appvr_access
   const canAppvr = isAdmin() || !!user?.appvr_access
+  // Доступ к «Дашборду»: админ или пользователь с флагом dashboard_access
+  const canDashboard = isAdmin() || !!user?.dashboard_access
   // Активный раздел: 'insurance' (страхование) или 'oppv' (пенсионные взносы).
   // Запоминаем выбор, чтобы после перезагрузки страницы остаться в том же разделе.
   const [section, setSection] = useState(() => localStorage.getItem('section') || 'insurance')
@@ -207,10 +209,11 @@ const Dashboard = () => {
     setSection(next)
   }
 
-  // Если пользователь без доступа к ОПВР — не оставляем его в этом разделе
+  // Если у пользователя нет доступа к разделу — не оставляем его там
   useEffect(() => {
     if (user && !canAppvr && section === 'oppv') setSection('insurance')
-  }, [user, canAppvr, section])
+    if (user && !canDashboard && section === 'dashboard') setSection('insurance')
+  }, [user, canAppvr, canDashboard, section])
 
   // ─── Загрузка файла ОПВР (только admin) ───────────────────────────────────
   const [isOppvUploading, setIsOppvUploading] = useState(false)
@@ -257,7 +260,7 @@ const Dashboard = () => {
 
   // ─── Управление пользователями (только admin) ─────────────────────────────
   const [usersList, setUsersList] = useState([])
-  const [newUser, setNewUser] = useState({ username: '', password: '', region: '', iin: '', eds_disabled: false, role: 'user' })
+  const [newUser, setNewUser] = useState({ username: '', password: '', region: '', iin: '', eds_disabled: false, role: 'user', dashboard_access: false })
   const [userMgmtMsg, setUserMgmtMsg] = useState('')
 
   // ─── Админ-панель (вкладки: пользователи / загрузка / логи) ───────────────
@@ -272,7 +275,16 @@ const Dashboard = () => {
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsDateFrom, setLogsDateFrom] = useState(null)
   const [logsDateTo, setLogsDateTo] = useState(null)
+  const [logsRegionFilter, setLogsRegionFilter] = useState('')
   const LOGS_PAGE_SIZE = 50
+
+  // ─── Рейтинг заходов по регионам (гит-календарь) ──────────────────────────
+  const [heatmap, setHeatmap] = useState(null)
+  const [heatMonth, setHeatMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [heatLoading, setHeatLoading] = useState(false)
 
   // ─── Таблица логов (сколько раз какой аккаунт заходил) ────────────────────
   const [logStats, setLogStats] = useState([])
@@ -582,8 +594,9 @@ const Dashboard = () => {
         region: newUser.region || null,
         iin: iin || null,
         eds_disabled: isManager() ? 0 : (newUser.eds_disabled ? 1 : 0),
+        dashboard_access: newUser.dashboard_access ? 1 : 0,
       })
-      setNewUser({ username: '', password: '', region: '', iin: '', eds_disabled: false, role: 'user' })
+      setNewUser({ username: '', password: '', region: '', iin: '', eds_disabled: false, role: 'user', dashboard_access: false })
       setUserMgmtMsg('Пользователь создан')
       if (isAdmin()) fetchUsers()
     } catch (e) {
@@ -609,7 +622,7 @@ const Dashboard = () => {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   }
 
-  const fetchLogs = useCallback(async (page = 1, username = '', from = null, to = null) => {
+  const fetchLogs = useCallback(async (page = 1, username = '', from = null, to = null, region = '') => {
     setLogsLoading(true)
     try {
       const res = await api.get('/api/logs', {
@@ -617,6 +630,7 @@ const Dashboard = () => {
           page,
           page_size: LOGS_PAGE_SIZE,
           username: username || undefined,
+          region: region || undefined,
           date_from: toLocalISODate(from),
           date_to: toLocalISODate(to),
         }
@@ -649,6 +663,20 @@ const Dashboard = () => {
     }
   }, [])
 
+  const fetchHeatmap = useCallback(async (month) => {
+    const [y, m] = (month || '').split('-')
+    if (!y || !m) return
+    setHeatLoading(true)
+    try {
+      const res = await api.get('/api/logs/heatmap', { params: { year: Number(y), month: Number(m) } })
+      setHeatmap(res.data)
+    } catch (e) {
+      toast.error('Ошибка загрузки рейтинга заходов')
+    } finally {
+      setHeatLoading(false)
+    }
+  }, [])
+
   const openAdminPanel = () => {
     setShowAdmin(true)
     setAdminTab('users')
@@ -658,8 +686,9 @@ const Dashboard = () => {
   const selectAdminTab = (tab) => {
     setAdminTab(tab)
     if (tab === 'users') fetchUsers()
-    if (tab === 'logs') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo)
+    if (tab === 'logs') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo, logsRegionFilter)
     if (tab === 'logstable') fetchLogStats(statsUserFilter, statsDateFrom, statsDateTo)
+    if (tab === 'heatmap') fetchHeatmap(heatMonth)
     if (tab === 'files') fetchFiles()
   }
 
@@ -902,6 +931,16 @@ const Dashboard = () => {
     }
   }
 
+  // Доступ к дашборду
+  const toggleDashAccess = async (u) => {
+    try {
+      await api.patch(`/api/users/${u.id}`, { dashboard_access: u.dashboard_access ? 0 : 1 })
+      fetchUsers()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Ошибка')
+    }
+  }
+
   // Отключить/включить вход по ЭЦП для аккаунта
   const toggleEds = async (u) => {
     try {
@@ -1016,12 +1055,14 @@ const Dashboard = () => {
                 <Coins size={16} /> Анализ ОППВ
               </button>
             )}
-            <button
-              className={'hud-tab ' + (section === 'dashboard' ? 'active' : '')}
-              onClick={() => switchSection('dashboard')}
-            >
-              <LayoutDashboard size={16} /> Дашборд
-            </button>
+            {canDashboard && (
+              <button
+                className={'hud-tab ' + (section === 'dashboard' ? 'active' : '')}
+                onClick={() => switchSection('dashboard')}
+              >
+                <LayoutDashboard size={16} /> Дашборд
+              </button>
+            )}
           </div>
           <span>{user?.username}</span>
           {!isAdmin() && !isManager() && (
@@ -1126,6 +1167,9 @@ const Dashboard = () => {
               <button className={adminTab === 'logstable' ? 'active' : ''} onClick={() => selectAdminTab('logstable')}>
                 <ScrollText size={16} /> Таблица логов
               </button>
+              <button className={adminTab === 'heatmap' ? 'active' : ''} onClick={() => selectAdminTab('heatmap')}>
+                <LayoutDashboard size={16} /> Рейтинг заходов
+              </button>
               {isAdmin() && (
                 <button className={adminTab === 'files' ? 'active' : ''} onClick={() => selectAdminTab('files')}>
                   <FolderOpen size={16} /> Файлы
@@ -1183,6 +1227,14 @@ const Dashboard = () => {
                       Без ЭЦП
                     </label>
                   )}
+                  <label className="eds-toggle" title="Доступ к разделу «Дашборд»">
+                    <input
+                      type="checkbox"
+                      checked={newUser.dashboard_access}
+                      onChange={(e) => setNewUser({ ...newUser, dashboard_access: e.target.checked })}
+                    />
+                    Дашборд
+                  </label>
                   <button onClick={createRegionalUser} className="apply-btn create-user-btn">
                     Создать
                   </button>
@@ -1192,7 +1244,7 @@ const Dashboard = () => {
                 {isAdmin() && (
                 <table className="users-table">
                   <thead>
-                    <tr><th>Логин</th><th>ФИО (из ЭЦП)</th><th>Роль</th><th>Регион</th><th>ИИН (ЭЦП)</th><th>Без ЭЦП</th><th>Доступ к ОПВР</th><th></th></tr>
+                    <tr><th>Логин</th><th>ФИО (из ЭЦП)</th><th>Роль</th><th>Регион</th><th>ИИН (ЭЦП)</th><th>Без ЭЦП</th><th>Доступ к ОПВР</th><th>Дашборд</th><th></th></tr>
                   </thead>
                   <tbody>
                     {usersList.map(u => (
@@ -1238,6 +1290,19 @@ const Dashboard = () => {
                               type="checkbox"
                               checked={!!u.appvr_access}
                               onChange={() => toggleAppvr(u)}
+                              style={{ width: 18, height: 18, cursor: 'pointer' }}
+                            />
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {u.role === 'admin' ? (
+                            <span title="Админам доступ открыт всегда">✓</span>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={!!u.dashboard_access}
+                              onChange={() => toggleDashAccess(u)}
+                              title="Доступ к разделу «Дашборд»"
                               style={{ width: 18, height: 18, cursor: 'pointer' }}
                             />
                           )}
@@ -1365,8 +1430,16 @@ const Dashboard = () => {
                 placeholder="Фильтр по логину..."
                 value={logsUserFilter}
                 onChange={(e) => setLogsUserFilter(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo, logsRegionFilter) }}
               />
+              <select
+                value={logsRegionFilter}
+                onChange={(e) => { setLogsRegionFilter(e.target.value); fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo, e.target.value) }}
+                className="logs-date-input"
+              >
+                <option value="">Все регионы</option>
+                {availableRegions.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
               <DatePicker
                 selected={logsDateFrom}
                 onChange={(d) => setLogsDateFrom(d)}
@@ -1384,7 +1457,7 @@ const Dashboard = () => {
                 className="logs-date-input"
               />
               <button
-                onClick={() => fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo)}
+                onClick={() => fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo, logsRegionFilter)}
                 className="apply-btn"
                 style={{ padding: '8px 16px' }}
               >
@@ -1441,7 +1514,7 @@ const Dashboard = () => {
               <div className="logs-pagination">
                 <button
                   disabled={logsPage <= 1}
-                  onClick={() => fetchLogs(logsPage - 1, logsUserFilter, logsDateFrom, logsDateTo)}
+                  onClick={() => fetchLogs(logsPage - 1, logsUserFilter, logsDateFrom, logsDateTo, logsRegionFilter)}
                 >
                   ← Назад
                 </button>
@@ -1450,7 +1523,7 @@ const Dashboard = () => {
                 </span>
                 <button
                   disabled={logsPage >= Math.ceil(logsTotal / LOGS_PAGE_SIZE)}
-                  onClick={() => fetchLogs(logsPage + 1, logsUserFilter, logsDateFrom, logsDateTo)}
+                  onClick={() => fetchLogs(logsPage + 1, logsUserFilter, logsDateFrom, logsDateTo, logsRegionFilter)}
                 >
                   Вперёд →
                 </button>
@@ -1543,6 +1616,60 @@ const Dashboard = () => {
             </div>
             </>
             )}
+
+            {/* Вкладка: рейтинг заходов по регионам (гит-календарь) */}
+            {adminTab === 'heatmap' && (
+            <>
+            <div className="logs-toolbar">
+              <input
+                type="month"
+                value={heatMonth}
+                onChange={(e) => setHeatMonth(e.target.value)}
+                className="logs-date-input"
+              />
+              <button onClick={() => fetchHeatmap(heatMonth)} className="apply-btn" style={{ padding: '8px 16px' }}>
+                <Search size={16} /> Показать
+              </button>
+            </div>
+
+            <div className="heatmap-wrap">
+              {heatLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
+              ) : !heatmap || heatmap.regions.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Нет заходов за выбранный месяц</div>
+              ) : (
+                <>
+                  <div className="heatmap-row heatmap-head">
+                    <span className="hm-region">Регион</span>
+                    <span className="hm-days-h">Дни месяца (1–{heatmap.days_in_month})</span>
+                    <span className="hm-tot">Дней / входов</span>
+                  </div>
+                  {heatmap.regions.map((r) => {
+                    const maxv = Math.max(1, ...r.days)
+                    return (
+                      <div className="heatmap-row" key={r.region}>
+                        <span className="hm-region" title={r.region}>{r.region}</span>
+                        <div className="hm-days">
+                          {r.days.map((c, di) => (
+                            <span
+                              key={di}
+                              className={'hm-cell' + (c > 0 ? ' on' : '')}
+                              title={`День ${di + 1}: ${c} заход.`}
+                              style={c > 0 ? { '--lvl': Math.min(1, 0.28 + 0.72 * (c / maxv)) } : undefined}
+                            >
+                              {c > 0 ? c : ''}
+                            </span>
+                          ))}
+                        </div>
+                        <span className="hm-tot"><b>{r.active_days}</b> дн · <b>{r.total}</b></span>
+                      </div>
+                    )
+                  })}
+                </>
+              )}
+            </div>
+            </>
+            )}
           </div>
         </div>
       )}
@@ -1551,7 +1678,7 @@ const Dashboard = () => {
 
       {section === 'oppv' && canAppvr && <OppvSection />}
 
-      {section === 'dashboard' && <DashboardHud />}
+      {section === 'dashboard' && canDashboard && <DashboardHud />}
 
       {section === 'insurance' && (
       <>

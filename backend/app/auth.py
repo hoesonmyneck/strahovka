@@ -92,6 +92,15 @@ def require_appvr(current_user: models.User = Depends(get_current_active_user)):
         )
     return current_user
 
+def require_dashboard(current_user: models.User = Depends(get_current_active_user)):
+    """Раздел «Дашборд» доступен админу и пользователям с флагом dashboard_access."""
+    if current_user.role != "admin" and not current_user.dashboard_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Нет доступа к дашборду"
+        )
+    return current_user
+
 def init_default_users(db: Session):
     """Создает дефолтных пользователей если их нет"""
     admin = get_user(db, "admin")

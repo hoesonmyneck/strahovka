@@ -29,6 +29,7 @@ with engine.connect() as _conn:
     for _sql in [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS appvr_access INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_access INTEGER DEFAULT 0",
         # ЭЦП-вход: ИИН аккаунта + флаг отключения ЭЦП
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS iin VARCHAR(32)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS eds_disabled INTEGER DEFAULT 0",
@@ -698,7 +699,7 @@ def get_metrics(
 
 @app.get("/api/dashboard/kpis")
 def dashboard_kpis(
-    current_user: models.User = Depends(auth.get_current_active_user),
+    current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db)
 ):
     """Сводные показатели по страхованию и ОППВ для HUD-дашборда.
@@ -719,6 +720,8 @@ def dashboard_kpis(
         func.coalesce(func.sum(S.total_employees_count), 0).label("tot_emp"),
         func.coalesce(func.sum(case((S.ip == 1, 1), else_=0)), 0).label("ip_cnt"),
         func.coalesce(func.sum(case((S.ip == 0, 1), else_=0)), 0).label("ul_cnt"),
+        func.coalesce(func.sum(case((and_(S.ip == 1, S.status == 1), 1), else_=0)), 0).label("ip_ins"),
+        func.coalesce(func.sum(case((and_(S.ip == 0, S.status == 1), 1), else_=0)), 0).label("ul_ins"),
     )).one()
 
     total = tot.total or 0
@@ -753,6 +756,8 @@ def dashboard_kpis(
         "tot_emp": int(tot.tot_emp or 0),
         "ip_cnt": tot.ip_cnt or 0,
         "ul_cnt": tot.ul_cnt or 0,
+        "ip_ins": tot.ip_ins or 0,
+        "ul_ins": tot.ul_ins or 0,
         "by_region": by_region,
         "by_status": by_status,
     }
@@ -1942,6 +1947,7 @@ def create_user(
         role=role,
         region=data.region,
         appvr_access=1 if data.appvr_access else 0,
+        dashboard_access=1 if data.dashboard_access else 0,
         iin=iin,
         eds_disabled=eds_disabled,
         is_active=1,
@@ -1964,6 +1970,8 @@ def update_user(
         raise HTTPException(404, "Пользователь не найден")
     if data.appvr_access is not None:
         user.appvr_access = 1 if data.appvr_access else 0
+    if data.dashboard_access is not None:
+        user.dashboard_access = 1 if data.dashboard_access else 0
     if data.eds_disabled is not None:
         user.eds_disabled = 1 if data.eds_disabled else 0
     # iin присылается только когда админ его редактирует; "" → отвязать ИИН
@@ -1999,6 +2007,7 @@ def get_login_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     username: Optional[str] = None,
+    region: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     current_user: models.User = Depends(auth.require_admin_or_manager),
@@ -2010,6 +2019,8 @@ def get_login_logs(
 
     if username:
         query = query.filter(models.LoginLog.username.ilike(f"%{username}%"))
+    if region:
+        query = query.filter(models.LoginLog.region == region)
     if date_from:
         query = query.filter(models.LoginLog.logged_at >= date_from)
     if date_to:
@@ -2066,6 +2077,42 @@ def login_stats_table(
         ))
     rows.sort(key=lambda r: (r.logins, r.last_login or datetime.min), reverse=True)
     return schemas.LogStatList(items=rows, total=len(rows))
+
+
+@app.get("/api/logs/heatmap")
+def login_heatmap(
+    year: int,
+    month: int = Query(..., ge=1, le=12),
+    current_user: models.User = Depends(auth.require_admin_or_manager),
+    db: Session = Depends(database.get_db)
+):
+    """Рейтинг заходов по регионам за месяц: по каждому региону — счётчики по
+    дням (для «гит-календаря»), число активных дней и всего заходов за месяц."""
+    import calendar
+    L = models.LoginLog
+    days_in_month = calendar.monthrange(year, month)[1]
+    start = date(year, month, 1)
+    end = date(year, month, days_in_month)
+    day_expr = func.extract('day', L.logged_at)
+    rows = (db.query(L.region, day_expr.label('d'), func.count().label('c'))
+            .filter(L.username.notin_(SYSTEM_ACCOUNTS),
+                    L.logged_at >= start,
+                    L.logged_at < end + timedelta(days=1))
+            .group_by(L.region, day_expr).all())
+    agg = {}
+    for region, d, c in rows:
+        key = region or NO_REGION_LABEL
+        agg.setdefault(key, {})[int(d)] = int(c)
+    regions = []
+    for region, days in agg.items():
+        regions.append({
+            'region': region,
+            'days': [days.get(d, 0) for d in range(1, days_in_month + 1)],
+            'active_days': len(days),
+            'total': sum(days.values()),
+        })
+    regions.sort(key=lambda r: r['total'], reverse=True)
+    return {'year': year, 'month': month, 'days_in_month': days_in_month, 'regions': regions}
 
 
 @app.get("/api/logs/stats/export")

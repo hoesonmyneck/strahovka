@@ -88,6 +88,7 @@ class UserBase(BaseModel):
     role: str = "user"
     region: Optional[str] = None
     appvr_access: int = 0
+    dashboard_access: int = 0
     iin: Optional[str] = None
     eds_disabled: int = 0
 
@@ -96,6 +97,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     appvr_access: Optional[int] = None
+    dashboard_access: Optional[int] = None
     iin: Optional[str] = None
     eds_disabled: Optional[int] = None
 
@@ -104,6 +106,7 @@ class UserResponse(UserBase):
     is_active: int
     region: Optional[str] = None
     appvr_access: int = 0
+    dashboard_access: int = 0
     iin: Optional[str] = None
     eds_disabled: int = 0
     full_name: Optional[str] = None
