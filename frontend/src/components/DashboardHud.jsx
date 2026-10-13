@@ -8,6 +8,13 @@ const fmtNum = (v) => {
   if (v == null || !Number.isFinite(v)) return '—'
   return Math.round(v).toLocaleString('ru-RU')
 }
+const plural = (n, one, few, many) => {
+  const a = Math.abs(n) % 100, b = a % 10
+  if (a > 10 && a < 20) return many
+  if (b > 1 && b < 5) return few
+  if (b === 1) return one
+  return many
+}
 const fmtCompact = (v) => {
   if (v == null || !Number.isFinite(v)) return '—'
   const a = Math.abs(v)
@@ -254,7 +261,6 @@ function HudActivity() {
     <HudCard wide>
       <div className="hud-activity-bar">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
-        {data && <span className="hud-activity-hint">дни месяца · число заходов за день</span>}
       </div>
       {loading && !data ? (
         <div className="hud-act-empty">Загрузка…</div>
@@ -262,21 +268,33 @@ function HudActivity() {
         <div className="hud-act-empty">Нет заходов за выбранный месяц</div>
       ) : (
         <div className="hud-heatmap">
+          <div className="hud-hm-row hud-hm-head">
+            <span className="hud-hm-region" />
+            <div className="hud-hm-days">
+              {Array.from({ length: data.days_in_month }, (_, di) => (
+                <span key={di} className="hud-hm-daynum">{di + 1}</span>
+              ))}
+            </div>
+            <span className="hud-hm-tot hud-hm-tothead">чел · заходов</span>
+          </div>
           {data.regions.map((r) => {
             const maxv = Math.max(1, ...r.days)
             return (
               <div className="hud-hm-row" key={r.region}>
                 <span className="hud-hm-region" title={r.region}>{r.region}</span>
                 <div className="hud-hm-days">
-                  {r.days.map((c, di) => (
-                    <span key={di} className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
-                      title={`День ${di + 1}: ${c} заход.`}
-                      style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
-                      {c > 0 ? c : ''}
-                    </span>
-                  ))}
+                  {r.days.map((c, di) => {
+                    const u = (r.users && r.users[di]) || 0
+                    return (
+                      <span key={di} className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
+                        title={`${di + 1} число: ${u} ${plural(u, 'учётка', 'учётки', 'учёток')}, ${c} ${plural(c, 'заход', 'захода', 'заходов')}`}
+                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                        {c > 0 ? <><span className="hud-hm-u">{u}</span><span className="hud-hm-c">{c}</span></> : ''}
+                      </span>
+                    )
+                  })}
                 </div>
-                <span className="hud-hm-tot"><b>{r.active_days}</b> дн · <b>{r.total}</b></span>
+                <span className="hud-hm-tot"><b>{r.total_users}</b> чел · <b>{r.total}</b></span>
               </div>
             )
           })}

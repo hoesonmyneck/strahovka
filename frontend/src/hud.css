@@ -346,13 +346,13 @@
 .hud-activity-hint { color: var(--h-dim); font-size: 12px; }
 .hud-act-empty { padding: 30px; text-align: center; color: var(--h-dim); }
 .hud-heatmap { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
-.hud-hm-row { display: grid; grid-template-columns: 180px 1fr 120px; align-items: center; gap: 12px; }
+.hud-hm-row { display: grid; grid-template-columns: 180px 1fr 150px; align-items: center; gap: 12px; }
 .hud-hm-region { color: var(--h-tx); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hud-hm-days { display: flex; flex-wrap: wrap; gap: 3px; }
 .hud-hm-cell {
-  width: 22px; height: 22px; border-radius: 4px; flex: 0 0 auto;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px; color: var(--h-dim);
+  width: 30px; height: 30px; border-radius: 4px; flex: 0 0 auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--h-dim);
   background: rgba(56, 189, 248, .08); border: 1px solid rgba(56, 189, 248, .10);
 }
 .hud-hm-cell.on {
@@ -361,6 +361,16 @@
   border-color: rgba(34, 211, 238, .5);
   box-shadow: 0 0 8px rgba(34, 211, 238, calc(var(--lvl, 1) * .4));
 }
+.hud-hm-u { font-size: 10px; font-weight: 700; }
+.hud-hm-c { font-size: 9px; opacity: .85; }
+.hud-hm-cell.on .hud-hm-c { border-top: 1px solid rgba(4, 22, 42, .3); }
+/* строка с номерами дней */
+.hud-hm-head { align-items: end; }
+.hud-hm-daynum {
+  width: 30px; flex: 0 0 auto; text-align: center;
+  font-size: 9px; color: var(--h-dim); font-variant-numeric: tabular-nums;
+}
+.hud-hm-tothead { font-size: 10px; color: var(--h-dim); }
 .hud-hm-tot { text-align: right; color: var(--h-dim); font-size: 12px; }
 .hud-hm-tot b { color: #6fe6ff; font-variant-numeric: tabular-nums; }
 

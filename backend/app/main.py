@@ -2095,24 +2095,43 @@ def login_heatmap(
     start = date(year, month, 1)
     end = date(year, month, days_in_month)
     day_expr = func.extract('day', L.logged_at)
-    q = (db.query(L.region, day_expr.label('d'), func.count().label('c'))
+    q = (db.query(L.region, day_expr.label('d'),
+                  func.count().label('c'),
+                  func.count(func.distinct(L.username)).label('u'))
          .filter(L.username.notin_(SYSTEM_ACCOUNTS),
                  L.logged_at >= start,
                  L.logged_at < end + timedelta(days=1)))
     if current_user.region:
         q = q.filter(L.region == current_user.region)
     rows = q.group_by(L.region, day_expr).all()
+    # всего заходов и уникальных учёток за месяц по региону (не сумма дневных uniq)
+    mq = (db.query(L.region,
+                   func.count().label('c'),
+                   func.count(func.distinct(L.username)).label('u'))
+          .filter(L.username.notin_(SYSTEM_ACCOUNTS),
+                  L.logged_at >= start,
+                  L.logged_at < end + timedelta(days=1)))
+    if current_user.region:
+        mq = mq.filter(L.region == current_user.region)
+    month_tot = {}
+    for region, c, u in mq.group_by(L.region).all():
+        month_tot[region or NO_REGION_LABEL] = (int(c), int(u))
     agg = {}
-    for region, d, c in rows:
+    for region, d, c, u in rows:
         key = region or NO_REGION_LABEL
-        agg.setdefault(key, {})[int(d)] = int(c)
+        agg.setdefault(key, {})[int(d)] = (int(c), int(u))
     regions = []
     for region, days in agg.items():
+        mc, mu = month_tot.get(region, (0, 0))
         regions.append({
             'region': region,
-            'days': [days.get(d, 0) for d in range(1, days_in_month + 1)],
+            # число заходов за день
+            'days': [days.get(d, (0, 0))[0] for d in range(1, days_in_month + 1)],
+            # число уникальных учёток за день
+            'users': [days.get(d, (0, 0))[1] for d in range(1, days_in_month + 1)],
             'active_days': len(days),
-            'total': sum(days.values()),
+            'total': mc,          # всего заходов за месяц
+            'total_users': mu,    # уникальных учёток за месяц
         })
     regions.sort(key=lambda r: r['total'], reverse=True)
     return {'year': year, 'month': month, 'days_in_month': days_in_month, 'regions': regions}
