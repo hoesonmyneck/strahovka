@@ -270,11 +270,7 @@ function HudActivity() {
         <div className="hud-heatmap">
           <div className="hud-hm-row hud-hm-head">
             <span className="hud-hm-region" />
-            <div className="hud-hm-days">
-              {Array.from({ length: data.days_in_month }, (_, di) => (
-                <span key={di} className="hud-hm-daynum">{di + 1}</span>
-              ))}
-            </div>
+            <div className="hud-hm-days" />
             <span className="hud-hm-tot hud-hm-tothead">чел · заходов</span>
           </div>
           {data.regions.map((r) => {
@@ -286,11 +282,14 @@ function HudActivity() {
                   {r.days.map((c, di) => {
                     const u = (r.users && r.users[di]) || 0
                     return (
-                      <span key={di} className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
-                        title={`${di + 1} число: ${u} ${plural(u, 'учётка', 'учётки', 'учёток')}, ${c} ${plural(c, 'заход', 'захода', 'заходов')}`}
-                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
-                        {c > 0 ? <><span className="hud-hm-u">{u}</span><span className="hud-hm-c">{c}</span></> : ''}
-                      </span>
+                      <div className="hud-hm-day" key={di}>
+                        <span className="hud-hm-daynum">{di + 1}</span>
+                        <span className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
+                          title={`${di + 1} число: ${u} ${plural(u, 'учётка', 'учётки', 'учёток')}, ${c} ${plural(c, 'заход', 'захода', 'заходов')}`}
+                          style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                          {c > 0 ? <><span className="hud-hm-u">{u}</span><span className="hud-hm-c">{c}</span></> : ''}
+                        </span>
+                      </div>
                     )
                   })}
                 </div>
