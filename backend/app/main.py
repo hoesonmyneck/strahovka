@@ -748,6 +748,20 @@ def dashboard_kpis(
         )).group_by(S.obl_name).order_by(func.count().desc()).limit(10).all()
     ]
 
+    # Рейтинг страховых компаний (КСЖ) по числу застрахованных людей.
+    # Страховая = system_delimiter_bin_name; люди = count_employees застрахованных организаций.
+    by_insurer = [
+        {"label": r.ins_name, "value": int(r.ppl or 0)}
+        for r in scope(db.query(
+            S.system_delimiter_bin_name.label("ins_name"),
+            func.coalesce(func.sum(S.count_employees), 0).label("ppl"),
+        ).filter(S.status == 1,
+                 S.system_delimiter_bin_name.isnot(None),
+                 S.system_delimiter_bin_name != ""))
+        .group_by(S.system_delimiter_bin_name)
+        .order_by(func.sum(S.count_employees).desc()).limit(10).all()
+    ]
+
     # Разбивка по размеру предприятия (Малое/Среднее/Крупное)
     by_size = [
         {"label": r.org_size or "Не указан", "insured": r.ins or 0,
@@ -780,6 +794,7 @@ def dashboard_kpis(
         "ip_ins": tot.ip_ins or 0,
         "ul_ins": tot.ul_ins or 0,
         "by_region": by_region,
+        "by_insurer": by_insurer,
         "by_status": by_status,
         "by_size": by_size,
     }

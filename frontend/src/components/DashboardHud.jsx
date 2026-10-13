@@ -422,6 +422,13 @@ const DashboardHud = () => {
           </div>
         </HudCard>
       </div>
+      {ins.by_insurer && ins.by_insurer.length > 0 && (
+        <div className="hud-charts">
+          <HudCard title="Рейтинг страховых компаний по застрахованным людям" wide>
+            <HudRanking items={ins.by_insurer} color="var(--h-teal)" />
+          </HudCard>
+        </div>
+      )}
       {ins.by_size && ins.by_size.length > 0 && (
         <div className="hud-charts">
           <HudCard title="Разбивка по размеру предприятия" wide>
