@@ -348,7 +348,7 @@
 .hud-heatmap { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
 .hud-hm-row { display: grid; grid-template-columns: 180px 1fr 150px; align-items: center; gap: 12px; }
 .hud-hm-region { color: var(--h-tx); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hud-hm-days { display: flex; flex-wrap: wrap; gap: 3px; }
+.hud-hm-days { display: flex; flex-wrap: nowrap; gap: 3px; }
 .hud-hm-cell {
   width: 30px; height: 30px; border-radius: 4px; flex: 0 0 auto;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
