@@ -2083,22 +2083,25 @@ def login_stats_table(
 def login_heatmap(
     year: int,
     month: int = Query(..., ge=1, le=12),
-    current_user: models.User = Depends(auth.require_admin_or_manager),
+    current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db)
 ):
-    """Рейтинг заходов по регионам за месяц: по каждому региону — счётчики по
-    дням (для «гит-календаря»), число активных дней и всего заходов за месяц."""
+    """Активность заходов по регионам за месяц: по каждому региону — счётчики по
+    дням (для «гит-календаря»), число активных дней и всего заходов за месяц.
+    Для регионального пользователя — только его регион."""
     import calendar
     L = models.LoginLog
     days_in_month = calendar.monthrange(year, month)[1]
     start = date(year, month, 1)
     end = date(year, month, days_in_month)
     day_expr = func.extract('day', L.logged_at)
-    rows = (db.query(L.region, day_expr.label('d'), func.count().label('c'))
-            .filter(L.username.notin_(SYSTEM_ACCOUNTS),
-                    L.logged_at >= start,
-                    L.logged_at < end + timedelta(days=1))
-            .group_by(L.region, day_expr).all())
+    q = (db.query(L.region, day_expr.label('d'), func.count().label('c'))
+         .filter(L.username.notin_(SYSTEM_ACCOUNTS),
+                 L.logged_at >= start,
+                 L.logged_at < end + timedelta(days=1)))
+    if current_user.region:
+        q = q.filter(L.region == current_user.region)
+    rows = q.group_by(L.region, day_expr).all()
     agg = {}
     for region, d, c in rows:
         key = region or NO_REGION_LABEL

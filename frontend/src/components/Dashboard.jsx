@@ -278,14 +278,6 @@ const Dashboard = () => {
   const [logsRegionFilter, setLogsRegionFilter] = useState('')
   const LOGS_PAGE_SIZE = 50
 
-  // ─── Рейтинг заходов по регионам (гит-календарь) ──────────────────────────
-  const [heatmap, setHeatmap] = useState(null)
-  const [heatMonth, setHeatMonth] = useState(() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-  })
-  const [heatLoading, setHeatLoading] = useState(false)
-
   // ─── Таблица логов (сколько раз какой аккаунт заходил) ────────────────────
   const [logStats, setLogStats] = useState([])
   const [statsLoading, setStatsLoading] = useState(false)
@@ -663,20 +655,6 @@ const Dashboard = () => {
     }
   }, [])
 
-  const fetchHeatmap = useCallback(async (month) => {
-    const [y, m] = (month || '').split('-')
-    if (!y || !m) return
-    setHeatLoading(true)
-    try {
-      const res = await api.get('/api/logs/heatmap', { params: { year: Number(y), month: Number(m) } })
-      setHeatmap(res.data)
-    } catch (e) {
-      toast.error('Ошибка загрузки рейтинга заходов')
-    } finally {
-      setHeatLoading(false)
-    }
-  }, [])
-
   const openAdminPanel = () => {
     setShowAdmin(true)
     setAdminTab('users')
@@ -688,7 +666,6 @@ const Dashboard = () => {
     if (tab === 'users') fetchUsers()
     if (tab === 'logs') fetchLogs(1, logsUserFilter, logsDateFrom, logsDateTo, logsRegionFilter)
     if (tab === 'logstable') fetchLogStats(statsUserFilter, statsDateFrom, statsDateTo)
-    if (tab === 'heatmap') fetchHeatmap(heatMonth)
     if (tab === 'files') fetchFiles()
   }
 
@@ -1167,9 +1144,6 @@ const Dashboard = () => {
               <button className={adminTab === 'logstable' ? 'active' : ''} onClick={() => selectAdminTab('logstable')}>
                 <ScrollText size={16} /> Таблица логов
               </button>
-              <button className={adminTab === 'heatmap' ? 'active' : ''} onClick={() => selectAdminTab('heatmap')}>
-                <LayoutDashboard size={16} /> Рейтинг заходов
-              </button>
               {isAdmin() && (
                 <button className={adminTab === 'files' ? 'active' : ''} onClick={() => selectAdminTab('files')}>
                   <FolderOpen size={16} /> Файлы
@@ -1617,59 +1591,6 @@ const Dashboard = () => {
             </>
             )}
 
-            {/* Вкладка: рейтинг заходов по регионам (гит-календарь) */}
-            {adminTab === 'heatmap' && (
-            <>
-            <div className="logs-toolbar">
-              <input
-                type="month"
-                value={heatMonth}
-                onChange={(e) => setHeatMonth(e.target.value)}
-                className="logs-date-input"
-              />
-              <button onClick={() => fetchHeatmap(heatMonth)} className="apply-btn" style={{ padding: '8px 16px' }}>
-                <Search size={16} /> Показать
-              </button>
-            </div>
-
-            <div className="heatmap-wrap">
-              {heatLoading ? (
-                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Загрузка...</div>
-              ) : !heatmap || heatmap.regions.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>Нет заходов за выбранный месяц</div>
-              ) : (
-                <>
-                  <div className="heatmap-row heatmap-head">
-                    <span className="hm-region">Регион</span>
-                    <span className="hm-days-h">Дни месяца (1–{heatmap.days_in_month})</span>
-                    <span className="hm-tot">Дней / входов</span>
-                  </div>
-                  {heatmap.regions.map((r) => {
-                    const maxv = Math.max(1, ...r.days)
-                    return (
-                      <div className="heatmap-row" key={r.region}>
-                        <span className="hm-region" title={r.region}>{r.region}</span>
-                        <div className="hm-days">
-                          {r.days.map((c, di) => (
-                            <span
-                              key={di}
-                              className={'hm-cell' + (c > 0 ? ' on' : '')}
-                              title={`День ${di + 1}: ${c} заход.`}
-                              style={c > 0 ? { '--lvl': Math.min(1, 0.28 + 0.72 * (c / maxv)) } : undefined}
-                            >
-                              {c > 0 ? c : ''}
-                            </span>
-                          ))}
-                        </div>
-                        <span className="hm-tot"><b>{r.active_days}</b> дн · <b>{r.total}</b></span>
-                      </div>
-                    )
-                  })}
-                </>
-              )}
-            </div>
-            </>
-            )}
           </div>
         </div>
       )}

@@ -337,6 +337,33 @@
 .hud-donut-extra b { color: var(--h-tx); font-variant-numeric: tabular-nums; }
 .hud-donut-extra .dim { color: var(--h-dim); font-size: 12px; }
 
+/* активность (гит-календарь) */
+.hud-activity-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.hud-month {
+  background: rgba(8, 20, 52, .78); border: 1px solid var(--h-line-hi); color: #eaf4ff;
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; color-scheme: dark;
+}
+.hud-activity-hint { color: var(--h-dim); font-size: 12px; }
+.hud-act-empty { padding: 30px; text-align: center; color: var(--h-dim); }
+.hud-heatmap { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
+.hud-hm-row { display: grid; grid-template-columns: 180px 1fr 120px; align-items: center; gap: 12px; }
+.hud-hm-region { color: var(--h-tx); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-hm-days { display: flex; flex-wrap: wrap; gap: 3px; }
+.hud-hm-cell {
+  width: 22px; height: 22px; border-radius: 4px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--h-dim);
+  background: rgba(56, 189, 248, .08); border: 1px solid rgba(56, 189, 248, .10);
+}
+.hud-hm-cell.on {
+  color: #04162a; font-weight: 700;
+  background: rgba(34, 211, 238, var(--lvl, 1));
+  border-color: rgba(34, 211, 238, .5);
+  box-shadow: 0 0 8px rgba(34, 211, 238, calc(var(--lvl, 1) * .4));
+}
+.hud-hm-tot { text-align: right; color: var(--h-dim); font-size: 12px; }
+.hud-hm-tot b { color: #6fe6ff; font-variant-numeric: tabular-nums; }
+
 /* донат */
 .hud-chart-card { display: flex; flex-direction: column; }
 .hud-donut-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; min-height: 230px; }

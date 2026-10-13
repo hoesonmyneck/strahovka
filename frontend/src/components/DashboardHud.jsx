@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api.js'
-import { Shield, Coins } from 'lucide-react'
+import { Shield, Coins, Activity } from 'lucide-react'
 import { KpiSpark, CountUp } from './KpiSpark.jsx'
 
 // ─── Форматирование ──────────────────────────────────────────────────────────
@@ -230,6 +230,62 @@ function HudDonut({ a, b, labelA, labelB }) {
   )
 }
 
+// Активность заходов по регионам за месяц (гит-календарь)
+function HudActivity() {
+  const [data, setData] = useState(null)
+  const [month, setMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async (m) => {
+    const [y, mo] = (m || '').split('-')
+    if (!y || !mo) return
+    setLoading(true)
+    try {
+      const res = await api.get('/api/logs/heatmap', { params: { year: Number(y), month: Number(mo) } })
+      setData(res.data)
+    } catch { setData(null) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load(month) }, [month, load])
+
+  return (
+    <HudCard title="Активность заходов по регионам" wide>
+      <div className="hud-activity-bar">
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
+        {data && <span className="hud-activity-hint">дни месяца · число заходов за день</span>}
+      </div>
+      {loading && !data ? (
+        <div className="hud-act-empty">Загрузка…</div>
+      ) : !data || data.regions.length === 0 ? (
+        <div className="hud-act-empty">Нет заходов за выбранный месяц</div>
+      ) : (
+        <div className="hud-heatmap">
+          {data.regions.map((r) => {
+            const maxv = Math.max(1, ...r.days)
+            return (
+              <div className="hud-hm-row" key={r.region}>
+                <span className="hud-hm-region" title={r.region}>{r.region}</span>
+                <div className="hud-hm-days">
+                  {r.days.map((c, di) => (
+                    <span key={di} className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
+                      title={`День ${di + 1}: ${c} заход.`}
+                      style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                      {c > 0 ? c : ''}
+                    </span>
+                  ))}
+                </div>
+                <span className="hud-hm-tot"><b>{r.active_days}</b> дн · <b>{r.total}</b></span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </HudCard>
+  )
+}
+
 // ─── Основной компонент ──────────────────────────────────────────────────────
 const DashboardHud = () => {
   const [data, setData] = useState(null)
@@ -337,6 +393,9 @@ const DashboardHud = () => {
           </div>
         </>
       )}
+
+      <h2 className="hud-h2"><Activity size={18} /> Активность</h2>
+      <div className="hud-charts"><HudActivity /></div>
     </div>
   )
 }
