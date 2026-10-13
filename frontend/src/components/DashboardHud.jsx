@@ -130,7 +130,7 @@ function HudBubbles({ items }) {
 function HudCard({ title, children, wide }) {
   return (
     <div className={'hud-card hud-chart-card' + (wide ? ' hud-chart-card--wide' : '')}>
-      <div className="hud-chart-title">{title}</div>
+      {title && <div className="hud-chart-title">{title}</div>}
       {children}
     </div>
   )
@@ -251,7 +251,7 @@ function HudActivity() {
   useEffect(() => { load(month) }, [month, load])
 
   return (
-    <HudCard title="Активность заходов по регионам" wide>
+    <HudCard wide>
       <div className="hud-activity-bar">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
         {data && <span className="hud-activity-hint">дни месяца · число заходов за день</span>}
