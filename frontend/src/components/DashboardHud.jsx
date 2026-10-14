@@ -538,7 +538,13 @@ const DashboardHud = () => {
   useEffect(() => { load() }, [load])
 
   if (loading && !data) {
-    return <div className="hud-view"><div className="hud-loading">Загрузка показателей…</div></div>
+    return (
+      <div className="hud-view">
+        <div className="hud-loading">
+          <span className="hud-spinner" role="status" aria-label="Загрузка" />
+        </div>
+      </div>
+    )
   }
   if (!data) {
     return <div className="hud-view"><div className="hud-loading">Нет данных</div></div>
