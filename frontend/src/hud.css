@@ -337,6 +337,42 @@
 .hud-donut-extra b { color: var(--h-tx); font-variant-numeric: tabular-nums; }
 .hud-donut-extra .dim { color: var(--h-dim); font-size: 12px; }
 
+/* карта окончаний страховки (регионы × месяцы) */
+.hud-exp-cell {
+  cursor: pointer; min-width: 42px; width: auto; padding: 0 6px;
+  font-size: 11px; font-weight: 700; transition: transform .12s, box-shadow .12s;
+}
+.hud-exp-cell.on:hover { transform: translateY(-2px); box-shadow: 0 0 14px rgba(34, 211, 238, .7); }
+.hud-exp-cell:disabled { cursor: default; }
+.hud-exp-row .hud-hm-daynum { width: auto; min-width: 42px; }
+
+/* модалка со списком предприятий */
+.hud-modal-overlay {
+  position: fixed; inset: 0; z-index: 1000; background: rgba(2, 8, 22, .72);
+  backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.hud-modal {
+  width: min(1100px, 96vw); max-height: 88vh; display: flex; flex-direction: column;
+  background: #071226; border: 1px solid rgba(56, 189, 248, .25); border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6); overflow: hidden;
+}
+.hud-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--h-line); }
+.hud-modal-title { color: var(--h-tx); font-size: 16px; font-weight: 700; }
+.hud-modal-sub { color: var(--h-dim); font-size: 13px; margin-top: 4px; }
+.hud-modal-sub b { color: var(--h-cyan); }
+.hud-modal-close { background: transparent; border: 1px solid var(--h-line); color: var(--h-dim); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.hud-modal-close:hover { color: var(--h-tx); border-color: rgba(56, 189, 248, .4); }
+.hud-modal-body { overflow: auto; }
+.hud-modal-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hud-modal-table th { position: sticky; top: 0; background: #0a1730; color: var(--h-dim); font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--h-line); white-space: nowrap; }
+.hud-modal-table td { padding: 9px 12px; border-bottom: 1px solid rgba(56, 189, 248, .08); color: var(--h-tx); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-modal-table td.mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; color: var(--h-dim); }
+.hud-modal-table tbody tr:hover { background: rgba(56, 189, 248, .06); }
+.hud-modal-foot { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px; border-top: 1px solid var(--h-line); color: var(--h-dim); font-size: 13px; }
+.hud-modal-foot button { background: rgba(8, 20, 52, .8); border: 1px solid var(--h-line); color: var(--h-tx); padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.hud-modal-foot button:disabled { opacity: .4; cursor: default; }
+.hud-modal-foot button:not(:disabled):hover { border-color: rgba(56, 189, 248, .5); }
+
 /* таблица «Страхование по регионам» */
 .hud-rtable-wrap { overflow-x: auto; }
 .hud-rtable { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }

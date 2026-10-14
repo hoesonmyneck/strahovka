@@ -372,6 +372,152 @@ function HudActivity() {
   )
 }
 
+// Карта окончаний страховки: регионы × 12 месяцев, клик по ячейке → список предприятий
+const MONTHS_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+const MONTHS_FULL = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+const fmtDate = (s) => {
+  if (!s) return '—'
+  const d = new Date(s)
+  if (isNaN(d)) return s
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
+}
+const bin12 = (b) => (b == null ? '' : String(b).padStart(12, '0'))
+
+function HudExpiryModal({ year, month, region, onClose }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const pageSize = 50
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.get('/api/dashboard/expiry-list', { params: { year, month, region, page, page_size: pageSize } })
+      .then((res) => { if (alive) setData(res.data) })
+      .catch(() => { if (alive) setData(null) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [year, month, region, page])
+
+  const total = data?.total || 0
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+
+  return (
+    <div className="hud-modal-overlay" onClick={onClose}>
+      <div className="hud-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="hud-modal-head">
+          <div>
+            <div className="hud-modal-title">Окончание страховки — {MONTHS_FULL[month - 1]} {year}</div>
+            <div className="hud-modal-sub">{region} · предприятий: <b>{fmtNum(total)}</b></div>
+          </div>
+          <button className="hud-modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="hud-modal-body">
+          {loading && !data ? (
+            <div className="hud-act-empty">Загрузка…</div>
+          ) : total === 0 ? (
+            <div className="hud-act-empty">Нет предприятий</div>
+          ) : (
+            <table className="hud-modal-table">
+              <thead>
+                <tr>
+                  <th>БИН</th><th>Название компании</th><th>Страховая компания</th>
+                  <th>Окончание</th><th>Телефон</th><th>Руководитель</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((it) => (
+                  <tr key={it.id}>
+                    <td className="mono">{bin12(it.bin)}</td>
+                    <td title={it.bin_name}>{it.bin_name || '—'}</td>
+                    <td title={it.system_delimiter_bin_name}>{it.system_delimiter_bin_name || '—'}</td>
+                    <td className="mono">{fmtDate(it.date_end)}</td>
+                    <td className="mono">{it.phone || '—'}</td>
+                    <td>{[it.leader_surname, it.leader_name, it.leader_middlename].filter(Boolean).join(' ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {pages > 1 && (
+          <div className="hud-modal-foot">
+            <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Назад</button>
+            <span>Стр. {page} из {pages}</span>
+            <button disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>Вперёд →</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function HudExpiry() {
+  const now = new Date()
+  const [year, setYear] = useState(now.getFullYear())
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [sel, setSel] = useState(null) // {region, month}
+
+  const load = useCallback(async (y) => {
+    setLoading(true)
+    try {
+      const res = await api.get('/api/dashboard/expiry-heatmap', { params: { year: Number(y) } })
+      setData(res.data)
+    } catch { setData(null) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load(year) }, [year, load])
+
+  const years = []
+  for (let y = now.getFullYear() + 1; y >= now.getFullYear() - 4; y--) years.push(y)
+
+  return (
+    <HudCard title="Окончание страховки по месяцам" wide>
+      <div className="hud-activity-bar">
+        <select className="hud-month" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+          {years.map((y) => <option key={y} value={y}>{y} год</option>)}
+        </select>
+      </div>
+      {loading && !data ? (
+        <div className="hud-act-empty">Загрузка…</div>
+      ) : !data || data.regions.length === 0 ? (
+        <div className="hud-act-empty">Нет данных за выбранный год</div>
+      ) : (
+        <div className="hud-heatmap">
+          {data.regions.map((r) => {
+            const maxv = Math.max(1, ...r.months)
+            return (
+              <div className="hud-hm-row hud-exp-row" key={r.region}>
+                <span className="hud-hm-region" title={r.region}>{r.region}</span>
+                <div className="hud-hm-days">
+                  {r.months.map((c, mi) => (
+                    <div className="hud-hm-day" key={mi}>
+                      <span className="hud-hm-daynum">{MONTHS_SHORT[mi]}</span>
+                      <button
+                        type="button"
+                        className={'hud-hm-cell hud-exp-cell' + (c > 0 ? ' on' : '')}
+                        disabled={c === 0}
+                        title={`${MONTHS_FULL[mi]} ${data.year}: ${c} ${plural(c, 'предприятие', 'предприятия', 'предприятий')}`}
+                        onClick={() => c > 0 && setSel({ region: r.region, month: mi + 1 })}
+                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                        {c > 0 ? fmtNum(c) : ''}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <span className="hud-hm-tot"><b>{fmtNum(r.total)}</b> за год</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {sel && (
+        <HudExpiryModal year={data.year} month={sel.month} region={sel.region} onClose={() => setSel(null)} />
+      )}
+    </HudCard>
+  )
+}
+
 // ─── Основной компонент ──────────────────────────────────────────────────────
 const DashboardHud = () => {
   const [data, setData] = useState(null)
@@ -452,6 +598,7 @@ const DashboardHud = () => {
           </HudCard>
         </div>
       )}
+      <div className="hud-charts"><HudExpiry /></div>
       <div className="hud-charts">
         <HudCard title="Рейтинг регионов по застрахованным" wide>
           <HudRanking

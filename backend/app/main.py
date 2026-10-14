@@ -866,6 +866,95 @@ def dashboard_kpis(
     return {"insurance": insurance, "oppv": oppv}
 
 
+def _expiry_end_expr(S):
+    """Дата окончания страховки: расторжение обрывает договор раньше даты окончания."""
+    return case(
+        (and_(S.rescinding_date.isnot(None),
+              or_(S.date_end.is_(None), S.rescinding_date < S.date_end)), S.rescinding_date),
+        else_=S.date_end,
+    )
+
+
+@app.get("/api/dashboard/expiry-heatmap")
+def expiry_heatmap(
+    year: int,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Сколько застрахованных предприятий у которых заканчивается страховка в
+    каждом месяце выбранного года, в разбивке по регионам (все регионы РК)."""
+    S = models.CompanySummary
+    region = current_user.region
+
+    def scope(q):
+        return q.filter(S.obl_name == region) if region else q
+
+    eff = _expiry_end_expr(S)
+    rows = scope(
+        db.query(S.obl_name, func.extract('month', eff).label('m'), func.count().label('c'))
+        .filter(S.status == 1, func.extract('year', eff) == year)
+    ).group_by(S.obl_name, func.extract('month', eff)).all()
+
+    agg = {}
+    for obl, m, c in rows:
+        agg.setdefault(obl or "—", {})[int(m)] = int(c)
+
+    # Полный список регионов (чтобы показать все, даже с нулями)
+    all_regions = [r[0] for r in scope(db.query(S.obl_name).distinct()).all() if r[0]]
+    all_regions.sort()
+
+    regions = []
+    for obl in all_regions:
+        months = agg.get(obl, {})
+        regions.append({
+            'region': obl,
+            'months': [months.get(mo, 0) for mo in range(1, 13)],
+            'total': sum(months.values()),
+        })
+    return {'year': year, 'regions': regions}
+
+
+@app.get("/api/dashboard/expiry-list", response_model=schemas.InsuranceRecordList)
+def expiry_list(
+    year: int,
+    month: int = Query(..., ge=1, le=12),
+    region: str = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=1000),
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Список застрахованных предприятий конкретного региона, у которых страховка
+    заканчивается в указанном месяце года (клик по ячейке карты окончаний)."""
+    S = models.CompanySummary
+    # Региональный пользователь видит только свой регион
+    if current_user.region:
+        region = current_user.region
+
+    eff = _expiry_end_expr(S)
+    q = (db.query(S, S.obl.label("obl"), S.act.label("act"), S.ins_old.label("ins_old"))
+         .filter(S.status == 1, S.obl_name == region,
+                 func.extract('year', eff) == year,
+                 func.extract('month', eff) == month))
+    total = q.count()
+    records = q.order_by(eff.asc(), S.bin.asc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    items = []
+    for rep, obl, act, ins_old in records:
+        item = schemas.InsuranceRecordResponse.model_validate(rep)
+        item.is_insured = company_status(obl, act, ins_old)
+        items.append(item)
+
+    bins = [it.bin for it in items if it.bin is not None]
+    if bins:
+        st = dict(db.query(models.BinStatus.bin, models.BinStatus.status)
+                  .filter(models.BinStatus.bin.in_(bins)).all())
+        for it in items:
+            it.manual_status = st.get(it.bin)
+
+    return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
+
+
 # ============ RECORDS ============
 
 # Справочник ручных статусов по БИН (выбирается в таблице страхования)
