@@ -342,12 +342,13 @@
 .hud-exp-row .hud-hm-days { display: flex; flex-wrap: nowrap; gap: 6px; }
 .hud-exp-row .hud-hm-day { flex: 1 1 0; min-width: 0; }
 .hud-exp-row .hud-hm-daynum { width: 100%; min-width: 0; text-align: center; }
-.hud-exp-cell {
-  cursor: pointer; width: 100%; padding: 0 6px;
-  font-size: 12px; font-weight: 700; transition: transform .12s, box-shadow .12s;
+/* .hud-exp-row поднимает специфичность над базовым .hud-hm-cell (width:30px ниже по файлу) */
+.hud-exp-row .hud-exp-cell {
+  cursor: pointer; width: 100%; height: 34px; padding: 0 6px;
+  font-size: 13px; font-weight: 700; transition: transform .12s, box-shadow .12s;
 }
-.hud-exp-cell.on:hover { transform: translateY(-2px); box-shadow: 0 0 14px rgba(34, 211, 238, .7); }
-.hud-exp-cell:disabled { cursor: default; }
+.hud-exp-row .hud-exp-cell.on:hover { transform: translateY(-2px); box-shadow: 0 0 14px rgba(34, 211, 238, .7); }
+.hud-exp-row .hud-exp-cell:disabled { cursor: default; }
 
 /* модалка со списком предприятий */
 .hud-modal-overlay {
