@@ -337,6 +337,22 @@
 .hud-donut-extra b { color: var(--h-tx); font-variant-numeric: tabular-nums; }
 .hud-donut-extra .dim { color: var(--h-dim); font-size: 12px; }
 
+/* таблица «Страхование по регионам» */
+.hud-rtable-wrap { overflow-x: auto; }
+.hud-rtable { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.hud-rtable th, .hud-rtable td { padding: 8px 10px; border-bottom: 1px solid var(--h-line); white-space: nowrap; }
+.hud-rtable thead th {
+  color: var(--h-dim); font-weight: 600; font-size: 12px; text-align: center;
+  background: rgba(8, 20, 52, .5); border-bottom: 1px solid var(--h-line);
+}
+.hud-rtable thead tr:first-child th { border-bottom: 1px solid rgba(56, 189, 248, .18); }
+.hud-rtable td.num { text-align: right; color: var(--h-tx); }
+.hud-rtable td.num.strong { font-weight: 700; }
+.hud-rtable td.num.ins { color: var(--h-cyan); font-weight: 700; }
+.hud-rt-region { text-align: left !important; color: var(--h-tx); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.hud-rtable tbody tr:hover { background: rgba(56, 189, 248, .06); }
+.hud-rt-cov { color: #6fe6ff; font-weight: 700; }
+
 /* разбивка по размеру предприятия */
 .hud-size { display: flex; flex-direction: column; gap: 16px; }
 .hud-size-row { display: flex; flex-direction: column; gap: 6px; }

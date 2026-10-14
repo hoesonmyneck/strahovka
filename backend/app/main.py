@@ -719,60 +719,85 @@ def dashboard_kpis(
     def scope(q):
         return q.filter(S.obl_name == region) if region else q
 
+    # «Предприятие» в разделе страхование считается только среди ОБЯЗАННЫХ
+    # (status 0 — не застрахован, 1 — застрахован); status 2 (прочее) не в счёт.
+    # Дашборд должен считать так же → везде ниже ограничиваемся status in (0,1).
+    OBL = S.status.in_((0, 1))
+
     # ── Страхование (по предрасчёту company_summary) ──
     tot = scope(db.query(
-        func.count().label("total"),
         func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("insured"),
         func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("not_insured"),
         func.coalesce(func.sum(S.calculated_amount), 0).label("sum_amount"),
         func.coalesce(func.sum(S.count_employees), 0).label("ins_emp"),
         func.coalesce(func.sum(S.total_employees_count), 0).label("tot_emp"),
-        func.coalesce(func.sum(case((S.ip == 1, 1), else_=0)), 0).label("ip_cnt"),
-        func.coalesce(func.sum(case((S.ip == 0, 1), else_=0)), 0).label("ul_cnt"),
+        func.coalesce(func.sum(case((and_(S.ip == 1, OBL), 1), else_=0)), 0).label("ip_cnt"),
+        func.coalesce(func.sum(case((and_(S.ip == 0, OBL), 1), else_=0)), 0).label("ul_cnt"),
         func.coalesce(func.sum(case((and_(S.ip == 1, S.status == 1), 1), else_=0)), 0).label("ip_ins"),
         func.coalesce(func.sum(case((and_(S.ip == 0, S.status == 1), 1), else_=0)), 0).label("ul_ins"),
     )).one()
 
-    total = tot.total or 0
     insured = tot.insured or 0
     not_insured = tot.not_insured or 0
+    total = insured + not_insured  # «Всего организаций» — как в разделе страхование
     coverage = round(insured * 100.0 / (insured + not_insured), 1) if (insured + not_insured) else 0.0
 
+    # Полная разбивка по регионам (для таблицы и рейтингов).
+    region_rows = scope(db.query(
+        S.obl_name,
+        func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
+        func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("nins"),
+        func.coalesce(func.sum(case((and_(S.ip == 1, OBL), 1), else_=0)), 0).label("ip_tot"),
+        func.coalesce(func.sum(case((and_(S.ip == 0, OBL), 1), else_=0)), 0).label("ul_tot"),
+        func.coalesce(func.sum(case((and_(S.ip == 1, S.status == 0), 1), else_=0)), 0).label("ip_nins"),
+        func.coalesce(func.sum(case((and_(S.ip == 0, S.status == 0), 1), else_=0)), 0).label("ul_nins"),
+    )).group_by(S.obl_name).all()
+
+    region_table = []
+    for r in region_rows:
+        ins_c = r.ins or 0
+        nins_c = r.nins or 0
+        tot_c = ins_c + nins_c
+        region_table.append({
+            "region": r.obl_name or "—",
+            "total": tot_c, "ip_total": r.ip_tot or 0, "ul_total": r.ul_tot or 0,
+            "insured": ins_c,
+            "coverage": round(ins_c * 100.0 / tot_c, 1) if tot_c else 0.0,
+            "not_insured": nins_c, "ip_not_insured": r.ip_nins or 0, "ul_not_insured": r.ul_nins or 0,
+        })
+    region_table.sort(key=lambda x: x["total"], reverse=True)
+
+    # Рейтинг регионов по застрахованным (топ-10) — из той же разбивки
     by_region = [
-        {"label": r.obl_name or "—", "insured": r.ins or 0, "not_insured": r.nins or 0, "total": r.cnt or 0}
-        for r in scope(db.query(
-            S.obl_name,
-            func.count().label("cnt"),
-            func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
-            func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("nins"),
-        )).group_by(S.obl_name).order_by(func.count().desc()).limit(10).all()
+        {"label": x["region"], "insured": x["insured"], "not_insured": x["not_insured"], "total": x["total"]}
+        for x in sorted(region_table, key=lambda x: x["insured"], reverse=True)[:10]
     ]
 
-    # Рейтинг страховых компаний (КСЖ) по числу застрахованных людей.
-    # Страховая = system_delimiter_bin_name; люди = count_employees застрахованных организаций.
+    # Рейтинг страховых компаний (КСЖ) по числу застрахованных предприятий.
     by_insurer = [
-        {"label": r.ins_name, "value": int(r.ppl or 0)}
+        {"label": r.ins_name, "value": int(r.cnt or 0)}
         for r in scope(db.query(
             S.system_delimiter_bin_name.label("ins_name"),
-            func.coalesce(func.sum(S.count_employees), 0).label("ppl"),
+            func.count().label("cnt"),
         ).filter(S.status == 1,
                  S.system_delimiter_bin_name.isnot(None),
                  S.system_delimiter_bin_name != ""))
         .group_by(S.system_delimiter_bin_name)
-        .order_by(func.sum(S.count_employees).desc()).limit(10).all()
+        .order_by(func.count().desc()).limit(10).all()
     ]
 
-    # Разбивка по размеру предприятия (Малое/Среднее/Крупное)
+    # Разбивка по размеру предприятия (Крупное → Среднее → Малое; «Не указан» не показываем)
+    SIZE_ORDER = {"Крупное": 0, "Среднее": 1, "Малое": 2}
     by_size = [
-        {"label": r.org_size or "Не указан", "insured": r.ins or 0,
-         "not_insured": r.nins or 0, "total": r.cnt or 0}
+        {"label": r.org_size, "insured": r.ins or 0,
+         "not_insured": r.nins or 0, "total": (r.ins or 0) + (r.nins or 0)}
         for r in scope(db.query(
             S.org_size,
-            func.count().label("cnt"),
             func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
             func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("nins"),
-        )).group_by(S.org_size).order_by(func.count().desc()).all()
+        ).filter(S.org_size.in_(list(SIZE_ORDER.keys())))).group_by(S.org_size).all()
     ]
+    by_size.sort(key=lambda x: SIZE_ORDER.get(x["label"], 99))
 
     # Ручные статусы (глобально; привязка к региону — через join, для простоты опускаем)
     by_status = [
@@ -797,6 +822,7 @@ def dashboard_kpis(
         "by_insurer": by_insurer,
         "by_status": by_status,
         "by_size": by_size,
+        "region_table": region_table,
     }
 
     # ── ОППВ (по oppv_records) ──
@@ -977,9 +1003,22 @@ def get_records(
 
     total = query.count()
 
-    if sort_by and hasattr(Model, sort_by):
+    # Приоритет размера предприятия: Крупное → Среднее → Малое → не указано.
+    size_rank = case(
+        (Model.org_size == "Крупное", 0),
+        (Model.org_size == "Среднее", 1),
+        (Model.org_size == "Малое", 2),
+        else_=3,
+    )
+    if sort_by == "org_size":
+        query = query.order_by(size_rank.desc() if sort_order == "desc" else size_rank.asc(),
+                               Model.bin.asc())
+    elif sort_by and sort_by != "id" and hasattr(Model, sort_by):
         order_col = getattr(Model, sort_by)
         query = query.order_by(order_col.desc() if sort_order == "desc" else order_col.asc())
+    else:
+        # По умолчанию: сначала крупные предприятия, затем мельче, потом без размера
+        query = query.order_by(size_rank.asc(), Model.bin.asc())
 
     records = query.offset((page - 1) * page_size).limit(page_size).all()
 

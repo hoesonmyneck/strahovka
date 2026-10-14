@@ -20,7 +20,9 @@ import {
   Settings,
   Coins,
   LayoutDashboard,
-  X
+  X,
+  Check,
+  Pencil
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
@@ -64,6 +66,26 @@ const fmtNumber = (v, decimals = 0) => {
 const binFormatter = (params) => {
   if (params.value == null || params.value === '') return ''
   return String(params.value).padStart(12, '0')
+}
+
+// ─── Ячейка «Застрахован»: кастомные значок-галочка / крестик (не эмодзи) ──────
+const InsuredCell = (params) => {
+  if (!params.data) return null
+  if (params.value === 1) {
+    return (
+      <span className="ins-badge ins-yes">
+        <Check size={15} strokeWidth={3} /> Да
+      </span>
+    )
+  }
+  if (params.value === 0) {
+    return (
+      <span className="ins-badge ins-no">
+        <X size={15} strokeWidth={3} /> Нет
+      </span>
+    )
+  }
+  return <span className="ins-badge ins-na">—</span>
 }
 
 // ─── Ячейка «Статусы»: кастомный справочник (меню в портале той же ширины,
@@ -310,6 +332,13 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       minWidth: 250,
     },
+    {
+      field: 'is_insured',
+      headerName: 'Застрахован',
+      sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
+      minWidth: 140,
+      cellRenderer: InsuredCell,
+    },
     // Страховая компания
     {
       field: 'system_delimiter_bin',
@@ -380,18 +409,6 @@ const Dashboard = () => {
     // ТИП и Флаг скрыты в таблице, но экспортируются в Excel
     { field: 'tip', headerName: 'ТИП', hide: true },
     { field: 'flag_head', headerName: 'Флаг', hide: true },
-    {
-      field: 'is_insured',
-      headerName: 'Застрахован',
-      sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
-      minWidth: 130,
-      cellRenderer: (params) => {
-        if (!params.data) return ''
-        if (params.value === 1) return '✅ Да'
-        if (params.value === 0) return '❌ Нет'
-        return '—'
-      },
-    },
     // Ручной статус (справочник) — выбор сохраняется автоматически, живёт по БИН
     {
       field: 'manual_status',
@@ -1013,7 +1030,7 @@ const Dashboard = () => {
               <>
                 <span>Дата обновления данных: <b>{lastUpdate || 'не указана'}</b></span>
                 {isAdmin() && (
-                  <button onClick={() => { setDateInput(lastUpdate || ''); setEditingDate(true) }} style={{ marginLeft: 8, fontSize: 12, padding: '2px 8px', background: 'transparent', border: '1px solid #aaa', borderRadius: 4, cursor: 'pointer' }}>✏️ Изменить</button>
+                  <button onClick={() => { setDateInput(lastUpdate || ''); setEditingDate(true) }} style={{ marginLeft: 8, fontSize: 12, padding: '2px 8px', background: 'transparent', border: '1px solid #aaa', borderRadius: 4, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Pencil size={13} /> Изменить</button>
                 )}
               </>
             )}

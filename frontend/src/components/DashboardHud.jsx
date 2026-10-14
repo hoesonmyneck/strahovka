@@ -213,6 +213,44 @@ function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
   )
 }
 
+// Таблица по регионам: предприятия (всего/ИП/ЮЛ), застрахованы, % , не застрахованы (всего/ИП/ЮЛ)
+function HudRegionTable({ rows }) {
+  return (
+    <div className="hud-rtable-wrap">
+      <table className="hud-rtable">
+        <thead>
+          <tr>
+            <th rowSpan={2} className="hud-rt-region">Регион</th>
+            <th colSpan={3}>Кол-во предприятий</th>
+            <th rowSpan={2}>Застра&shy;хованных</th>
+            <th rowSpan={2}>% страхо&shy;вания</th>
+            <th colSpan={3}>Не застрахованы</th>
+          </tr>
+          <tr>
+            <th>Всего</th><th>ЮЛ</th><th>ИП</th>
+            <th>Всего</th><th>ЮЛ</th><th>ИП</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.region + i}>
+              <td className="hud-rt-region" title={r.region}>{r.region}</td>
+              <td className="num strong">{fmtNum(r.total)}</td>
+              <td className="num">{fmtNum(r.ul_total)}</td>
+              <td className="num">{fmtNum(r.ip_total)}</td>
+              <td className="num ins">{fmtNum(r.insured)}</td>
+              <td className="num"><span className="hud-rt-cov">{fmtPct(r.coverage)}</span></td>
+              <td className="num strong">{fmtNum(r.not_insured)}</td>
+              <td className="num">{fmtNum(r.ul_not_insured)}</td>
+              <td className="num">{fmtNum(r.ip_not_insured)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // Разбивка по размеру предприятия: всего, застраховано, охват (бар)
 function HudSizeBreakdown({ items }) {
   const maxTotal = Math.max(1, ...items.map((i) => i.total || 0))
@@ -407,6 +445,13 @@ const DashboardHud = () => {
 
       <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
       <KpiPanel tiles={insTiles} cols={4} />
+      {ins.region_table && ins.region_table.length > 0 && (
+        <div className="hud-charts">
+          <HudCard title="Страхование по регионам" wide>
+            <HudRegionTable rows={ins.region_table} />
+          </HudCard>
+        </div>
+      )}
       <div className="hud-charts">
         <HudCard title="Рейтинг регионов по застрахованным" wide>
           <HudRanking
@@ -424,7 +469,7 @@ const DashboardHud = () => {
       </div>
       {ins.by_insurer && ins.by_insurer.length > 0 && (
         <div className="hud-charts">
-          <HudCard title="Рейтинг страховых компаний по застрахованным людям" wide>
+          <HudCard title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
             <HudRanking items={ins.by_insurer} color="var(--h-teal)" />
           </HudCard>
         </div>
