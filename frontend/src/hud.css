@@ -102,7 +102,7 @@
 }
 .hud-h2 svg { color: var(--h-cyan); filter: drop-shadow(0 0 8px rgba(34, 211, 238, .6)); }
 .hud-loading { padding: 80px; text-align: center; color: var(--h-dim); font-size: 15px;
-  display: flex; align-items: center; justify-content: center; }
+  display: flex; align-items: center; justify-content: center; min-height: 65vh; }
 /* Орб загрузки (thinking-orbs) — лёгкое циановое свечение в духе HUD */
 .hud-orb { filter: drop-shadow(0 0 26px rgba(34, 211, 238, .35)); }
 
