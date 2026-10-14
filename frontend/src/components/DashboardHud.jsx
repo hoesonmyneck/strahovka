@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api.js'
 import { Shield, Coins, Activity } from 'lucide-react'
+import { ThinkingOrb } from 'thinking-orbs'
 import { KpiSpark, CountUp } from './KpiSpark.jsx'
 
 // ─── Форматирование ──────────────────────────────────────────────────────────
@@ -541,7 +542,7 @@ const DashboardHud = () => {
     return (
       <div className="hud-view">
         <div className="hud-loading">
-          <span className="hud-spinner" role="status" aria-label="Загрузка" />
+          <ThinkingOrb className="hud-orb" state="searching" size={64} theme="dark" aria-label="Загрузка" />
         </div>
       </div>
     )

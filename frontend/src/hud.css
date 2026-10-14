@@ -103,15 +103,8 @@
 .hud-h2 svg { color: var(--h-cyan); filter: drop-shadow(0 0 8px rgba(34, 211, 238, .6)); }
 .hud-loading { padding: 80px; text-align: center; color: var(--h-dim); font-size: 15px;
   display: flex; align-items: center; justify-content: center; }
-/* Кружок загрузки (в духе HUD-орба: циановое свечение) */
-.hud-spinner {
-  width: 64px; height: 64px; border-radius: 50%;
-  border: 4px solid rgba(34, 211, 238, .14);
-  border-top-color: var(--h-cyan);
-  box-shadow: 0 0 26px rgba(34, 211, 238, .35);
-  animation: hud-spin .8s linear infinite;
-}
-@keyframes hud-spin { to { transform: rotate(360deg); } }
+/* Орб загрузки (thinking-orbs) — лёгкое циановое свечение в духе HUD */
+.hud-orb { filter: drop-shadow(0 0 26px rgba(34, 211, 238, .35)); }
 
 /* ── Стеклянная карточка ── */
 .hud-card {
