@@ -519,6 +519,74 @@ function HudExpiry() {
   )
 }
 
+// Активность статусов: по статусам (Y) × дни месяца, фильтры месяц + регион
+function HudStatusActivity() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [region, setRegion] = useState('')
+  const [month, setMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+
+  const load = useCallback(async (m, reg) => {
+    const [y, mo] = (m || '').split('-')
+    if (!y || !mo) return
+    setLoading(true)
+    try {
+      const params = { year: Number(y), month: Number(mo) }
+      if (reg) params.region = reg
+      const res = await api.get('/api/dashboard/status-activity', { params })
+      setData(res.data)
+    } catch { setData(null) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load(month, region) }, [month, region, load])
+
+  const regions = data?.regions || []
+  const rows = (data?.statuses || []).filter((s) => s.total > 0)
+
+  return (
+    <HudCard title="Активность статусов" wide>
+      <div className="hud-activity-bar">
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
+        <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
+          <option value="">Все регионы</option>
+          {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </div>
+      {loading && !data ? (
+        <div className="hud-act-empty">Загрузка…</div>
+      ) : rows.length === 0 ? (
+        <div className="hud-act-empty">Нет проставленных статусов за выбранный месяц</div>
+      ) : (
+        <div className="hud-heatmap">
+          {rows.map((r) => {
+            const maxv = Math.max(1, ...r.days)
+            return (
+              <div className="hud-hm-row hud-stat-row" key={r.status}>
+                <span className="hud-hm-region" title={r.status}>{r.status}</span>
+                <div className="hud-hm-days">
+                  {r.days.map((c, di) => (
+                    <div className="hud-hm-day" key={di}>
+                      <span className="hud-hm-daynum">{di + 1}</span>
+                      <span className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
+                        title={`${di + 1} число: ${c} ${plural(c, 'статус', 'статуса', 'статусов')}`}
+                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                        {c > 0 ? fmtNum(c) : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <span className="hud-hm-tot"><b>{fmtNum(r.total)}</b> за месяц</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </HudCard>
+  )
+}
+
 // ─── Основной компонент ──────────────────────────────────────────────────────
 const DashboardHud = () => {
   const [data, setData] = useState(null)
@@ -642,6 +710,7 @@ const DashboardHud = () => {
           </HudCard>
         </div>
       )}
+      <div className="hud-charts"><HudStatusActivity /></div>
 
       {op && (
         <>

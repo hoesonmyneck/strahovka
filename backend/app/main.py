@@ -955,6 +955,63 @@ def expiry_list(
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
 
+@app.get("/api/dashboard/status-activity")
+def status_activity(
+    year: int,
+    month: int = Query(..., ge=1, le=12),
+    region: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Активность проставления статусов: по каждому статусу — сколько проставлено
+    в каждый день выбранного месяца. Фильтр по региону (через company_summary)."""
+    import calendar
+    B = models.BinStatus
+    S = models.CompanySummary
+    # Региональный пользователь — только свой регион
+    if current_user.region:
+        region = current_user.region
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    day_expr = func.extract('day', B.updated_at)
+
+    q = (db.query(B.status, day_expr.label('d'), func.count().label('c'))
+         .filter(B.status.isnot(None), B.status != "",
+                 func.extract('year', B.updated_at) == year,
+                 func.extract('month', B.updated_at) == month))
+    if region:
+        q = q.join(S, S.bin == B.bin).filter(S.obl_name == region)
+    rows = q.group_by(B.status, day_expr).all()
+
+    agg = {}
+    for status, d, c in rows:
+        agg.setdefault(status, {})[int(d)] = int(c)
+
+    # Ось Y: все статусы из справочника + любые нестандартные, что встретились
+    status_order = list(INSURANCE_STATUSES)
+    for s in agg:
+        if s not in status_order:
+            status_order.append(s)
+
+    statuses = []
+    for s in status_order:
+        days = agg.get(s, {})
+        statuses.append({
+            'status': s,
+            'days': [days.get(d, 0) for d in range(1, days_in_month + 1)],
+            'total': sum(days.values()),
+        })
+
+    # Список регионов для фильтра (для регионального пользователя — только его)
+    if current_user.region:
+        regions = [current_user.region]
+    else:
+        regions = sorted(r[0] for r in db.query(S.obl_name).distinct().all() if r[0])
+
+    return {'year': year, 'month': month, 'days_in_month': days_in_month,
+            'statuses': statuses, 'regions': regions}
+
+
 # ============ RECORDS ============
 
 # Справочник ручных статусов по БИН (выбирается в таблице страхования)
