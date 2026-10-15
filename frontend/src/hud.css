@@ -25,7 +25,11 @@
     radial-gradient(900px 600px at 50% -5%, rgba(34, 211, 238, .13), transparent 62%),
     linear-gradient(170deg, #081130 0%, #050b22 45%, #04081a 100%);
   background-attachment: fixed;
-  overflow: hidden;
+  /* clip, а НЕ hidden: hidden делает .hud-view прокручиваемым контейнером, и
+     scrollIntoView при переходе по навигации «уводил» его scrollTop без
+     возможности прокрутить обратно к верхним KPI. clip так же обрезает декор,
+     но не создаёт скролл-контейнер — прокручивается само окно. */
+  overflow: clip;
   animation: hud-view-in .6s cubic-bezier(.22, 1, .36, 1) both;
 }
 @keyframes hud-view-in {
