@@ -214,6 +214,25 @@ function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
   )
 }
 
+// Рейтинг регионов по заполненности статусов: место, регион, бар (%), числа
+function HudFillRanking({ rows }) {
+  return (
+    <div className="hud-rank">
+      {rows.map((r, i) => (
+        <div className="hud-rank-row hud-fill-row" key={r.region + i}
+          title={`${r.region}: заполнено ${fmtNum(r.filled)} из ${fmtNum(r.total)} (${fmtPct(r.pct)})`}>
+          <span className={'hud-rank-pos' + (i < 3 ? ' top top' + (i + 1) : '')}>{i + 1}</span>
+          <span className="hud-rank-label">{r.region}</span>
+          <span className="hud-rank-track">
+            <span className="hud-rank-fill" style={{ width: `${Math.min(100, r.pct)}%`, background: 'var(--h-cyan)', '--d': `${i * 45}ms` }} />
+          </span>
+          <span className="hud-fill-val"><b>{fmtPct(r.pct)}</b> <span className="dim">{fmtNum(r.filled)}/{fmtNum(r.total)}</span></span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Таблица по регионам: предприятия (всего/ИП/ЮЛ), застрахованы, % , не застрахованы (всего/ИП/ЮЛ)
 function HudRegionTable({ rows }) {
   return (
@@ -587,6 +606,51 @@ function HudStatusActivity() {
   )
 }
 
+// Закреплённая справа навигация по разделам дашборда (скролл к секции)
+function HudNav({ items }) {
+  const [active, setActive] = useState(items[0]?.id)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const ids = items.map((i) => i.id)
+    const onScroll = () => {
+      let cur = ids[0]
+      for (const id of ids) {
+        const el = document.getElementById(id)
+        if (el && el.getBoundingClientRect().top <= 160) cur = id
+      }
+      setActive(cur)
+    }
+    const sc = document.querySelector('.content') || window
+    sc.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => { sc.removeEventListener('scroll', onScroll); window.removeEventListener('scroll', onScroll) }
+  }, [items])
+
+  const go = (id) => {
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setOpen(false)
+  }
+
+  return (
+    <nav className={'hud-nav' + (open ? ' open' : '')}>
+      <button className="hud-nav-toggle" onClick={() => setOpen((v) => !v)} aria-label="Разделы">☰</button>
+      <div className="hud-nav-title">Разделы</div>
+      <ul className="hud-nav-list">
+        {items.map((it) => (
+          <li key={it.id}>
+            <button className={'hud-nav-link' + (active === it.id ? ' active' : '')} onClick={() => go(it.id)}>
+              {it.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+
 // ─── Основной компонент ──────────────────────────────────────────────────────
 const DashboardHud = () => {
   const [data, setData] = useState(null)
@@ -658,23 +722,38 @@ const DashboardHud = () => {
       spark: barSpark(op.by_oked, C[4], fmtNum) },
   ] : []
 
+  const navItems = [
+    { id: 'sec-ins', label: 'Страхование' },
+    ...(ins.region_table?.length ? [{ id: 'sec-region', label: 'Страхование по регионам' }] : []),
+    { id: 'sec-expiry', label: 'Окончание страховки' },
+    { id: 'sec-rank-region', label: 'Рейтинг регионов' },
+    ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Страховые компании' }] : []),
+    ...(ins.by_size?.length ? [{ id: 'sec-size', label: 'Размер предприятия' }] : []),
+    ...(ins.by_status?.length ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
+    { id: 'sec-status-act', label: 'Активность статусов' },
+    ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: 'Статусы по регионам' }] : []),
+    ...(op ? [{ id: 'sec-oppv', label: 'Анализ ОППВ' }] : []),
+    { id: 'sec-activity', label: 'Активность заходов' },
+  ]
+
   return (
     <div className="hud-view">
+      <HudNav items={navItems} />
       <div className="hud-topline">
         <div className="hud-topline-title">Аналитический дашборд</div>
       </div>
 
-      <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
+      <h2 className="hud-h2" id="sec-ins"><Shield size={18} /> Страхование</h2>
       <KpiPanel tiles={insTiles} cols={4} />
       {ins.region_table && ins.region_table.length > 0 && (
-        <div className="hud-charts">
+        <div className="hud-charts" id="sec-region">
           <HudCard title="Страхование по регионам" wide>
             <HudRegionTable rows={ins.region_table} />
           </HudCard>
         </div>
       )}
-      <div className="hud-charts"><HudExpiry /></div>
-      <div className="hud-charts">
+      <div className="hud-charts" id="sec-expiry"><HudExpiry /></div>
+      <div className="hud-charts" id="sec-rank-region">
         <HudCard title="Рейтинг регионов по застрахованным" wide>
           <HudRanking
             items={[...ins.by_region].sort((a, b) => b.insured - a.insured).map((r) => ({ label: r.label, value: r.insured }))}
@@ -690,31 +769,39 @@ const DashboardHud = () => {
         </HudCard>
       </div>
       {ins.by_insurer && ins.by_insurer.length > 0 && (
-        <div className="hud-charts">
+        <div className="hud-charts" id="sec-insurer">
           <HudCard title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
             <HudRanking items={ins.by_insurer} color="var(--h-teal)" />
           </HudCard>
         </div>
       )}
       {ins.by_size && ins.by_size.length > 0 && (
-        <div className="hud-charts">
+        <div className="hud-charts" id="sec-size">
           <HudCard title="Разбивка по размеру предприятия" wide>
             <HudSizeBreakdown items={ins.by_size} />
           </HudCard>
         </div>
       )}
       {ins.by_status && ins.by_status.length > 0 && (
-        <div className="hud-charts">
+        <div className="hud-charts" id="sec-status-rank">
           <HudCard title="Рейтинг статусов" wide>
             <HudRanking items={ins.by_status} color="var(--h-blue)" />
           </HudCard>
         </div>
       )}
-      <div className="hud-charts"><HudStatusActivity /></div>
+      <div className="hud-charts" id="sec-status-act"><HudStatusActivity /></div>
+      {ins.status_fill && ins.status_fill.length > 0 && (
+        <div className="hud-charts" id="sec-status-fill">
+          <HudCard title="Рейтинг регионов по заполненности статусов" wide>
+            <div className="hud-fill-note">Доля незастрахованных предприятий региона, которым проставлен статус</div>
+            <HudFillRanking rows={ins.status_fill} />
+          </HudCard>
+        </div>
+      )}
 
       {op && (
         <>
-          <h2 className="hud-h2"><Coins size={18} /> Анализ ОППВ</h2>
+          <h2 className="hud-h2" id="sec-oppv"><Coins size={18} /> Анализ ОППВ</h2>
           <KpiPanel tiles={opTiles} cols={3} />
           <div className="hud-charts">
             <HudCard title="Рейтинг ОКЭД по сотрудникам" wide>
@@ -724,7 +811,7 @@ const DashboardHud = () => {
         </>
       )}
 
-      <h2 className="hud-h2"><Activity size={18} /> Активность</h2>
+      <h2 className="hud-h2" id="sec-activity"><Activity size={18} /> Активность</h2>
       <div className="hud-charts"><HudActivity /></div>
     </div>
   )
