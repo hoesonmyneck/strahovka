@@ -112,7 +112,12 @@ const StatusCellRenderer = (params) => {
       if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return
       close()
     }
-    const onScroll = () => close()
+    // Закрываем при прокрутке страницы/грида (меню position:fixed «уедет»),
+    // но НЕ при прокрутке внутри самого меню — иначе список не прокрутить.
+    const onScroll = (e) => {
+      if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return
+      close()
+    }
     document.addEventListener('mousedown', onDoc)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
