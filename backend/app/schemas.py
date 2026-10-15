@@ -195,6 +195,7 @@ class OppvRecordList(BaseModel):
     total: int
     page: int
     page_size: int
+    sum_count: int = 0   # сумма «Количество сотрудников» по всей выборке (с учётом фильтров)
 
 
 class StoredFileResponse(BaseModel):

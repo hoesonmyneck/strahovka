@@ -1649,13 +1649,17 @@ def get_oppv(
               if k not in ("page", "page_size", "sort_by", "sort_order", "current_user", "db")}
     query = apply_oppv_filters(db.query(O), params)
     total = query.count()
+    # Сумма «Количество сотрудников» по всей выборке (для строки «Итого»)
+    sum_count = int(apply_oppv_filters(
+        db.query(func.coalesce(func.sum(O.count), 0)), params).scalar() or 0)
 
     if sort_by in OPPV_SORT_FIELDS:
         col = getattr(O, sort_by)
         query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
 
     items = query.offset((page - 1) * page_size).limit(page_size).all()
-    return schemas.OppvRecordList(items=items, total=total, page=page, page_size=page_size)
+    return schemas.OppvRecordList(items=items, total=total, page=page, page_size=page_size,
+                                  sum_count=sum_count)
 
 
 OPPV_EXPORT_HEADERS = [

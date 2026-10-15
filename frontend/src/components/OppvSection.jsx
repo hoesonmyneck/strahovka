@@ -24,6 +24,7 @@ const OppvSection = () => {
   const [filters, setFilters] = useState(EMPTY)
   const [rowData, setRowData] = useState([])
   const [total, setTotal] = useState(0)
+  const [sumCount, setSumCount] = useState(0)
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [regions, setRegions] = useState([])
@@ -39,7 +40,7 @@ const OppvSection = () => {
     { field: 'age', headerName: 'Возраст', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'gender', headerName: 'Пол', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 110 },
     { field: 'experience', headerName: 'Стаж', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 100 },
-    { field: 'count', headerName: 'Количество сотрудников', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150 },
+    { field: 'count', headerName: 'Количество сотрудников', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
     { field: 'fot', headerName: 'ФОТ', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
     { field: 'smz', headerName: 'СМЗ', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 150, valueFormatter: (p) => fmtNumber(p.value, 0) },
   ], [])
@@ -48,6 +49,12 @@ const OppvSection = () => {
     resizable: true, sortable: true, filter: true, floatingFilter: true,
     suppressMenu: false, wrapHeaderText: true, autoHeaderHeight: true,
   }), [])
+
+  // Закреплённая верхняя строка «Итого» — общая сумма работников по всей выборке
+  const pinnedTopRowData = useMemo(
+    () => [{ region: 'Итого', _total: true, count: sumCount }],
+    [sumCount],
+  )
 
   // Параметры фильтра: верхняя панель + floating-фильтры колонок AG Grid
   const buildParams = useCallback(() => {
@@ -75,6 +82,7 @@ const OppvSection = () => {
       const res = await api.get('/api/oppv', { params })
       setRowData(res.data.items)
       setTotal(res.data.total)
+      setSumCount(res.data.sum_count || 0)
       setPage(toPage)
     } catch (e) {
       // 403 — нет доступа к разделу (задумано), не показываем ошибку
@@ -192,6 +200,9 @@ const OppvSection = () => {
             rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
+            pinnedTopRowData={pinnedTopRowData}
+            getRowStyle={(p) => (p.node.rowPinned === 'top'
+              ? { fontWeight: 700, background: '#eef1fb' } : undefined)}
             pagination={false}
             domLayout="normal"
             enableCellTextSelection={true}
