@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import api from '../utils/api.js'
 import { Shield, Coins, Activity } from 'lucide-react'
 import { ThinkingOrb } from 'thinking-orbs'
@@ -606,10 +607,14 @@ function HudStatusActivity() {
   )
 }
 
-// Закреплённая справа навигация по разделам дашборда (скролл к секции)
+// Закреплённая справа навигация по разделам дашборда (скролл к секции).
+// Рендерится порталом в body: иначе трансформированный предок (анимация
+// перехода в дашборд) делает position:fixed относительным и меню уезжает.
 function HudNav({ items }) {
   const [active, setActive] = useState(items[0]?.id)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(() => {
+    try { return window.innerWidth > 1280 } catch { return true }
+  })
 
   useEffect(() => {
     const ids = items.map((i) => i.id)
@@ -621,33 +626,41 @@ function HudNav({ items }) {
       }
       setActive(cur)
     }
-    const sc = document.querySelector('.content') || window
-    sc.addEventListener('scroll', onScroll, { passive: true })
+    // Скроллиться может как окно, так и внутренний контейнер контента
+    const sc = document.querySelector('.content') || document.querySelector('.main-content')
+    if (sc) sc.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('scroll', onScroll, { passive: true })
     onScroll()
-    return () => { sc.removeEventListener('scroll', onScroll); window.removeEventListener('scroll', onScroll) }
+    return () => { if (sc) sc.removeEventListener('scroll', onScroll); window.removeEventListener('scroll', onScroll) }
   }, [items])
 
   const go = (id) => {
     const el = document.getElementById(id)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setOpen(false)
   }
 
-  return (
-    <nav className={'hud-nav' + (open ? ' open' : '')}>
-      <button className="hud-nav-toggle" onClick={() => setOpen((v) => !v)} aria-label="Разделы">☰</button>
-      <div className="hud-nav-title">Разделы</div>
-      <ul className="hud-nav-list">
-        {items.map((it) => (
-          <li key={it.id}>
-            <button className={'hud-nav-link' + (active === it.id ? ' active' : '')} onClick={() => go(it.id)}>
-              {it.label}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
+  return createPortal(
+    <nav className={'hud-nav' + (open ? ' open' : ' collapsed')}>
+      <button className="hud-nav-toggle" onClick={() => setOpen((v) => !v)}
+        aria-label={open ? 'Свернуть разделы' : 'Разделы'} title={open ? 'Свернуть' : 'Разделы'}>
+        {open ? '✕' : '☰'}
+      </button>
+      {open && (
+        <>
+          <div className="hud-nav-title">Разделы</div>
+          <ul className="hud-nav-list">
+            {items.map((it) => (
+              <li key={it.id}>
+                <button className={'hud-nav-link' + (active === it.id ? ' active' : '')} onClick={() => go(it.id)}>
+                  {it.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </nav>,
+    document.body,
   )
 }
 
