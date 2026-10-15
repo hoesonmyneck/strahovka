@@ -4,7 +4,10 @@ FROM node:18 AS build
 WORKDIR /app
 
 COPY package.json vite.config.js ./
-RUN npm install
+# На проде корпоративный прокси подменяет TLS самоподписанным сертификатом
+# (как --trusted-host для pip в backend). Иначе npm падает SELF_SIGNED_CERT_IN_CHAIN.
+RUN npm config set strict-ssl false \
+ && npm install --no-audit --no-fund
 
 COPY index.html ./
 COPY src ./src
