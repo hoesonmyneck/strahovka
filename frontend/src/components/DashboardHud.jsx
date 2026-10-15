@@ -136,9 +136,9 @@ function HudBubbles({ items }) {
 }
 
 // ─── Карточка-обёртка для графиков ───────────────────────────────────────────
-function HudCard({ title, children, wide }) {
+function HudCard({ title, children, wide, id }) {
   return (
-    <div className={'hud-card hud-chart-card' + (wide ? ' hud-chart-card--wide' : '')}>
+    <div id={id} className={'hud-card hud-chart-card' + (wide ? ' hud-chart-card--wide' : '')}>
       {title && <div className="hud-chart-title">{title}</div>}
       {children}
     </div>
@@ -348,7 +348,7 @@ function HudActivity() {
   useEffect(() => { load(month) }, [month, load])
 
   return (
-    <HudCard wide>
+    <HudCard id="sec-activity" wide>
       <div className="hud-activity-bar">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
       </div>
@@ -493,7 +493,7 @@ function HudExpiry() {
   for (let y = now.getFullYear() + 1; y >= now.getFullYear() - 4; y--) years.push(y)
 
   return (
-    <HudCard title="Окончание страховки по месяцам" wide>
+    <HudCard id="sec-expiry" title="Окончание страховки по месяцам" wide>
       <div className="hud-activity-bar">
         <select className="hud-month" value={year} onChange={(e) => setYear(Number(e.target.value))}>
           {years.map((y) => <option key={y} value={y}>{y} год</option>)}
@@ -566,7 +566,7 @@ function HudStatusActivity() {
   const rows = (data?.statuses || []).filter((s) => s.total > 0)
 
   return (
-    <HudCard title="Активность статусов" wide>
+    <HudCard id="sec-status-act" title="Активность статусов" wide>
       <div className="hud-activity-bar">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
         <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
@@ -641,13 +641,15 @@ function HudNav({ items }) {
 
   return createPortal(
     <nav className={'hud-nav' + (open ? ' open' : ' collapsed')}>
-      <button className="hud-nav-toggle" onClick={() => setOpen((v) => !v)}
-        aria-label={open ? 'Свернуть разделы' : 'Разделы'} title={open ? 'Свернуть' : 'Разделы'}>
-        {open ? '✕' : '☰'}
+      {/* Полоса-переключатель слева на всю высоту */}
+      <button className="hud-nav-bar" onClick={() => setOpen((v) => !v)}
+        aria-label={open ? 'Свернуть разделы' : 'Развернуть разделы'}
+        title={open ? 'Свернуть' : 'Разделы'}>
+        <span className="hud-nav-bar-chevron">{open ? '›' : '‹'}</span>
+        <span className="hud-nav-bar-label">Разделы</span>
       </button>
       {open && (
-        <>
-          <div className="hud-nav-title">Разделы</div>
+        <div className="hud-nav-body">
           <ul className="hud-nav-list">
             {items.map((it) => (
               <li key={it.id}>
@@ -657,7 +659,7 @@ function HudNav({ items }) {
               </li>
             ))}
           </ul>
-        </>
+        </div>
       )}
     </nav>,
     document.body,
@@ -735,17 +737,18 @@ const DashboardHud = () => {
       spark: barSpark(op.by_oked, C[4], fmtNum) },
   ] : []
 
+  // В меню — каждая таблица/график отдельно (без KPI-панелей)
   const navItems = [
-    { id: 'sec-ins', label: 'Страхование' },
     ...(ins.region_table?.length ? [{ id: 'sec-region', label: 'Страхование по регионам' }] : []),
     { id: 'sec-expiry', label: 'Окончание страховки' },
-    { id: 'sec-rank-region', label: 'Рейтинг регионов' },
-    ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Страховые компании' }] : []),
+    { id: 'sec-rank-region', label: 'Рейтинг регионов по застрахованным' },
+    { id: 'sec-form', label: 'Форма предприятия' },
+    ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Рейтинг страховых компаний' }] : []),
     ...(ins.by_size?.length ? [{ id: 'sec-size', label: 'Размер предприятия' }] : []),
     ...(ins.by_status?.length ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
     { id: 'sec-status-act', label: 'Активность статусов' },
-    ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: 'Статусы по регионам' }] : []),
-    ...(op ? [{ id: 'sec-oppv', label: 'Анализ ОППВ' }] : []),
+    ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: 'Заполненность статусов по регионам' }] : []),
+    ...(op ? [{ id: 'sec-oked', label: 'Рейтинг ОКЭД по сотрудникам' }] : []),
     { id: 'sec-activity', label: 'Активность заходов' },
   ]
 
@@ -756,23 +759,23 @@ const DashboardHud = () => {
         <div className="hud-topline-title">Аналитический дашборд</div>
       </div>
 
-      <h2 className="hud-h2" id="sec-ins"><Shield size={18} /> Страхование</h2>
+      <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
       <KpiPanel tiles={insTiles} cols={4} />
       {ins.region_table && ins.region_table.length > 0 && (
-        <div className="hud-charts" id="sec-region">
-          <HudCard title="Страхование по регионам" wide>
+        <div className="hud-charts">
+          <HudCard id="sec-region" title="Страхование по регионам" wide>
             <HudRegionTable rows={ins.region_table} />
           </HudCard>
         </div>
       )}
-      <div className="hud-charts" id="sec-expiry"><HudExpiry /></div>
-      <div className="hud-charts" id="sec-rank-region">
-        <HudCard title="Рейтинг регионов по застрахованным" wide>
+      <div className="hud-charts"><HudExpiry /></div>
+      <div className="hud-charts">
+        <HudCard id="sec-rank-region" title="Рейтинг регионов по застрахованным" wide>
           <HudRanking
             items={[...ins.by_region].sort((a, b) => b.insured - a.insured).map((r) => ({ label: r.label, value: r.insured }))}
             color="var(--h-cyan)" />
         </HudCard>
-        <HudCard title="Форма предприятия">
+        <HudCard id="sec-form" title="Форма предприятия">
           <HudDonut a={ins.ul_cnt} b={ins.ip_cnt} labelA="ЮЛ" labelB="ИП" />
           <div className="hud-donut-extra">
             <div className="hud-donut-extra-title">Застрахованы</div>
@@ -782,30 +785,30 @@ const DashboardHud = () => {
         </HudCard>
       </div>
       {ins.by_insurer && ins.by_insurer.length > 0 && (
-        <div className="hud-charts" id="sec-insurer">
-          <HudCard title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
+        <div className="hud-charts">
+          <HudCard id="sec-insurer" title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
             <HudRanking items={ins.by_insurer} color="var(--h-teal)" />
           </HudCard>
         </div>
       )}
       {ins.by_size && ins.by_size.length > 0 && (
-        <div className="hud-charts" id="sec-size">
-          <HudCard title="Разбивка по размеру предприятия" wide>
+        <div className="hud-charts">
+          <HudCard id="sec-size" title="Разбивка по размеру предприятия" wide>
             <HudSizeBreakdown items={ins.by_size} />
           </HudCard>
         </div>
       )}
       {ins.by_status && ins.by_status.length > 0 && (
-        <div className="hud-charts" id="sec-status-rank">
-          <HudCard title="Рейтинг статусов" wide>
+        <div className="hud-charts">
+          <HudCard id="sec-status-rank" title="Рейтинг статусов" wide>
             <HudRanking items={ins.by_status} color="var(--h-blue)" />
           </HudCard>
         </div>
       )}
-      <div className="hud-charts" id="sec-status-act"><HudStatusActivity /></div>
+      <div className="hud-charts"><HudStatusActivity /></div>
       {ins.status_fill && ins.status_fill.length > 0 && (
-        <div className="hud-charts" id="sec-status-fill">
-          <HudCard title="Рейтинг регионов по заполненности статусов" wide>
+        <div className="hud-charts">
+          <HudCard id="sec-status-fill" title="Рейтинг регионов по заполненности статусов" wide>
             <div className="hud-fill-note">Доля незастрахованных предприятий региона, которым проставлен статус</div>
             <HudFillRanking rows={ins.status_fill} />
           </HudCard>
@@ -814,17 +817,17 @@ const DashboardHud = () => {
 
       {op && (
         <>
-          <h2 className="hud-h2" id="sec-oppv"><Coins size={18} /> Анализ ОППВ</h2>
+          <h2 className="hud-h2"><Coins size={18} /> Анализ ОППВ</h2>
           <KpiPanel tiles={opTiles} cols={3} />
           <div className="hud-charts">
-            <HudCard title="Рейтинг ОКЭД по сотрудникам" wide>
+            <HudCard id="sec-oked" title="Рейтинг ОКЭД по сотрудникам" wide>
               <HudRanking items={op.by_oked} color="var(--h-teal)" />
             </HudCard>
           </div>
         </>
       )}
 
-      <h2 className="hud-h2" id="sec-activity"><Activity size={18} /> Активность</h2>
+      <h2 className="hud-h2"><Activity size={18} /> Активность</h2>
       <div className="hud-charts"><HudActivity /></div>
     </div>
   )
