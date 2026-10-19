@@ -272,9 +272,8 @@ function HudRegionTable({ rows }) {
   )
 }
 
-// Разбивка по размеру предприятия: всего, застраховано, охват (бар)
+// Разбивка по размеру предприятия: линия показывает ПРОЦЕНТ застрахованных
 function HudSizeBreakdown({ items }) {
-  const maxTotal = Math.max(1, ...items.map((i) => i.total || 0))
   return (
     <div className="hud-size">
       {items.map((it, i) => {
@@ -285,16 +284,11 @@ function HudSizeBreakdown({ items }) {
           <div className="hud-size-row" key={it.label + i}>
             <div className="hud-size-head">
               <span className="hud-size-label">{it.label}</span>
-              <span className="hud-size-tot"><b>{fmtNum(tot)}</b> орг.</span>
+              <span className="hud-size-tot">застрах. <b>{fmtNum(ins)}</b> <span className="dim">из {fmtNum(tot)}</span></span>
             </div>
             <div className="hud-size-track" title={`Застраховано ${fmtNum(ins)} из ${fmtNum(tot)} (${cov}%)`}>
-              <span className="hud-size-bar" style={{ width: `${(tot / maxTotal) * 100}%`, '--d': `${i * 60}ms` }}>
-                <span className="hud-size-ins" style={{ width: `${cov}%` }} />
-              </span>
-            </div>
-            <div className="hud-size-sub">
-              <span><i style={{ background: 'var(--h-cyan)' }} /> застрах. <b>{fmtNum(ins)}</b></span>
-              <span className="hud-size-cov">{cov}%</span>
+              <span className="hud-size-bar hud-size-pct" style={{ width: `${cov}%`, '--d': `${i * 60}ms` }} />
+              <span className="hud-size-pctlabel">{cov}%</span>
             </div>
           </div>
         )
@@ -741,7 +735,6 @@ const DashboardHud = () => {
   const navItems = [
     ...(ins.region_table?.length ? [{ id: 'sec-region', label: 'Страхование по регионам' }] : []),
     { id: 'sec-expiry', label: 'Окончание страховки' },
-    { id: 'sec-rank-region', label: 'Рейтинг регионов по застрахованным' },
     { id: 'sec-form', label: 'Форма предприятия' },
     ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Рейтинг страховых компаний' }] : []),
     ...(ins.by_size?.length ? [{ id: 'sec-size', label: 'Размер предприятия' }] : []),
@@ -770,12 +763,7 @@ const DashboardHud = () => {
       )}
       <div className="hud-charts"><HudExpiry /></div>
       <div className="hud-charts">
-        <HudCard id="sec-rank-region" title="Рейтинг регионов по застрахованным" wide>
-          <HudRanking
-            items={[...ins.by_region].sort((a, b) => b.insured - a.insured).map((r) => ({ label: r.label, value: r.insured }))}
-            color="var(--h-cyan)" />
-        </HudCard>
-        <HudCard id="sec-form" title="Форма предприятия">
+        <HudCard id="sec-form" title="Форма предприятия" wide>
           <HudDonut a={ins.ul_cnt} b={ins.ip_cnt} labelA="ЮЛ" labelB="ИП" />
           <div className="hud-donut-extra">
             <div className="hud-donut-extra-title">Застрахованы</div>
