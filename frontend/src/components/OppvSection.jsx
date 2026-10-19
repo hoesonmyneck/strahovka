@@ -4,6 +4,7 @@ import api from '../utils/api.js'
 import { toast } from 'react-toastify'
 import { Search, Filter } from 'lucide-react'
 import SuggestInput from './SuggestInput.jsx'
+import { AG_GRID_LOCALE_RU } from '../utils/agGridLocale.js'
 
 // Форматирование числа с пробелами: 1000000 → "1 000 000"
 const fmtNumber = (v, decimals = 0) => {
@@ -200,6 +201,7 @@ const OppvSection = () => {
             rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
+            localeText={AG_GRID_LOCALE_RU}
             pinnedTopRowData={pinnedTopRowData}
             getRowStyle={(p) => (p.node.rowPinned === 'top'
               ? { fontWeight: 700, background: '#eef1fb' } : undefined)}

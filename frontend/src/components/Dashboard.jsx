@@ -28,6 +28,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
 import DashboardHud from './DashboardHud.jsx'
 import SuggestInput from './SuggestInput.jsx'
+import { AG_GRID_LOCALE_RU } from '../utils/agGridLocale.js'
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 const MONTHS_RU_PREP = [
@@ -1856,6 +1857,7 @@ const Dashboard = () => {
             rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
+            localeText={AG_GRID_LOCALE_RU}
             context={gridContext}
             getRowId={(p) => String(p.data.id)}
             pagination={false}
