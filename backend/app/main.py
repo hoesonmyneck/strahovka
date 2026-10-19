@@ -755,11 +755,13 @@ def dashboard_kpis(
 
     region_table = []
     for r in region_rows:
+        if not r.obl_name:   # без региона — в списке не показываем
+            continue
         ins_c = r.ins or 0
         nins_c = r.nins or 0
         tot_c = ins_c + nins_c
         region_table.append({
-            "region": r.obl_name or "—",
+            "region": r.obl_name,
             "total": tot_c, "ip_total": r.ip_tot or 0, "ul_total": r.ul_tot or 0,
             "insured": ins_c,
             "coverage": round(ins_c * 100.0 / tot_c, 1) if tot_c else 0.0,
@@ -820,9 +822,11 @@ def dashboard_kpis(
     filled_map = {r.obl_name: int(r.c or 0) for r in filled_rows}
     status_fill = []
     for obl, total_need in need_map.items():
+        if not obl:   # без региона — не показываем
+            continue
         filled = filled_map.get(obl, 0)
         status_fill.append({
-            "region": obl or "—", "filled": filled, "total": total_need,
+            "region": obl, "filled": filled, "total": total_need,
             "pct": round(filled * 100.0 / total_need, 1) if total_need else 0.0,
         })
     status_fill.sort(key=lambda x: (x["pct"], x["filled"]), reverse=True)
