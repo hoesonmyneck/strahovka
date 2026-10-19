@@ -102,7 +102,20 @@ const StatusCellRenderer = (params) => {
   const openMenu = (e) => {
     e.stopPropagation()
     const r = btnRef.current.getBoundingClientRect()
-    setRect({ left: r.left, top: r.bottom + 2, width: r.width })
+    const MENU_MAX = 280
+    const margin = 8
+    const spaceBelow = window.innerHeight - r.bottom - margin
+    const spaceAbove = r.top - margin
+    // Если снизу мало места и сверху больше — раскрываем вверх.
+    let top, maxHeight
+    if (spaceBelow >= Math.min(MENU_MAX, 220) || spaceBelow >= spaceAbove) {
+      top = r.bottom + 2
+      maxHeight = Math.min(MENU_MAX, spaceBelow)
+    } else {
+      maxHeight = Math.min(MENU_MAX, spaceAbove)
+      top = r.top - 2 - maxHeight
+    }
+    setRect({ left: r.left, top, width: r.width, maxHeight })
     setOpen(true)
   }
   const close = () => setOpen(false)
@@ -138,7 +151,7 @@ const StatusCellRenderer = (params) => {
         <span className="status-caret">▾</span>
       </div>
       {open && rect && createPortal(
-        <div ref={menuRef} className="status-menu" style={{ left: rect.left, top: rect.top, width: rect.width }}>
+        <div ref={menuRef} className="status-menu" style={{ left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}>
           <div className={`status-opt${!value ? ' sel' : ''}`} onClick={() => pick('')}>— нет —</div>
           {opts.map((s) => (
             <div key={s} className={`status-opt${s === value ? ' sel' : ''}`} onClick={() => pick(s)}>{s}</div>
