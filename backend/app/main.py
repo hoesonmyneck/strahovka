@@ -2389,7 +2389,8 @@ def login_heatmap(
             'total': mc,          # всего заходов за месяц
             'total_users': mu,    # уникальных учёток за месяц
         })
-    regions.sort(key=lambda r: r['total'], reverse=True)
+    # ГАК всегда первым, остальные — по алфавиту
+    regions.sort(key=lambda r: (0 if 'ГАК' in (r['region'] or '').upper() else 1, r['region'] or ''))
     return {'year': year, 'month': month, 'days_in_month': days_in_month, 'regions': regions}
 
 

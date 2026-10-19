@@ -284,7 +284,7 @@ function HudSizeBreakdown({ items }) {
           <div className="hud-size-row" key={it.label + i}>
             <div className="hud-size-head">
               <span className="hud-size-label">{it.label}</span>
-              <span className="hud-size-tot">застрах. <b>{fmtNum(ins)}</b> <span className="dim">из {fmtNum(tot)}</span></span>
+              <span className="hud-size-tot">застрах. <b>{fmtNum(ins)}</b></span>
             </div>
             <div className="hud-size-track" title={`Застраховано ${fmtNum(ins)} из ${fmtNum(tot)} (${cov}%)`}>
               <span className="hud-size-bar hud-size-pct" style={{ width: `${cov}%`, '--d': `${i * 60}ms` }} />
