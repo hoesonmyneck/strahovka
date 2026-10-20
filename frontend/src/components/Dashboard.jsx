@@ -1740,7 +1740,7 @@ const Dashboard = () => {
           )}
 
           <div className="filter-group">
-            <label>Статус</label>
+            <label>Статус страхования</label>
             <select
               value={filters.is_insured}
               onChange={(e) => setFilters({ ...filters, is_insured: e.target.value })}
@@ -1777,7 +1777,7 @@ const Dashboard = () => {
           </div>
 
           <div className="filter-group">
-            <label>Статус (по итогам обзвона)</label>
+            <label>Статус</label>
             <select
               value={filters.manual_status}
               onChange={(e) => setFilters({ ...filters, manual_status: e.target.value })}
