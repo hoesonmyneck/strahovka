@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from starlette.background import BackgroundTask
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import func, and_, or_, not_, String, case, distinct, text
+from sqlalchemy import func, and_, or_, not_, String, case, distinct, text, select
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -206,6 +206,21 @@ def _apply_esutd_filter(query, col, params: dict):
     return query
 
 
+# Фильтр по проставленному вручную статусу (bin_status). bin_col — колонка БИН
+# таблицы (company_summary.bin или insurance_records.bin). Спецзначение
+# "__empty__" — предприятия без статуса.
+def _apply_manual_status_filter(query, bin_col, params: dict):
+    ms = params.get("manual_status")
+    if not ms:
+        return query
+    B = models.BinStatus
+    if ms == "__empty__":
+        sub = select(B.bin).where(B.status.isnot(None), B.status != "")
+        return query.filter(bin_col.notin_(sub))
+    sub = select(B.bin).where(B.status == ms)
+    return query.filter(bin_col.in_(sub))
+
+
 def apply_filters(query, model, params: dict, force_region: str = None):
     """Применяет все фильтры к запросу. force_region — обязательный регион для региональных пользователей."""
     M = model
@@ -279,6 +294,7 @@ def apply_filters(query, model, params: dict, force_region: str = None):
         query = query.filter(M.org_size == params["org_size"])
 
     query = _apply_esutd_filter(query, M.esutd_akt_td, params)
+    query = _apply_manual_status_filter(query, M.bin, params)
 
     # is_insured сознательно НЕ фильтруется здесь: статус застрахованности —
     # свойство компании (БИН), поэтому он применяется в дедуп-пути
@@ -435,6 +451,7 @@ def apply_summary_filters(query, params: dict, force_region: str = None):
     if params.get("org_size"):
         query = query.filter(S.org_size == params["org_size"])
     query = _apply_esutd_filter(query, S.esutd_akt_td, params)
+    query = _apply_manual_status_filter(query, S.bin, params)
     return query
 
 
@@ -656,6 +673,8 @@ def get_metrics(
     name_oked: Optional[str] = None,
     is_insured: Optional[int] = None,
     ip: Optional[int] = None,
+    org_size: Optional[str] = None,
+    manual_status: Optional[str] = None,
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
@@ -1166,6 +1185,7 @@ def get_records(
     is_insured: Optional[int] = None,
     ip: Optional[int] = None,
     org_size: Optional[str] = None,
+    manual_status: Optional[str] = None,
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
