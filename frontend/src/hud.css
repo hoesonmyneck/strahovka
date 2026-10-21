@@ -399,6 +399,10 @@
   white-space: normal; overflow: visible; text-overflow: clip;
   line-height: 1.25; display: block;
 }
+/* итоговая строка «Итого» */
+.hud-stat-total { margin-top: 6px; padding-top: 10px; border-top: 1px solid rgba(56, 189, 248, .3); }
+.hud-stat-total .hud-hm-region { font-weight: 700; color: var(--h-tx); }
+.hud-stat-total .hud-hm-cell { font-weight: 700; }
 
 /* карта окончаний страховки (регионы × месяцы) */
 /* месяцы растянуты на всю ширину: 12 ячеек делят строку поровну */

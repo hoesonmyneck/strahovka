@@ -558,6 +558,9 @@ function HudStatusActivity() {
 
   const regions = data?.regions || []
   const rows = (data?.statuses || []).filter((s) => s.total > 0)
+  const dim = data?.days_in_month || 0
+  const dayTotals = Array.from({ length: dim }, (_, di) => rows.reduce((s, r) => s + (r.days[di] || 0), 0))
+  const grandTotal = rows.reduce((s, r) => s + r.total, 0)
 
   return (
     <HudCard id="sec-status-act" title="Активность статусов" wide>
@@ -595,6 +598,28 @@ function HudStatusActivity() {
               </div>
             )
           })}
+          {/* Итоговая строка: сумма по дням и за месяц */}
+          {(() => {
+            const maxv = Math.max(1, ...dayTotals)
+            return (
+              <div className="hud-hm-row hud-stat-row hud-stat-total">
+                <span className="hud-hm-region">Итого</span>
+                <div className="hud-hm-days">
+                  {dayTotals.map((c, di) => (
+                    <div className="hud-hm-day" key={di}>
+                      <span className="hud-hm-daynum">{di + 1}</span>
+                      <span className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
+                        title={`${di + 1} число: ${c} ${plural(c, 'статус', 'статуса', 'статусов')}`}
+                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                        {c > 0 ? fmtNum(c) : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <span className="hud-hm-tot"><b>{fmtNum(grandTotal)}</b> за месяц</span>
+              </div>
+            )
+          })()}
         </div>
       )}
     </HudCard>
