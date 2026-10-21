@@ -287,7 +287,7 @@ const Dashboard = () => {
     contract_number: '', contract_date_from: null, contract_date_to: null,
     date_end_from: null, date_end_to: null,
     obl_name: '', rai_name: '', opf_name: '', is_insured: '', ip: '',
-    org_size: '', manual_status: '',
+    org_size: '', manual_status: '', manual_kgit: '', manual_meeting: '',
     // ESUTD акт. ТД — оператор сравнения + число
     esutd_op: 'gte', esutd_val: '',
     // Срок истечения — конкретный месяц (date_end_from/to считаем отдельно)
@@ -509,6 +509,8 @@ const Dashboard = () => {
     if (filters.ip !== '') params.ip = parseInt(filters.ip)
     if (filters.org_size) params.org_size = filters.org_size
     if (filters.manual_status) params.manual_status = filters.manual_status
+    if (filters.manual_kgit) params.manual_kgit = filters.manual_kgit
+    if (filters.manual_meeting) params.manual_meeting = filters.manual_meeting
     // ESUTD акт. ТД: применяем только когда указано число
     if (filters.esutd_val !== '' && filters.esutd_val != null) {
       params.esutd_op = filters.esutd_op
@@ -1836,6 +1838,30 @@ const Dashboard = () => {
               <option value="">Все</option>
               <option value="__empty__">Без статуса</option>
               {(statusOptions.status || []).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>Статус КГИТ</label>
+            <select
+              value={filters.manual_kgit}
+              onChange={(e) => setFilters({ ...filters, manual_kgit: e.target.value })}
+            >
+              <option value="">Все</option>
+              <option value="__empty__">Без статуса</option>
+              {(statusOptions.kgit_status || []).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>Статус встречи</label>
+            <select
+              value={filters.manual_meeting}
+              onChange={(e) => setFilters({ ...filters, manual_meeting: e.target.value })}
+            >
+              <option value="">Все</option>
+              <option value="__empty__">Без статуса</option>
+              {(statusOptions.meeting_status || []).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 

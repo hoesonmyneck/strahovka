@@ -212,16 +212,25 @@ def _apply_esutd_filter(query, col, params: dict):
 # Фильтр по проставленному вручную статусу (bin_status). bin_col — колонка БИН
 # таблицы (company_summary.bin или insurance_records.bin). Спецзначение
 # "__empty__" — предприятия без статуса.
-def _apply_manual_status_filter(query, bin_col, params: dict):
-    ms = params.get("manual_status")
-    if not ms:
+def _apply_status_col_filter(query, bin_col, params: dict, param_key: str, col):
+    """Фильтр по одному из столбцов bin_status (status/kgit_status/meeting_status).
+    Спецзначение "__empty__" — предприятия без значения в этом столбце."""
+    val = params.get(param_key)
+    if not val:
         return query
-    B = models.BinStatus
-    if ms == "__empty__":
-        sub = select(B.bin).where(B.status.isnot(None), B.status != "")
+    if val == "__empty__":
+        sub = select(models.BinStatus.bin).where(col.isnot(None), col != "")
         return query.filter(bin_col.notin_(sub))
-    sub = select(B.bin).where(B.status == ms)
+    sub = select(models.BinStatus.bin).where(col == val)
     return query.filter(bin_col.in_(sub))
+
+
+def _apply_manual_status_filter(query, bin_col, params: dict):
+    B = models.BinStatus
+    query = _apply_status_col_filter(query, bin_col, params, "manual_status", B.status)
+    query = _apply_status_col_filter(query, bin_col, params, "manual_kgit", B.kgit_status)
+    query = _apply_status_col_filter(query, bin_col, params, "manual_meeting", B.meeting_status)
+    return query
 
 
 # Принудительное ограничение по списку статусов (для роли ДКГИТ: показываем
@@ -691,6 +700,8 @@ def get_metrics(
     ip: Optional[int] = None,
     org_size: Optional[str] = None,
     manual_status: Optional[str] = None,
+    manual_kgit: Optional[str] = None,
+    manual_meeting: Optional[str] = None,
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
@@ -1254,6 +1265,8 @@ def get_records(
     ip: Optional[int] = None,
     org_size: Optional[str] = None,
     manual_status: Optional[str] = None,
+    manual_kgit: Optional[str] = None,
+    manual_meeting: Optional[str] = None,
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
