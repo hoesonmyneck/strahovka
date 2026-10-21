@@ -73,8 +73,12 @@ export const AuthProvider = ({ children }) => {
     return user?.role === 'manager'
   }
 
+  const isDkgit = () => {
+    return user?.role === 'dkgit'
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, loginWith2fa, logout, isAdmin, isManager, loading }}>
+    <AuthContext.Provider value={{ user, login, loginWith2fa, logout, isAdmin, isManager, isDkgit, loading }}>
       {children}
     </AuthContext.Provider>
   )

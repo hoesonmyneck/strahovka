@@ -97,6 +97,7 @@ class UserCreate(UserBase):
     password: str
 
 class UserUpdate(BaseModel):
+    role: Optional[str] = None
     appvr_access: Optional[int] = None
     dashboard_access: Optional[int] = None
     iin: Optional[str] = None

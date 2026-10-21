@@ -221,6 +221,17 @@ def _apply_manual_status_filter(query, bin_col, params: dict):
     return query.filter(bin_col.in_(sub))
 
 
+# Принудительное ограничение по списку статусов (для роли ДКГИТ: показываем
+# только её строки). Накладывается поверх прочих фильтров.
+def _apply_status_in_filter(query, bin_col, params: dict):
+    statuses = params.get("_status_in")
+    if not statuses:
+        return query
+    B = models.BinStatus
+    sub = select(B.bin).where(B.status.in_(statuses))
+    return query.filter(bin_col.in_(sub))
+
+
 def apply_filters(query, model, params: dict, force_region: str = None):
     """Применяет все фильтры к запросу. force_region — обязательный регион для региональных пользователей."""
     M = model
@@ -295,6 +306,7 @@ def apply_filters(query, model, params: dict, force_region: str = None):
 
     query = _apply_esutd_filter(query, M.esutd_akt_td, params)
     query = _apply_manual_status_filter(query, M.bin, params)
+    query = _apply_status_in_filter(query, M.bin, params)
 
     # is_insured сознательно НЕ фильтруется здесь: статус застрахованности —
     # свойство компании (БИН), поэтому он применяется в дедуп-пути
@@ -452,6 +464,7 @@ def apply_summary_filters(query, params: dict, force_region: str = None):
         query = query.filter(S.org_size == params["org_size"])
     query = _apply_esutd_filter(query, S.esutd_akt_td, params)
     query = _apply_manual_status_filter(query, S.bin, params)
+    query = _apply_status_in_filter(query, S.bin, params)
     return query
 
 
@@ -683,6 +696,10 @@ def get_metrics(
 ):
     params = locals()
     params.pop("current_user"); params.pop("db")
+
+    # Роль ДКГИТ видит только свои строки (по статусу)
+    if current_user.role == "dkgit":
+        params["_status_in"] = DKGIT_VIEW_STATUSES
 
     # Карточки по уникальным БИН. Правила независимы (не дополняют друг друга):
     #   Всего        — все БИН;
@@ -1069,13 +1086,37 @@ INSURANCE_STATUSES = [
     "Заключил ОСНС с ГАК",
     "В работе",
     "Для работы ДКГИТ",
+    "Встреча назначена",
+    "Встреча проведена - планирует заключить с ГАК",
+    "Встреча проведена - не будет заключать договор с ГАК",
     "Иное",
 ]
+
+# Статусы, которые проставляет роль ДКГИТ (и только она).
+DKGIT_SET_STATUSES = ["Встреча назначена", "В работе"]
+# Статус-исключительно-ДКГИТ: обычным пользователям недоступен для простановки.
+DKGIT_ONLY_STATUSES = {"Встреча назначена"}
+# Какие строки (по статусу) видит ДКГИТ в таблице страхования.
+DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ", "В работе", "Встреча назначена"]
+
+
+def allowed_set_statuses(user) -> list:
+    """Какие статусы данная роль может проставлять (для выпадашки и проверки)."""
+    if user.role == "dkgit":
+        return list(DKGIT_SET_STATUSES)
+    # Все, кроме эксклюзивных для ДКГИТ
+    return [s for s in INSURANCE_STATUSES if s not in DKGIT_ONLY_STATUSES]
 
 
 @app.get("/api/insurance/statuses")
 def get_insurance_statuses(current_user: models.User = Depends(auth.get_current_active_user)):
-    """Список допустимых статусов для справочника в таблице страхования."""
+    """Список допустимых для простановки статусов (зависит от роли). Для ячейки."""
+    return allowed_set_statuses(current_user)
+
+
+@app.get("/api/insurance/statuses/all")
+def get_all_insurance_statuses(current_user: models.User = Depends(auth.get_current_active_user)):
+    """Полный список статусов — для фильтра (искать можно по любому статусу)."""
     return INSURANCE_STATUSES
 
 
@@ -1089,6 +1130,9 @@ def set_bin_status(
     status_val = (data.status or "").strip()
     if status_val and status_val not in INSURANCE_STATUSES:
         raise HTTPException(400, "Неизвестный статус")
+    # Ролевое ограничение простановки статусов
+    if status_val and status_val not in allowed_set_statuses(current_user):
+        raise HTTPException(403, "Этот статус недоступен для вашей роли")
     row = db.query(models.BinStatus).filter(models.BinStatus.bin == data.bin).first()
     if not status_val:
         if row:
@@ -1192,6 +1236,10 @@ def get_records(
     db: Session = Depends(database.get_db)
 ):
     params = {k: v for k, v in locals().items() if k not in ("page", "page_size", "sort_by", "sort_order", "current_user", "db")}
+
+    # Роль ДКГИТ видит только свои строки (по статусу)
+    if current_user.role == "dkgit":
+        params["_status_in"] = DKGIT_VIEW_STATUSES
 
     # Одна строка на БИН (реестр организаций): предрасчёт или живой дедуп
     query, Model = registry_query(db, params, force_region=current_user.region)
@@ -2194,7 +2242,7 @@ def _check_iin_unique(db, iin, exclude_user_id=None):
         raise HTTPException(400, "Этот ИИН уже привязан к другому аккаунту")
 
 
-ALLOWED_ROLES = ("user", "manager", "admin")
+ALLOWED_ROLES = ("user", "manager", "admin", "dkgit")
 
 
 @app.post("/api/users", response_model=schemas.UserResponse)
@@ -2245,6 +2293,8 @@ def update_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(404, "Пользователь не найден")
+    if data.role is not None and data.role in ALLOWED_ROLES:
+        user.role = data.role
     if data.appvr_access is not None:
         user.appvr_access = 1 if data.appvr_access else 0
     if data.dashboard_access is not None:

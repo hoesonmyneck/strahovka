@@ -224,7 +224,7 @@ const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = 
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 const Dashboard = () => {
-  const { user, logout, isAdmin, isManager } = useAuth()
+  const { user, logout, isAdmin, isManager, isDkgit } = useAuth()
   // Админ-панель доступна админу и менеджеру (у менеджера — урезанный набор вкладок)
   const canAdminPanel = isAdmin() || isManager()
   const gridRef = useRef()
@@ -287,6 +287,7 @@ const Dashboard = () => {
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
   const [statusOptions, setStatusOptions] = useState([])
+  const [allStatusOptions, setAllStatusOptions] = useState([])
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 100
 
@@ -1010,6 +1011,7 @@ const Dashboard = () => {
     fetchAll(1)
     fetchLastUpdate()
     api.get('/api/insurance/statuses').then((r) => setStatusOptions(r.data)).catch(() => {})
+    api.get('/api/insurance/statuses/all').then((r) => setAllStatusOptions(r.data)).catch(() => {})
     if (isAdmin()) {
       fetchRegions()
       fetchUsers()
@@ -1082,7 +1084,7 @@ const Dashboard = () => {
             )}
           </div>
           <span>{user?.username}</span>
-          {!isAdmin() && !isManager() && (
+          {!isAdmin() && !isManager() && !isDkgit() && (
             <button onClick={openFiles} className="files-btn">
               <FolderOpen size={18} /> Файлы
             </button>
@@ -1210,6 +1212,7 @@ const Dashboard = () => {
                     >
                       <option value="user">Пользователь</option>
                       <option value="manager">Менеджер</option>
+                      <option value="dkgit">ДКГИТ</option>
                     </select>
                   )}
                   <input
@@ -1784,7 +1787,7 @@ const Dashboard = () => {
             >
               <option value="">Все</option>
               <option value="__empty__">Без статуса</option>
-              {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+              {allStatusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 
