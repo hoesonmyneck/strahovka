@@ -89,11 +89,21 @@ const InsuredCell = (params) => {
   return <span className="ins-badge ins-na">—</span>
 }
 
-// ─── Ячейка «Статусы»: кастомный справочник (меню в портале той же ширины,
-// что и поле — нативный <select> так не умеет, его список шире поля). ──────────
+// ─── Ячейка статуса: кастомный справочник. Работает для трёх столбцов —
+// «Статус» (status), «Статус КГИТ» (kgit_status), «Статус встречи»
+// (meeting_status) — через cellRendererParams.statusKey. Доступ к простановке
+// зависит от роли и заполненности предыдущего столбца. ────────────────────────
 const StatusCellRenderer = (params) => {
-  const opts = params.context?.statusOptions || []
+  const ctx = params.context || {}
+  const key = params.statusKey || 'status'          // бэкенд-поле
+  const opts = (ctx.statusDefs && ctx.statusDefs[key]) || []
   const value = params.value || ''
+  // Кто может редактировать этот столбец
+  const isDkgit = !!ctx.isDkgit
+  let editable
+  if (key === 'kgit_status') editable = isDkgit
+  else if (key === 'meeting_status') editable = !isDkgit && !!params.data?.kgit_status
+  else editable = !isDkgit  // status
   const [open, setOpen] = useState(false)
   const [rect, setRect] = useState(null)
   const btnRef = useRef(null)
@@ -142,7 +152,13 @@ const StatusCellRenderer = (params) => {
     }
   }, [open])
 
-  const pick = (v) => { close(); params.context.onStatusChange(params.data, v) }
+  const pick = (v) => { close(); ctx.onStatusChange(key, params.data, v) }
+
+  if (!params.data) return null
+  // Нельзя редактировать → просто текст (или прочерк)
+  if (!editable) {
+    return <span className="status-readonly">{value || '—'}</span>
+  }
 
   return (
     <>
@@ -286,8 +302,7 @@ const Dashboard = () => {
 
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
-  const [statusOptions, setStatusOptions] = useState([])
-  const [allStatusOptions, setAllStatusOptions] = useState([])
+  const [statusOptions, setStatusOptions] = useState({ status: [], kgit_status: [], meeting_status: [] })
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 100
 
@@ -429,15 +444,38 @@ const Dashboard = () => {
     // ТИП и Флаг скрыты в таблице, но экспортируются в Excel
     { field: 'tip', headerName: 'ТИП', hide: true },
     { field: 'flag_head', headerName: 'Флаг', hide: true },
-    // Ручной статус (справочник) — выбор сохраняется автоматически, живёт по БИН
+    // Три столбца статусов (справочники), сохраняются автоматически, живут по БИН
     {
       field: 'manual_status',
-      headerName: 'Статусы',
+      headerName: 'Статус',
       pinned: 'right',
-      width: 300,
+      width: 260,
       sortable: false,
       filter: false,
       cellRenderer: StatusCellRenderer,
+      cellRendererParams: { statusKey: 'status' },
+      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
+    },
+    {
+      field: 'kgit_status',
+      headerName: 'Статус КГИТ',
+      pinned: 'right',
+      width: 220,
+      sortable: false,
+      filter: false,
+      cellRenderer: StatusCellRenderer,
+      cellRendererParams: { statusKey: 'kgit_status' },
+      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
+    },
+    {
+      field: 'meeting_status',
+      headerName: 'Статус встречи',
+      pinned: 'right',
+      width: 280,
+      sortable: false,
+      filter: false,
+      cellRenderer: StatusCellRenderer,
+      cellRendererParams: { statusKey: 'meeting_status' },
       cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
   ], [])  // useMemo — колонки не пересоздаются при ре-рендере
@@ -992,26 +1030,36 @@ const Dashboard = () => {
   const totalPages = Math.ceil(totalRecords / pageSize)
   const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchAll(page) }
 
-  // Сохранение ручного статуса по БИН (выбор в выпадашке столбца «Статусы»)
-  const onStatusChange = useCallback(async (row, status) => {
+  // Сохранение статуса по БИН в один из трёх столбцов (field)
+  const onStatusChange = useCallback(async (field, row, status) => {
     const bin = row?.bin
     if (bin == null) return
+    // front-поле, которое хранит значение в rowData
+    const rowKey = field === 'status' ? 'manual_status' : field
     try {
-      await api.patch('/api/insurance/status', { bin, status })
-      setRowData((prev) => prev.map((r) => (r.bin === bin ? { ...r, manual_status: status } : r)))
+      await api.patch('/api/insurance/status', { bin, field, status })
+      setRowData((prev) => prev.map((r) => {
+        if (r.bin !== bin) return r
+        const next = { ...r, [rowKey]: status }
+        // снятие «Статуса КГИТ» очищает и «Статус встречи»
+        if (field === 'kgit_status' && !status) next.meeting_status = null
+        return next
+      }))
     } catch (e) {
-      toast.error('Не удалось сохранить статус')
+      toast.error(e.response?.data?.detail || 'Не удалось сохранить статус')
     }
   }, [])
 
-  // Контекст для AG Grid: справочник статусов + обработчик (без пересоздания колонок)
-  const gridContext = useMemo(() => ({ statusOptions, onStatusChange }), [statusOptions, onStatusChange])
+  // Контекст для AG Grid: справочники трёх столбцов + роль + обработчик
+  const gridContext = useMemo(
+    () => ({ statusDefs: statusOptions, isDkgit: isDkgit(), onStatusChange }),
+    [statusOptions, onStatusChange, user],
+  )
 
   useEffect(() => {
     fetchAll(1)
     fetchLastUpdate()
     api.get('/api/insurance/statuses').then((r) => setStatusOptions(r.data)).catch(() => {})
-    api.get('/api/insurance/statuses/all').then((r) => setAllStatusOptions(r.data)).catch(() => {})
     if (isAdmin()) {
       fetchRegions()
       fetchUsers()
@@ -1787,7 +1835,7 @@ const Dashboard = () => {
             >
               <option value="">Все</option>
               <option value="__empty__">Без статуса</option>
-              {allStatusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+              {(statusOptions.status || []).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 

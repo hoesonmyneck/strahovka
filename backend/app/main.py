@@ -45,6 +45,9 @@ with engine.connect() as _conn:
                updated_by VARCHAR(50),
                updated_at TIMESTAMP DEFAULT NOW()
            )""",
+        # Доп. столбцы статусов: КГИТ и встречи
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_status VARCHAR(200)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS meeting_status VARCHAR(200)",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
@@ -1008,10 +1011,15 @@ def expiry_list(
 
     bins = [it.bin for it in items if it.bin is not None]
     if bins:
-        st = dict(db.query(models.BinStatus.bin, models.BinStatus.status)
-                  .filter(models.BinStatus.bin.in_(bins)).all())
+        B = models.BinStatus
+        st = {r.bin: r for r in db.query(B.bin, B.status, B.kgit_status, B.meeting_status)
+              .filter(B.bin.in_(bins)).all()}
         for it in items:
-            it.manual_status = st.get(it.bin)
+            r = st.get(it.bin)
+            if r:
+                it.manual_status = r.status
+                it.kgit_status = r.kgit_status
+                it.meeting_status = r.meeting_status
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
@@ -1075,7 +1083,10 @@ def status_activity(
 
 # ============ RECORDS ============
 
-# Справочник ручных статусов по БИН (выбирается в таблице страхования)
+# Три независимых столбца статусов по БИН:
+#   status         — «Статус» (обзвон). Ставят обычные пользователи.
+#   kgit_status    — «Статус КГИТ». Ставит только роль ДКГИТ.
+#   meeting_status — «Статус встречи». Ставят обычные, когда заполнен kgit_status.
 INSURANCE_STATUSES = [
     "Контактный номер некорректный/отключен/отсутствует",
     "Заключил/планирует заключить договор ОСНС в другом КСЖ",
@@ -1084,40 +1095,31 @@ INSURANCE_STATUSES = [
     "Ликвидация/закрытие предприятия",
     "Филиал/ГУ/КГУ/РГУ",
     "Заключил ОСНС с ГАК",
-    "В работе",
     "Для работы ДКГИТ",
-    "Встреча назначена",
-    "Встреча проведена - планирует заключить с ГАК",
-    "Встреча проведена - не будет заключать договор с ГАК",
     "Иное",
 ]
+KGIT_STATUSES = ["Встреча назначена", "В работе"]
+MEETING_STATUSES = [
+    "Встреча проведена - планирует заключить с ГАК",
+    "Встреча проведена - не будет заключать договор с ГАК",
+]
 
-# Статусы, которые проставляет роль ДКГИТ (и только она).
-DKGIT_SET_STATUSES = ["Встреча назначена", "В работе"]
-# Статус-исключительно-ДКГИТ: обычным пользователям недоступен для простановки.
-DKGIT_ONLY_STATUSES = {"Встреча назначена"}
-# Какие строки (по статусу) видит ДКГИТ в таблице страхования.
-DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ", "В работе", "Встреча назначена"]
+# Какие строки (по основному статусу) видит роль ДКГИТ в таблице страхования.
+DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ"]
 
-
-def allowed_set_statuses(user) -> list:
-    """Какие статусы данная роль может проставлять (для выпадашки и проверки)."""
-    if user.role == "dkgit":
-        return list(DKGIT_SET_STATUSES)
-    # Все, кроме эксклюзивных для ДКГИТ
-    return [s for s in INSURANCE_STATUSES if s not in DKGIT_ONLY_STATUSES]
+# Описание столбцов статусов: справочник, поле модели, кто ставит.
+STATUS_FIELDS = {
+    "status":         {"options": INSURANCE_STATUSES, "dkgit_only": False},
+    "kgit_status":    {"options": KGIT_STATUSES,      "dkgit_only": True},
+    "meeting_status": {"options": MEETING_STATUSES,   "dkgit_only": False},
+}
 
 
 @app.get("/api/insurance/statuses")
 def get_insurance_statuses(current_user: models.User = Depends(auth.get_current_active_user)):
-    """Список допустимых для простановки статусов (зависит от роли). Для ячейки."""
-    return allowed_set_statuses(current_user)
-
-
-@app.get("/api/insurance/statuses/all")
-def get_all_insurance_statuses(current_user: models.User = Depends(auth.get_current_active_user)):
-    """Полный список статусов — для фильтра (искать можно по любому статусу)."""
-    return INSURANCE_STATUSES
+    """Справочники всех трёх столбцов статусов."""
+    return {"status": INSURANCE_STATUSES, "kgit_status": KGIT_STATUSES,
+            "meeting_status": MEETING_STATUSES}
 
 
 @app.patch("/api/insurance/status")
@@ -1126,30 +1128,53 @@ def set_bin_status(
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
 ):
-    """Установить/снять ручной статус по БИН. Пустая строка — снять статус."""
+    """Установить/снять статус по БИН в одном из трёх столбцов (data.field).
+    Пустая строка — снять. Роль ДКГИТ ставит только kgit_status; обычные — status
+    и meeting_status (последний только когда заполнен kgit_status)."""
+    field = (data.field or "status")
+    if field not in STATUS_FIELDS:
+        raise HTTPException(400, "Неизвестный столбец статуса")
+    spec = STATUS_FIELDS[field]
+    is_dkgit = current_user.role == "dkgit"
+    # Ролевой доступ к столбцу
+    if spec["dkgit_only"] and not is_dkgit:
+        raise HTTPException(403, "Этот столбец заполняет только ДКГИТ")
+    if not spec["dkgit_only"] and is_dkgit:
+        raise HTTPException(403, "Роль ДКГИТ заполняет только «Статус КГИТ»")
+
     status_val = (data.status or "").strip()
-    if status_val and status_val not in INSURANCE_STATUSES:
-        raise HTTPException(400, "Неизвестный статус")
-    # Ролевое ограничение простановки статусов
-    if status_val and status_val not in allowed_set_statuses(current_user):
-        raise HTTPException(403, "Этот статус недоступен для вашей роли")
+    if status_val and status_val not in spec["options"]:
+        raise HTTPException(400, "Неизвестный статус для этого столбца")
+
     row = db.query(models.BinStatus).filter(models.BinStatus.bin == data.bin).first()
-    if not status_val:
+
+    # «Статус встречи» доступен только когда заполнен «Статус КГИТ»
+    if field == "meeting_status" and status_val:
+        if not (row and row.kgit_status):
+            raise HTTPException(400, "Сначала должен быть заполнен «Статус КГИТ»")
+
+    if not status_val:  # снять значение в этом столбце
         if row:
-            db.delete(row)
+            setattr(row, field, None)
+            row.updated_by = current_user.username
+            row.updated_at = datetime.now()
+            # если все три столбца пусты — удаляем строку
+            if not (row.status or row.kgit_status or row.meeting_status):
+                db.delete(row)
             db.commit()
-        return {"bin": data.bin, "status": ""}
+        return {"bin": data.bin, "field": field, "status": ""}
+
     if row:
-        row.status = status_val
+        setattr(row, field, status_val)
         row.updated_by = current_user.username
         row.updated_at = datetime.now()
     else:
-        db.add(models.BinStatus(
-            bin=data.bin, status=status_val,
-            updated_by=current_user.username, updated_at=datetime.now(),
-        ))
+        row = models.BinStatus(bin=data.bin, updated_by=current_user.username,
+                               updated_at=datetime.now())
+        setattr(row, field, status_val)
+        db.add(row)
     db.commit()
-    return {"bin": data.bin, "status": status_val}
+    return {"bin": data.bin, "field": field, "status": status_val}
 
 
 @app.get("/api/insurance/status/export")
@@ -1274,12 +1299,15 @@ def get_records(
     # Подтягиваем ручные статусы по БИН одним запросом для текущей страницы
     bins = [it.bin for it in items if it.bin is not None]
     if bins:
-        st = dict(
-            db.query(models.BinStatus.bin, models.BinStatus.status)
-            .filter(models.BinStatus.bin.in_(bins)).all()
-        )
+        B = models.BinStatus
+        st = {r.bin: r for r in db.query(B.bin, B.status, B.kgit_status, B.meeting_status)
+              .filter(B.bin.in_(bins)).all()}
         for it in items:
-            it.manual_status = st.get(it.bin)
+            r = st.get(it.bin)
+            if r:
+                it.manual_status = r.status
+                it.kgit_status = r.kgit_status
+                it.meeting_status = r.meeting_status
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 

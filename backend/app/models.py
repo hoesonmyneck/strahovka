@@ -200,6 +200,8 @@ class BinStatus(Base):
     __tablename__ = "bin_status"
 
     bin = Column(BigInteger, primary_key=True)
-    status = Column(String(200))
+    status = Column(String(200))          # «Статус» (обзвон)
+    kgit_status = Column(String(200))     # «Статус КГИТ» (ставит ДКГИТ)
+    meeting_status = Column(String(200))  # «Статус встречи»
     updated_by = Column(String(50), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)

@@ -39,7 +39,9 @@ class InsuranceRecordBase(BaseModel):
 class InsuranceRecordResponse(InsuranceRecordBase):
     id: int
     created_at: Optional[datetime] = None
-    manual_status: Optional[str] = None   # ручной статус по БИН (справочник)
+    manual_status: Optional[str] = None   # «Статус» (обзвон)
+    kgit_status: Optional[str] = None     # «Статус КГИТ»
+    meeting_status: Optional[str] = None  # «Статус встречи»
 
     class Config:
         from_attributes = True
@@ -48,6 +50,7 @@ class InsuranceRecordResponse(InsuranceRecordBase):
 class BinStatusUpdate(BaseModel):
     bin: int
     status: Optional[str] = None
+    field: Optional[str] = "status"       # status | kgit_status | meeting_status
 
 class InsuranceRecordList(BaseModel):
     items: List[InsuranceRecordResponse]

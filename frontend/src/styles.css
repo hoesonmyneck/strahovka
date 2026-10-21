@@ -856,6 +856,17 @@ body {
 .ins-no svg { background: #ef4444; }
 .ins-na { color: #9ca3af; }
 
+/* Статус только для чтения (роль не может его менять) */
+.status-readonly {
+  display: inline-block;
+  width: 100%;
+  padding: 4px 8px;
+  color: #555;
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
+}
+
 /* Справочник статусов: поле-триггер в ячейке + меню в портале той же ширины */
 .status-trigger {
   display: flex;
