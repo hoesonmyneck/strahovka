@@ -827,16 +827,15 @@ def dashboard_kpis(
         .group_by(models.BinStatus.status).order_by(func.count().desc()).all()
     ]
 
-    # Рейтинг заполненности статусов по регионам: сколько незастрахованных
-    # предприятий («надо заполнить») уже имеют проставленный статус. Рейтинг —
-    # по проценту, но отдаём и числа (заполнено / всего).
+    # Рейтинг заполненности статусов по регионам: из всех предприятий региона
+    # (как в таблице страхования) сколько уже имеют проставленный статус.
+    # Рейтинг — по проценту, но отдаём и числа (заполнено / всего).
     B = models.BinStatus
-    need_rows = scope(db.query(S.obl_name, func.count().label("c"))
-                      .filter(S.status == 0)).group_by(S.obl_name).all()
+    need_rows = scope(db.query(S.obl_name, func.count().label("c"))).group_by(S.obl_name).all()
     need_map = {r.obl_name: int(r.c or 0) for r in need_rows}
     filled_rows = scope(db.query(S.obl_name, func.count().label("c"))
                         .join(B, B.bin == S.bin)
-                        .filter(S.status == 0, B.status.isnot(None), B.status != "")
+                        .filter(B.status.isnot(None), B.status != "")
                         ).group_by(S.obl_name).all()
     filled_map = {r.obl_name: int(r.c or 0) for r in filled_rows}
     status_fill = []
