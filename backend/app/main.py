@@ -5,6 +5,7 @@ from starlette.background import BackgroundTask
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, and_, or_, not_, String, case, distinct, text, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import pandas as pd
@@ -1157,33 +1158,35 @@ def set_bin_status(
     if status_val and status_val not in spec["options"]:
         raise HTTPException(400, "Неизвестный статус для этого столбца")
 
-    row = db.query(models.BinStatus).filter(models.BinStatus.bin == data.bin).first()
+    B = models.BinStatus
+    now = datetime.now()
 
     # «Статус встречи» доступен только когда заполнен «Статус КГИТ»
     if field == "meeting_status" and status_val:
-        if not (row and row.kgit_status):
+        kg = db.query(B.kgit_status).filter(B.bin == data.bin).scalar()
+        if not kg:
             raise HTTPException(400, "Сначала должен быть заполнен «Статус КГИТ»")
 
     if not status_val:  # снять значение в этом столбце
-        if row:
-            setattr(row, field, None)
-            row.updated_by = current_user.username
-            row.updated_at = datetime.now()
-            # если все три столбца пусты — удаляем строку
-            if not (row.status or row.kgit_status or row.meeting_status):
-                db.delete(row)
-            db.commit()
+        db.query(B).filter(B.bin == data.bin).update(
+            {field: None, "updated_by": current_user.username, "updated_at": now},
+            synchronize_session=False)
+        # если все три столбца пусты — удаляем строку
+        db.query(B).filter(B.bin == data.bin, B.status.is_(None),
+                           B.kgit_status.is_(None), B.meeting_status.is_(None)).delete(
+            synchronize_session=False)
+        db.commit()
         return {"bin": data.bin, "field": field, "status": ""}
 
-    if row:
-        setattr(row, field, status_val)
-        row.updated_by = current_user.username
-        row.updated_at = datetime.now()
-    else:
-        row = models.BinStatus(bin=data.bin, updated_by=current_user.username,
-                               updated_at=datetime.now())
-        setattr(row, field, status_val)
-        db.add(row)
+    # Атомарный upsert ПО ОДНОМУ полю: не перетирает остальные столбцы и не
+    # падает на гонке (дубликат PK при одновременном первом редактировании).
+    stmt = pg_insert(B.__table__).values(
+        bin=data.bin, updated_by=current_user.username, updated_at=now,
+        **{field: status_val})
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["bin"],
+        set_={field: status_val, "updated_by": current_user.username, "updated_at": now})
+    db.execute(stmt)
     db.commit()
     return {"bin": data.bin, "field": field, "status": status_val}
 
