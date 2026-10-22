@@ -860,7 +860,7 @@ body {
 .ag-theme-alpine [col-id="kgit_status"].ag-header-cell,
 .ag-theme-alpine [col-id="kgit_status"].ag-header-cell .ag-header-cell-comp-wrapper,
 .ag-theme-alpine .ag-header-row-floating-filter [col-id="kgit_status"],
-.ag-theme-alpine .ag-header-row-floating-filter [col-id="kgit_status"] > * {
+.ag-theme-alpine .ag-header-row-floating-filter [col-id="kgit_status"] * {
   background: #dfe3ea !important;
 }
 
