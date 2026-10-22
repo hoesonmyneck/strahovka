@@ -463,9 +463,10 @@ const Dashboard = () => {
       width: 220,
       sortable: false,
       filter: false,
+      headerClass: 'kgit-header',
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'kgit_status' },
-      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
+      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center', background: '#eceef2' },
     },
     {
       field: 'meeting_status',

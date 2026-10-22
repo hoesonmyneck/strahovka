@@ -856,6 +856,12 @@ body {
 .ins-no svg { background: #ef4444; }
 .ins-na { color: #9ca3af; }
 
+/* Сероватый столбец «Статус КГИТ» (заголовок + ячейки) */
+.ag-theme-alpine .kgit-header,
+.ag-theme-alpine .kgit-header .ag-header-cell-comp-wrapper {
+  background: #dfe3ea;
+}
+
 /* Статус только для чтения (роль не может его менять) */
 .status-readonly {
   display: inline-block;
