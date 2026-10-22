@@ -856,11 +856,14 @@ body {
 .ins-no svg { background: #ef4444; }
 .ins-na { color: #9ca3af; }
 
-/* Сероватый столбец «Статус КГИТ» (заголовок + строка фильтра + ячейки) */
+/* Сероватый столбец «Статус КГИТ» (заголовок + строка фильтра + ячейки).
+   Заголовок и ячейки несут col-id, а у ячейки плавающего фильтра col-id нет —
+   её берём позиционно: в закреплённом справа блоке 3 статус-столбца идут по
+   порядку (Статус, Статус КГИТ, Статус встречи), КГИТ — второй. */
 .ag-theme-alpine [col-id="kgit_status"].ag-header-cell,
 .ag-theme-alpine [col-id="kgit_status"].ag-header-cell .ag-header-cell-comp-wrapper,
-.ag-theme-alpine .ag-header-row-floating-filter [col-id="kgit_status"],
-.ag-theme-alpine .ag-header-row-floating-filter [col-id="kgit_status"] * {
+.ag-theme-alpine .ag-pinned-right-header .ag-header-row-floating-filter .ag-floating-filter:nth-child(2),
+.ag-theme-alpine .ag-pinned-right-header .ag-header-row-floating-filter .ag-floating-filter:nth-child(2) * {
   background: #dfe3ea !important;
 }
 
