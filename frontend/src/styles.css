@@ -857,10 +857,12 @@ body {
 .ins-na { color: #9ca3af; }
 
 /* Сероватый столбец «Статус КГИТ» (заголовок + строка фильтра + ячейки) */
-.ag-theme-alpine .kgit-header,
-.ag-theme-alpine .kgit-header .ag-header-cell-comp-wrapper,
-.ag-theme-alpine .ag-header-row-floating-filter .ag-header-cell[col-id="kgit_status"] {
-  background: #dfe3ea;
+.ag-theme-alpine .ag-header-cell[col-id="kgit_status"],
+.ag-theme-alpine .ag-header-cell[col-id="kgit_status"] .ag-header-cell-comp-wrapper,
+.ag-theme-alpine .ag-floating-filter[col-id="kgit_status"],
+.ag-theme-alpine [col-id="kgit_status"].ag-header-cell,
+.ag-theme-alpine [col-id="kgit_status"].ag-floating-filter {
+  background: #dfe3ea !important;
 }
 
 /* Статус только для чтения (роль не может его менять) */
