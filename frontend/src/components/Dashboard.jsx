@@ -1076,9 +1076,24 @@ const Dashboard = () => {
   }, [])
 
   // Авто-ширина колонок после загрузки данных
+  // Серый фон у ячейки плавающего фильтра столбца «Статус КГИТ»: у неё нет
+  // col-id (есть только aria-colindex), поэтому берём colindex у заголовка КГИТ
+  // (у него col-id есть) и красим ячейку фильтра с тем же aria-colindex.
+  const tintKgitFilter = useCallback(() => {
+    requestAnimationFrame(() => {
+      const hdr = document.querySelector('.ag-header-cell[col-id="kgit_status"]')
+      const idx = hdr?.getAttribute('aria-colindex')
+      document.querySelectorAll('.ag-floating-filter.kgit-ff').forEach((el) => el.classList.remove('kgit-ff'))
+      if (!idx) return
+      document.querySelectorAll(`.ag-header-cell.ag-floating-filter[aria-colindex="${idx}"]`)
+        .forEach((el) => el.classList.add('kgit-ff'))
+    })
+  }, [])
+
   const onFirstDataRendered = useCallback((params) => {
     params.api.autoSizeAllColumns(false)
-  }, [])
+    tintKgitFilter()
+  }, [tintKgitFilter])
 
   return (
     <div className={'dashboard' + (section === 'dashboard' ? ' hud-active' : '')}>
@@ -1970,6 +1985,8 @@ const Dashboard = () => {
             suppressClipboard={false}
             floatingFiltersHeight={40}
             onFirstDataRendered={onFirstDataRendered}
+            onGridReady={tintKgitFilter}
+            onDisplayedColumnsChanged={tintKgitFilter}
             onFilterChanged={onAgGridFilterChanged}
           />
         </div>
