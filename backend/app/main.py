@@ -1239,14 +1239,20 @@ def _status_meta_for_bins(db, bins):
 @app.get("/api/insurance/status/history")
 def get_bin_status_history(
     bin: int,
+    field: Optional[str] = None,
     limit: int = Query(100, ge=1, le=1000),
-    current_user: models.User = Depends(auth.require_admin_or_manager),
+    current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db),
 ):
-    """История изменений статусов по БИН (новые сверху) — для разбора жалоб."""
+    """История изменений статусов по БИН (новые сверху). field — только один
+    столбец (кнопка «часы» в ячейке); без field — все три."""
     H = models.BinStatusHistory
-    rows = (db.query(H).filter(H.bin == bin)
-            .order_by(H.changed_at.desc(), H.id.desc()).limit(limit).all())
+    q = db.query(H).filter(H.bin == bin)
+    if field:
+        if field not in STATUS_FIELDS:
+            raise HTTPException(400, "Неизвестный столбец статуса")
+        q = q.filter(H.field == field)
+    rows = q.order_by(H.changed_at.desc(), H.id.desc()).limit(limit).all()
     return [{
         "field": r.field, "old_value": r.old_value, "new_value": r.new_value,
         "changed_by": r.changed_by, "changed_at": r.changed_at.isoformat() if r.changed_at else None,

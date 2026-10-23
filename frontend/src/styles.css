@@ -866,6 +866,39 @@ body {
   background: #dfe3ea !important;
 }
 
+/* Обёртка ячейки статуса: поле/текст + кнопка «часы» (история) */
+.status-cell-wrap { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; }
+.status-cell-wrap .status-trigger,
+.status-cell-wrap .status-readonly { flex: 1 1 auto; min-width: 0; }
+.status-hist-btn {
+  flex: 0 0 24px; width: 24px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  color: #8a94a8; cursor: pointer; transition: background .12s, color .12s;
+}
+.status-hist-btn:hover, .status-hist-btn.on { background: #eef1fb; color: #4a5bd0; border-color: #d5dbf0; }
+
+/* Всплывающий список истории ячейки */
+.status-hist-pop {
+  position: fixed; z-index: 10001; display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #c9d2e3; border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .18); overflow: hidden;
+}
+.status-hist-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+  font-size: 12px; font-weight: 700; color: #333; background: #f5f7fb; border-bottom: 1px solid #e3e8f2;
+}
+.status-hist-body { overflow-y: auto; min-height: 0; }
+.status-hist-empty { padding: 16px 12px; font-size: 12px; color: #888; text-align: center; }
+.status-hist-item { padding: 8px 12px; border-bottom: 1px solid #eef1f6; }
+.status-hist-item:last-child { border-bottom: none; }
+.status-hist-when { font-size: 11px; color: #777; margin-bottom: 3px; }
+.status-hist-when b { color: #333; }
+.status-hist-change { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+.status-hist-change .old { color: #999; text-decoration: line-through; }
+.status-hist-change .arr { color: #aaa; }
+.status-hist-change .new { color: #1f2937; font-weight: 600; }
+
 /* Статус только для чтения (роль не может его менять) */
 .status-readonly {
   display: inline-block;

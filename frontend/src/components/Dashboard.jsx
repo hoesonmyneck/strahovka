@@ -22,7 +22,8 @@ import {
   LayoutDashboard,
   X,
   Check,
-  Pencil
+  Pencil,
+  History
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
@@ -87,6 +88,97 @@ const InsuredCell = (params) => {
     )
   }
   return <span className="ins-badge ins-na">—</span>
+}
+
+// ─── Кнопка «часы» в ячейке статуса: история изменений этой ячейки ──────────
+const STATUS_FIELD_LABELS = { status: 'Статус', kgit_status: 'Статус КГИТ', meeting_status: 'Статус встречи' }
+const fmtDateTime = (s) => s
+  ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  : ''
+
+const CellHistoryButton = ({ bin, field }) => {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
+  const [items, setItems] = useState(null)   // null = загрузка
+  const btnRef = useRef(null)
+  const popRef = useRef(null)
+
+  const toggle = async (e) => {
+    e.stopPropagation()
+    if (open) { setOpen(false); return }
+    const r = btnRef.current.getBoundingClientRect()
+    const W = 380, H = 320, margin = 8
+    const spaceBelow = window.innerHeight - r.bottom - margin
+    // Снизу не влезает — открываем вверх; по горизонтали прижимаем к правому краю кнопки
+    const top = spaceBelow >= H ? r.bottom + 4 : Math.max(margin, r.top - 4 - H)
+    const left = Math.max(margin, Math.min(r.right - W, window.innerWidth - W - margin))
+    setRect({ top, left, width: W, maxHeight: H })
+    setItems(null)
+    setOpen(true)
+    try {
+      const res = await api.get('/api/insurance/status/history', { params: { bin, field, limit: 50 } })
+      setItems(res.data)
+    } catch {
+      setItems([])
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target) || popRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    const onScroll = (e) => {
+      if (popRef.current && e.target instanceof Node && popRef.current.contains(e.target)) return
+      setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <>
+      <button ref={btnRef} type="button" className={'status-hist-btn' + (open ? ' on' : '')}
+        title="История изменений" onClick={toggle}>
+        <History size={14} />
+      </button>
+      {open && rect && createPortal(
+        <div ref={popRef} className="status-hist-pop"
+          style={{ top: rect.top, left: rect.left, width: rect.width, maxHeight: rect.maxHeight }}>
+          <div className="status-hist-head">
+            <History size={14} /> История · {STATUS_FIELD_LABELS[field] || field}
+          </div>
+          <div className="status-hist-body">
+            {items === null ? (
+              <div className="status-hist-empty">Загрузка…</div>
+            ) : items.length === 0 ? (
+              <div className="status-hist-empty">Изменений не было</div>
+            ) : items.map((h, i) => (
+              <div className="status-hist-item" key={i}>
+                <div className="status-hist-when">{fmtDateTime(h.changed_at)} · <b>{h.changed_by || '—'}</b></div>
+                <div className="status-hist-change">
+                  <span className="old">{h.old_value || '— нет —'}</span>
+                  <span className="arr">→</span>
+                  <span className="new">{h.new_value || '— нет —'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
 }
 
 // ─── Ячейка статуса: кастомный справочник. Работает для трёх столбцов —
@@ -164,14 +256,22 @@ const StatusCellRenderer = (params) => {
   if (!params.data) return null
   // Нельзя редактировать → просто текст (или прочерк)
   if (!editable) {
-    return <span className="status-readonly" title={tip}>{value || '—'}</span>
+    return (
+      <div className="status-cell-wrap">
+        <span className="status-readonly" title={tip}>{value || '—'}</span>
+        <CellHistoryButton bin={params.data.bin} field={key} />
+      </div>
+    )
   }
 
   return (
     <>
-      <div ref={btnRef} className="status-trigger" title={tip} onClick={(e) => (open ? (e.stopPropagation(), close()) : openMenu(e))}>
-        <span className="status-trigger-text">{value || '— нет —'}</span>
-        <span className="status-caret">▾</span>
+      <div className="status-cell-wrap">
+        <div ref={btnRef} className="status-trigger" title={tip} onClick={(e) => (open ? (e.stopPropagation(), close()) : openMenu(e))}>
+          <span className="status-trigger-text">{value || '— нет —'}</span>
+          <span className="status-caret">▾</span>
+        </div>
+        <CellHistoryButton bin={params.data.bin} field={key} />
       </div>
       {open && rect && createPortal(
         <div ref={menuRef} className="status-menu" style={{ left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}>
