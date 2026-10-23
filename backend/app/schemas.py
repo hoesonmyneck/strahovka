@@ -42,6 +42,8 @@ class InsuranceRecordResponse(InsuranceRecordBase):
     manual_status: Optional[str] = None   # «Статус» (обзвон)
     kgit_status: Optional[str] = None     # «Статус КГИТ»
     meeting_status: Optional[str] = None  # «Статус встречи»
+    # Кто/когда последний раз менял каждый столбец: {field: {by, at}}
+    status_meta: Optional[dict] = None
 
     class Config:
         from_attributes = True

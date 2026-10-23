@@ -49,6 +49,18 @@ with engine.connect() as _conn:
         # Доп. столбцы статусов: КГИТ и встречи
         "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_status VARCHAR(200)",
         "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS meeting_status VARCHAR(200)",
+        # Журнал изменений статусов (кто/когда/было → стало) — для разбора «статус пропал»
+        """CREATE TABLE IF NOT EXISTS bin_status_history (
+               id         SERIAL PRIMARY KEY,
+               bin        BIGINT,
+               field      VARCHAR(30),
+               old_value  VARCHAR(200),
+               new_value  VARCHAR(200),
+               changed_by VARCHAR(50),
+               changed_at TIMESTAMP DEFAULT NOW()
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_bsh_bin_field_at ON bin_status_history (bin, field, changed_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_bsh_changed_at ON bin_status_history (changed_at)",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
@@ -1026,12 +1038,14 @@ def expiry_list(
         B = models.BinStatus
         st = {r.bin: r for r in db.query(B.bin, B.status, B.kgit_status, B.meeting_status)
               .filter(B.bin.in_(bins)).all()}
+        meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
         for it in items:
             r = st.get(it.bin)
             if r:
                 it.manual_status = r.status
                 it.kgit_status = r.kgit_status
                 it.meeting_status = r.meeting_status
+            it.status_meta = meta.get(it.bin)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
@@ -1162,11 +1176,22 @@ def set_bin_status(
     B = models.BinStatus
     now = datetime.now()
 
+    # Текущее состояние строки: старое значение поля (для журнала) и kgit (для проверки)
+    cur = db.query(B.status, B.kgit_status, B.meeting_status).filter(B.bin == data.bin).first()
+    old_val = getattr(cur, field) if cur else None
+
     # «Статус встречи» доступен только когда заполнен «Статус КГИТ»
     if field == "meeting_status" and status_val:
-        kg = db.query(B.kgit_status).filter(B.bin == data.bin).scalar()
-        if not kg:
+        if not (cur and cur.kgit_status):
             raise HTTPException(400, "Сначала должен быть заполнен «Статус КГИТ»")
+
+    def log_change(new_val):
+        # Журнал: пишем только реальное изменение (в той же транзакции)
+        if (old_val or None) == (new_val or None):
+            return
+        db.add(models.BinStatusHistory(
+            bin=data.bin, field=field, old_value=old_val, new_value=new_val,
+            changed_by=current_user.username, changed_at=now))
 
     if not status_val:  # снять значение в этом столбце
         db.query(B).filter(B.bin == data.bin).update(
@@ -1176,6 +1201,7 @@ def set_bin_status(
         db.query(B).filter(B.bin == data.bin, B.status.is_(None),
                            B.kgit_status.is_(None), B.meeting_status.is_(None)).delete(
             synchronize_session=False)
+        log_change(None)
         db.commit()
         return {"bin": data.bin, "field": field, "status": ""}
 
@@ -1188,8 +1214,43 @@ def set_bin_status(
         index_elements=["bin"],
         set_={field: status_val, "updated_by": current_user.username, "updated_at": now})
     db.execute(stmt)
+    log_change(status_val)
     db.commit()
     return {"bin": data.bin, "field": field, "status": status_val}
+
+
+# Последнее изменение по каждому (БИН, столбец) — для подсказки «кто/когда» в ячейке.
+def _status_meta_for_bins(db, bins):
+    """{bin: {field: {'by': user, 'at': iso}}} по журналу (DISTINCT ON bin, field)."""
+    if not bins:
+        return {}
+    H = models.BinStatusHistory
+    rows = (db.query(H.bin, H.field, H.changed_by, H.changed_at)
+            .filter(H.bin.in_(bins))
+            .distinct(H.bin, H.field)
+            .order_by(H.bin, H.field, H.changed_at.desc())
+            .all())
+    meta = {}
+    for b, f, by, at in rows:
+        meta.setdefault(b, {})[f] = {"by": by, "at": at.isoformat() if at else None}
+    return meta
+
+
+@app.get("/api/insurance/status/history")
+def get_bin_status_history(
+    bin: int,
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: models.User = Depends(auth.require_admin_or_manager),
+    db: Session = Depends(database.get_db),
+):
+    """История изменений статусов по БИН (новые сверху) — для разбора жалоб."""
+    H = models.BinStatusHistory
+    rows = (db.query(H).filter(H.bin == bin)
+            .order_by(H.changed_at.desc(), H.id.desc()).limit(limit).all())
+    return [{
+        "field": r.field, "old_value": r.old_value, "new_value": r.new_value,
+        "changed_by": r.changed_by, "changed_at": r.changed_at.isoformat() if r.changed_at else None,
+    } for r in rows]
 
 
 @app.get("/api/insurance/status/export")
@@ -1319,12 +1380,14 @@ def get_records(
         B = models.BinStatus
         st = {r.bin: r for r in db.query(B.bin, B.status, B.kgit_status, B.meeting_status)
               .filter(B.bin.in_(bins)).all()}
+        meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
         for it in items:
             r = st.get(it.bin)
             if r:
                 it.manual_status = r.status
                 it.kgit_status = r.kgit_status
                 it.meeting_status = r.meeting_status
+            it.status_meta = meta.get(it.bin)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 

@@ -205,3 +205,18 @@ class BinStatus(Base):
     meeting_status = Column(String(200))  # «Статус встречи»
     updated_by = Column(String(50), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BinStatusHistory(Base):
+    """Журнал изменений статусов: каждое изменение любого из трёх столбцов —
+    отдельная запись (было → стало, кто, когда). Нужен, чтобы разбирать
+    жалобы «статус пропал»: видно, кто и когда перезаписал."""
+    __tablename__ = "bin_status_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bin = Column(BigInteger, index=True)
+    field = Column(String(30))            # status | kgit_status | meeting_status
+    old_value = Column(String(200), nullable=True)
+    new_value = Column(String(200), nullable=True)
+    changed_by = Column(String(50), nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow, index=True)

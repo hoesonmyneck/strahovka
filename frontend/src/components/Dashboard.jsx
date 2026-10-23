@@ -104,6 +104,13 @@ const StatusCellRenderer = (params) => {
   if (key === 'kgit_status') editable = isDkgit
   else if (key === 'meeting_status') editable = !isDkgit && !!params.data?.kgit_status
   else editable = !isDkgit  // status
+  // Подсказка «кто и когда» последний раз менял этот столбец (из журнала)
+  const meta = params.data?.status_meta?.[key]
+  const tip = meta
+    ? `Изменил: ${meta.by || '—'} · ${meta.at
+        ? new Date(meta.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : ''}`
+    : undefined
   const [open, setOpen] = useState(false)
   const [rect, setRect] = useState(null)
   const btnRef = useRef(null)
@@ -157,12 +164,12 @@ const StatusCellRenderer = (params) => {
   if (!params.data) return null
   // Нельзя редактировать → просто текст (или прочерк)
   if (!editable) {
-    return <span className="status-readonly">{value || '—'}</span>
+    return <span className="status-readonly" title={tip}>{value || '—'}</span>
   }
 
   return (
     <>
-      <div ref={btnRef} className="status-trigger" onClick={(e) => (open ? (e.stopPropagation(), close()) : openMenu(e))}>
+      <div ref={btnRef} className="status-trigger" title={tip} onClick={(e) => (open ? (e.stopPropagation(), close()) : openMenu(e))}>
         <span className="status-trigger-text">{value || '— нет —'}</span>
         <span className="status-caret">▾</span>
       </div>
@@ -554,11 +561,18 @@ const Dashboard = () => {
     }
   }, [buildFilterParams])
 
+  // Защита от «устаревших» ответов: применяем только самый последний запрос.
+  // Иначе медленный запрос, ушедший ДО проставки статуса, вернувшись ПОСЛЕ,
+  // перезатирал экран старыми данными (в базе при этом всё было сохранено).
+  const fetchSeqRef = useRef(0)
+
   const fetchData = useCallback(async (page = 1, overrideParams) => {
+    const seq = ++fetchSeqRef.current
     try {
       const base = overrideParams ?? buildFilterParams()
       const params = { ...base, page, page_size: pageSize }
       const response = await api.get('/api/records', { params })
+      if (seq !== fetchSeqRef.current) return  // пришёл более свежий — этот игнорируем
       setRowData(response.data.items)
       setTotalRecords(response.data.total)
       setCurrentPage(page)
