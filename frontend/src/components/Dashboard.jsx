@@ -2061,7 +2061,7 @@ const Dashboard = () => {
             Сбросить
           </button>
           {isAdmin() && (
-            <button onClick={downloadStatuses} className="download-btn" title="Excel: БИН и проставленный статус">
+            <button onClick={downloadStatuses} className="download-btn" title="Excel: БИН + Статус, Статус КГИТ, Статус встречи">
               <Download size={18} /> Скачать статусы
             </button>
           )}

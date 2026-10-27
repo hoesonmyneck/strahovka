@@ -1265,9 +1265,10 @@ def export_bin_status(
     current_user: models.User = Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    """Выгрузка статусов (только админ): два столбца — БИН и Статус.
-    По умолчанию — весь реестр организаций (по одной строке на БИН), статус
-    пустой у неотмеченных. only_set=1 — только БИНы с проставленным статусом.
+    """Выгрузка статусов (только админ): БИН + три столбца статусов
+    (Статус, Статус КГИТ, Статус встречи). По умолчанию — весь реестр
+    организаций (по одной строке на БИН), пусто у неотмеченных. only_set=1 —
+    только БИНы, где заполнен хотя бы один из статусов.
     Пишем потоково (xlsxwriter constant_memory + yield_per), память не грузим."""
     def bin12(v):
         return str(int(v)).zfill(12) if v is not None else ''
@@ -1279,24 +1280,29 @@ def export_bin_status(
     header_fmt = wb.add_format({'bold': True})
     ws.set_column(0, 0, 16)
     ws.set_column(1, 1, 60)
-    ws.write_string(0, 0, 'БИН', header_fmt)
-    ws.write_string(0, 1, 'Статус', header_fmt)
+    ws.set_column(2, 2, 24)
+    ws.set_column(3, 3, 52)
+    for c, h in enumerate(['БИН', 'Статус', 'Статус КГИТ', 'Статус встречи']):
+        ws.write_string(0, c, h, header_fmt)
     ws.freeze_panes(1, 0)
 
     S, B = models.CompanySummary, models.BinStatus
+    cols = (B.status, B.kgit_status, B.meeting_status)
     if only_set:
-        q = db.query(B.bin, B.status).order_by(B.bin)
+        q = db.query(B.bin, *cols).order_by(B.bin)
     else:
-        # Весь реестр: одна строка на БИН + левый джойн статуса (пустой у неотмеченных)
-        q = (db.query(S.bin, B.status)
+        # Весь реестр: одна строка на БИН + левый джойн статусов (пусто у неотмеченных)
+        q = (db.query(S.bin, *cols)
              .outerjoin(B, B.bin == S.bin)
              .order_by(S.bin))
 
     row = 0
-    for b, s in q.yield_per(5000):
+    for b, s, k, mt in q.yield_per(5000):
         row += 1
         ws.write_string(row, 0, bin12(b))
         ws.write_string(row, 1, s or '')
+        ws.write_string(row, 2, k or '')
+        ws.write_string(row, 3, mt or '')
     wb.close()
 
     return FileResponse(
