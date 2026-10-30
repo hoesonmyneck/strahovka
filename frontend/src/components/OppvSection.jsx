@@ -35,7 +35,7 @@ const OppvSection = () => {
   const columnDefs = useMemo(() => [
     { field: 'region', headerName: 'Регион', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 160, pinned: 'left' },
     { field: 'bin', headerName: 'БИН', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, width: 150, pinned: 'left' },
-    { field: 'bin_name', headerName: 'Наименование организации', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 320, pinned: 'left' },
+    { field: 'bin_name', headerName: 'Наименование организации', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 320, pinned: 'left', tooltipField: 'bin_name' },
     { field: 'oked_code_low', headerName: 'Код ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 150 },
     { field: 'oked_name_low', headerName: 'ОКЭД', sortable: true, filter: 'agTextColumnFilter', floatingFilter: true, minWidth: 300 },
     { field: 'age', headerName: 'Возраст', sortable: true, filter: 'agNumberColumnFilter', floatingFilter: true, minWidth: 110 },
@@ -202,6 +202,7 @@ const OppvSection = () => {
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             localeText={AG_GRID_LOCALE_RU}
+            tooltipShowDelay={300}
             pinnedTopRowData={pinnedTopRowData}
             getRowStyle={(p) => (p.node.rowPinned === 'top'
               ? { fontWeight: 700, background: '#eef1fb' } : undefined)}

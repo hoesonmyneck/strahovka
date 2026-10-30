@@ -473,6 +473,7 @@ const Dashboard = () => {
       headerName: 'Название компании',
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       minWidth: 250,
+      tooltipField: 'bin_name',   // полное название при наведении
     },
     {
       field: 'is_insured',
@@ -2091,6 +2092,7 @@ const Dashboard = () => {
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             localeText={AG_GRID_LOCALE_RU}
+            tooltipShowDelay={300}
             context={gridContext}
             getRowId={(p) => String(p.data.id)}
             pagination={false}
