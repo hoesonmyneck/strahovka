@@ -211,12 +211,17 @@ const NotificationBell = ({ onOpenBin }) => {
     }
   }, [loadCount])
 
+  // Открыл колокольчик = прочитал всё: счётчик сразу гасим, на сервере
+  // отмечаем прочитанными. В этом открытии новые остаются подсвеченными.
   const loadList = async () => {
     setItems(null)
     try {
       const r = await api.get('/api/notifications', { params: { limit: 30 } })
       setItems(r.data.items || [])
-      setUnread(r.data.unread || 0)
+      if (r.data.unread > 0) {
+        setUnread(0)
+        api.post('/api/notifications/read-all').catch(() => {})
+      }
     } catch {
       setItems([])
     }
@@ -239,24 +244,10 @@ const NotificationBell = ({ onOpenBin }) => {
     }
   }, [open])
 
-  const openItem = async (n) => {
-    if (!n.read) {
-      try {
-        const r = await api.post(`/api/notifications/${n.id}/read`)
-        setUnread(r.data.unread || 0)
-      } catch {}
-      setItems((list) => (list || []).map((x) => (x.id === n.id ? { ...x, read: true } : x)))
-    }
+  // Уже прочитано при открытии — просто переходим к БИН
+  const openItem = (n) => {
     setOpen(false)
     if (onOpenBin && n.bin != null) onOpenBin(n.bin)
-  }
-
-  const readAll = async () => {
-    try {
-      await api.post('/api/notifications/read-all')
-      setUnread(0)
-      setItems((list) => (list || []).map((x) => ({ ...x, read: true })))
-    } catch {}
   }
 
   return (
@@ -270,7 +261,6 @@ const NotificationBell = ({ onOpenBin }) => {
         <div className="notif-pop">
           <div className="notif-head">
             <span>Уведомления</span>
-            {unread > 0 && <button type="button" onClick={readAll}>Прочитать все</button>}
           </div>
           <div className="notif-body">
             {items === null ? (
@@ -434,7 +424,10 @@ const StatusCellRenderer = (params) => {
       maxHeight = Math.min(MENU_MAX, spaceAbove)
       top = r.top - 2 - maxHeight
     }
-    setRect({ left: r.left, top, width: r.width, maxHeight })
+    // Не уже 240px и не за правый край экрана
+    const width = Math.max(r.width, 240)
+    const left = Math.max(margin, Math.min(r.left, window.innerWidth - width - margin))
+    setRect({ left, top, width, maxHeight })
     setOpen(true)
   }
   const close = () => setOpen(false)
@@ -807,7 +800,9 @@ const Dashboard = () => {
       field: 'manual_status',
       headerName: 'Статус',
       pinned: 'right',
-      width: 260,
+      // Фиксированная ширина: автоподгонка сжимала столбец до «— нет —», и
+      // выпадашка становилась узкой. Запас — под кнопку истории (часы).
+      width: 300, minWidth: 260, suppressAutoSize: true,
       sortable: false,
       filter: false,
       cellRenderer: StatusCellRenderer,
@@ -818,7 +813,7 @@ const Dashboard = () => {
       field: 'kgit_status',
       headerName: 'Статус КГИТ',
       pinned: 'right',
-      width: 220,
+      width: 250, minWidth: 220, suppressAutoSize: true,
       sortable: false,
       filter: false,
       headerClass: 'kgit-header',
@@ -830,7 +825,7 @@ const Dashboard = () => {
       field: 'meeting_status',
       headerName: 'Статус встречи',
       pinned: 'right',
-      width: 280,
+      width: 270, minWidth: 230, suppressAutoSize: true,
       sortable: false,
       filter: false,
       cellRenderer: StatusCellRenderer,

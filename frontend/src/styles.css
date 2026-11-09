@@ -1034,6 +1034,7 @@ body {
   box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
   max-height: 280px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 .status-opt {
   padding: 7px 10px;
