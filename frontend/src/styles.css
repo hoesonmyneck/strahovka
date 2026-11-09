@@ -1015,6 +1015,14 @@ body {
 .notif-msg { font-size: 13px; color: #1f2937; line-height: 1.3; }
 .notif-item.unread .notif-msg { font-weight: 600; }
 .notif-meta { font-size: 11px; color: #888; }
+
+/* В шапке правило «.user-info span» (и HUD-вариант) перекрашивает все span —
+   возвращаем колокольчику свои цвета: белая цифра на красном и т.д. */
+.user-info .notif-wrap .notif-badge { color: #fff !important; font-weight: 700 !important; }
+.user-info .notif-wrap .notif-head span { color: #1f2937 !important; font-weight: 700 !important; }
+.user-info .notif-wrap .notif-msg { color: #1f2937 !important; font-weight: 400 !important; }
+.user-info .notif-wrap .notif-item.unread .notif-msg { font-weight: 600 !important; }
+.user-info .notif-wrap .notif-meta { color: #888 !important; font-weight: 400 !important; }
 .status-caret { color: #888; font-size: 10px; flex: 0 0 auto; }
 
 .status-menu {
