@@ -100,6 +100,26 @@ with engine.connect() as _conn:
            INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
            SELECT old.bin, 'meeting_status', old.meeting_status, upd.meeting_status, 'system-migration', NOW()
            FROM old JOIN upd ON upd.bin = old.bin""",
+        # «Статус» (ГАК): старые длинные названия → короткие со схемы статусов.
+        # Идемпотентно (только по старым названиям), атомарно (CTE), в журнал.
+        """WITH map(old_v, new_v) AS (VALUES
+               ('Контактный номер некорректный/отключен/отсутствует', 'Нет номера'),
+               ('Заключил/планирует заключить договор ОСНС в другом КСЖ', 'В другом КСЖ'),
+               ('Отказ от заключения договора ОСНС', 'Отказ'),
+               ('Отсутствие наемных работников', 'Нет работников'),
+               ('Ликвидация/закрытие предприятия', 'Ликвидация'),
+               ('Филиал/ГУ/КГУ/РГУ', 'Филиал/ГУ'),
+               ('Заключил ОСНС с ГАК', 'Заключил с ГАК')
+           ), old AS (
+               SELECT b.bin, b.status AS old_v, map.new_v
+               FROM bin_status b JOIN map ON b.status = map.old_v
+           ), upd AS (
+               UPDATE bin_status b SET status = old.new_v
+               FROM old WHERE b.bin = old.bin RETURNING b.bin
+           )
+           INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
+           SELECT old.bin, 'status', old.old_v, old.new_v, 'system-migration', NOW()
+           FROM old JOIN upd ON upd.bin = old.bin""",
         # Уведомления (колокольчик)
         """CREATE TABLE IF NOT EXISTS notifications (
                id         SERIAL PRIMARY KEY,
@@ -1170,17 +1190,19 @@ def status_activity(
 #   status         — «Статус» (обзвон). Ставят обычные пользователи.
 #   kgit_status    — «Статус КГИТ». Ставит только роль ДКГИТ.
 #   meeting_status — «Статус встречи». Ставят обычные, когда заполнен kgit_status.
+# Названия — как на схеме статусов (итоговые статусы ГАК). Старые длинные
+# названия переводятся автомиграцией (список миграций в начале файла).
 INSURANCE_STATUSES = [
-    "Контактный номер некорректный/отключен/отсутствует",
-    "Заключил/планирует заключить договор ОСНС в другом КСЖ",
-    "Отказ от заключения договора ОСНС",
-    "Отсутствие наемных работников",
-    "Ликвидация/закрытие предприятия",
-    "Филиал/ГУ/КГУ/РГУ",
-    "Заключил ОСНС с ГАК",
     "В работе",
-    "Для работы ДКГИТ",
+    "Заключил с ГАК",
+    "В другом КСЖ",
+    "Отказ",
+    "Нет работников",
+    "Ликвидация",
+    "Филиал/ГУ",
+    "Нет номера",
     "Иное",
+    "Для работы ДКГИТ",
 ]
 KGIT_STATUSES = [
     "В работе",
