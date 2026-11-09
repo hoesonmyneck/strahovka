@@ -203,8 +203,31 @@ class BinStatus(Base):
     status = Column(String(200))          # «Статус» (обзвон)
     kgit_status = Column(String(200))     # «Статус КГИТ» (ставит ДКГИТ)
     meeting_status = Column(String(200))  # «Статус встречи»
+    # Доп. данные к статусам (дата/время/место/причина — по схеме статусов)
+    status_date = Column(Date)
+    kgit_date = Column(Date)
+    kgit_time = Column(String(10))
+    kgit_place = Column(String(300))
+    kgit_reason = Column(String(500))
+    meeting_date = Column(Date)
+    meeting_reason = Column(String(500))
     updated_by = Column(String(50), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Notification(Base):
+    """Уведомление пользователю (колокольчик): новый БИН для ДКГИТ, возврат ГАК
+    на доработку и т.п. Одна строка на получателя."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True)
+    bin = Column(BigInteger)
+    kind = Column(String(40))
+    message = Column(String(500))
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    read_at = Column(DateTime, nullable=True)
 
 
 class BinStatusHistory(Base):

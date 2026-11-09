@@ -23,7 +23,8 @@ import {
   X,
   Check,
   Pencil,
-  History
+  History,
+  Bell
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
@@ -181,28 +182,237 @@ const CellHistoryButton = ({ bin, field }) => {
   )
 }
 
+// ─── Колокольчик уведомлений: красный счётчик + список ──────────────────────
+// Счётчик опрашивается раз в 30 с и при возврате на вкладку (лёгкий запрос).
+// Клик по уведомлению: отметить прочитанным и открыть этот БИН в таблице.
+const NotificationBell = ({ onOpenBin }) => {
+  const [unread, setUnread] = useState(0)
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState(null)   // null = загрузка
+  const wrapRef = useRef(null)
+
+  const loadCount = useCallback(async () => {
+    try {
+      const r = await api.get('/api/notifications/unread-count')
+      setUnread(r.data.unread || 0)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    loadCount()
+    const t = setInterval(loadCount, 30000)
+    const onVisible = () => { if (document.visibilityState === 'visible') loadCount() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', loadCount)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', loadCount)
+    }
+  }, [loadCount])
+
+  const loadList = async () => {
+    setItems(null)
+    try {
+      const r = await api.get('/api/notifications', { params: { limit: 30 } })
+      setItems(r.data.items || [])
+      setUnread(r.data.unread || 0)
+    } catch {
+      setItems([])
+    }
+  }
+
+  const toggle = () => {
+    if (!open) loadList()
+    setOpen((o) => !o)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const openItem = async (n) => {
+    if (!n.read) {
+      try {
+        const r = await api.post(`/api/notifications/${n.id}/read`)
+        setUnread(r.data.unread || 0)
+      } catch {}
+      setItems((list) => (list || []).map((x) => (x.id === n.id ? { ...x, read: true } : x)))
+    }
+    setOpen(false)
+    if (onOpenBin && n.bin != null) onOpenBin(n.bin)
+  }
+
+  const readAll = async () => {
+    try {
+      await api.post('/api/notifications/read-all')
+      setUnread(0)
+      setItems((list) => (list || []).map((x) => ({ ...x, read: true })))
+    } catch {}
+  }
+
+  return (
+    <div className="notif-wrap" ref={wrapRef}>
+      <button type="button" className={'notif-btn' + (open ? ' on' : '')} onClick={toggle}
+        title={unread ? `Новых уведомлений: ${unread}` : 'Уведомления'}>
+        <Bell size={18} />
+        {unread > 0 && <span className="notif-badge">{unread > 99 ? '99+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-pop">
+          <div className="notif-head">
+            <span>Уведомления</span>
+            {unread > 0 && <button type="button" onClick={readAll}>Прочитать все</button>}
+          </div>
+          <div className="notif-body">
+            {items === null ? (
+              <div className="notif-empty">Загрузка…</div>
+            ) : items.length === 0 ? (
+              <div className="notif-empty">Уведомлений нет</div>
+            ) : items.map((n) => (
+              <button type="button" key={n.id} className={'notif-item' + (n.read ? '' : ' unread')}
+                onClick={() => openItem(n)}>
+                <span className={'notif-dot ' + (n.kind || '')} />
+                <span className="notif-text">
+                  <span className="notif-msg">{n.message}</span>
+                  <span className="notif-meta">
+                    {fmtDateTime(n.created_at)}{n.created_by ? ` · ${n.created_by}` : ''}
+                    {n.bin != null ? ` · БИН ${String(n.bin).padStart(12, '0')}` : ''}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Ячейка статуса: кастомный справочник. Работает для трёх столбцов —
 // «Статус» (status), «Статус КГИТ» (kgit_status), «Статус встречи»
 // (meeting_status) — через cellRendererParams.statusKey. Доступ к простановке
 // зависит от роли и заполненности предыдущего столбца. ────────────────────────
+
+// Доп. данные статусов: какие поля строки хранят дату/время/место/причину столбца
+const STATUS_EXTRA_COLS = {
+  status:         { date: 'status_date' },
+  kgit_status:    { date: 'kgit_date', time: 'kgit_time', place: 'kgit_place', reason: 'kgit_reason' },
+  meeting_status: { date: 'meeting_date', reason: 'meeting_reason' },
+}
+// «Итог» ставится только после этого статуса КГИТ
+const MEETING_REQUIRES_KGIT = 'Встреча проведена'
+const isoToRu = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('.') : '')
+const todayIso = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+// «12.11.2026 14:00 · Офис ГАК · причина» — для подписи под значением
+const statusDetails = (key, data) => {
+  const c = STATUS_EXTRA_COLS[key] || {}
+  const parts = []
+  const d = c.date && data?.[c.date]
+  const t = c.time && data?.[c.time]
+  if (d) parts.push(isoToRu(d) + (t ? ` ${t}` : ''))
+  else if (t) parts.push(t)
+  if (c.place && data?.[c.place]) parts.push(data[c.place])
+  if (c.reason && data?.[c.reason]) parts.push(data[c.reason])
+  return parts.join(' · ')
+}
+
+// ─── Форма доп. данных при выборе статуса (дата/время/место/причина) ─────────
+const EXTRA_FIELD_LABELS = { date: 'Дата', time: 'Время', place: 'Место', reason: 'Причина' }
+const StatusExtrasModal = ({ title, status, rule, initial, onSave, onClose }) => {
+  const [vals, setVals] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const fields = [...rule.required, ...rule.optional]
+  const order = ['date', 'time', 'place', 'reason']
+  const shown = order.filter((f) => fields.includes(f))
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const missing = rule.required.filter((f) => !String(vals[f] || '').trim())
+    if (missing.length) {
+      setErr('Заполните: ' + missing.map((f) => EXTRA_FIELD_LABELS[f].toLowerCase()).join(', '))
+      return
+    }
+    setSaving(true)
+    const ok = await onSave(vals)
+    setSaving(false)
+    if (ok) onClose()
+  }
+
+  return createPortal(
+    <div className="sx-overlay" onMouseDown={onClose}>
+      <form className="sx-modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="sx-head">
+          <div className="sx-title">{title}</div>
+          <div className="sx-status">{status}</div>
+        </div>
+        <div className="sx-body">
+          {shown.map((f) => {
+            const req = rule.required.includes(f)
+            const common = {
+              value: vals[f] || '',
+              onChange: (e) => { setVals((v) => ({ ...v, [f]: e.target.value })); setErr('') },
+            }
+            return (
+              <label key={f} className="sx-field">
+                <span>{EXTRA_FIELD_LABELS[f]}{req && <i>*</i>}</span>
+                {f === 'date' && <input type="date" {...common} autoFocus />}
+                {f === 'time' && <input type="time" {...common} />}
+                {f === 'place' && <input type="text" maxLength={300} placeholder="Адрес / место встречи" {...common} />}
+                {f === 'reason' && <textarea rows={3} maxLength={500} placeholder="Укажите причину" {...common} />}
+              </label>
+            )
+          })}
+          {err && <div className="sx-err">{err}</div>}
+        </div>
+        <div className="sx-foot">
+          <button type="button" className="sx-cancel" onClick={onClose}>Отмена</button>
+          <button type="submit" className="sx-save" disabled={saving}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  )
+}
+
 const StatusCellRenderer = (params) => {
   const ctx = params.context || {}
   const key = params.statusKey || 'status'          // бэкенд-поле
   const opts = (ctx.statusDefs && ctx.statusDefs[key]) || []
+  const extrasDefs = (ctx.statusDefs && ctx.statusDefs.extras && ctx.statusDefs.extras[key]) || {}
   const value = params.value || ''
   // Кто может редактировать этот столбец
   const isDkgit = !!ctx.isDkgit
   let editable
   if (key === 'kgit_status') editable = isDkgit
-  else if (key === 'meeting_status') editable = !isDkgit && !!params.data?.kgit_status
+  else if (key === 'meeting_status') editable = !isDkgit && params.data?.kgit_status === MEETING_REQUIRES_KGIT
   else editable = !isDkgit  // status
-  // Подсказка «кто и когда» последний раз менял этот столбец (из журнала)
+  // Подпись под значением (дата/время/место/причина) + подсказка «кто и когда»
+  const details = value ? statusDetails(key, params.data) : ''
   const meta = params.data?.status_meta?.[key]
-  const tip = meta
-    ? `Изменил: ${meta.by || '—'} · ${meta.at
-        ? new Date(meta.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : ''}`
-    : undefined
+  const tipParts = []
+  if (details) tipParts.push(`${value}: ${details}`)
+  if (meta) tipParts.push(`Изменил: ${meta.by || '—'} · ${fmtDateTime(meta.at)}`)
+  const tip = tipParts.length ? tipParts.join('\n') : undefined
+  const [extrasFor, setExtrasFor] = useState(null)   // статус, для которого открыта форма
   const [open, setOpen] = useState(false)
   const [rect, setRect] = useState(null)
   const btnRef = useRef(null)
@@ -251,14 +461,44 @@ const StatusCellRenderer = (params) => {
     }
   }, [open])
 
-  const pick = (v) => { close(); ctx.onStatusChange(key, params.data, v) }
+  // Статус с доп. данными → сначала форма; без них — сохраняем сразу
+  const pick = (v) => {
+    close()
+    const rule = v && extrasDefs[v]
+    if (rule && (rule.required.length || rule.optional.length)) setExtrasFor(v)
+    else ctx.onStatusChange(key, params.data, v, {})
+  }
+
+  // Предзаполнение формы: тот же статус — текущие данные; новый — сегодняшняя
+  // дата (+ место/время из строки, если новый статус их допускает: «перенесена»)
+  const initialExtras = (v) => {
+    const c = STATUS_EXTRA_COLS[key] || {}
+    const d = params.data || {}
+    const same = v === value
+    const rule = extrasDefs[v] || { required: [], optional: [] }
+    const allowed = new Set([...rule.required, ...rule.optional])
+    const init = { date: (same && c.date && d[c.date]) ? String(d[c.date]).slice(0, 10) : todayIso() }
+    ;['time', 'place', 'reason'].forEach((f) => {
+      if (!c[f] || !allowed.has(f)) return
+      if (same || f !== 'reason') init[f] = d[c[f]] || ''
+    })
+    return init
+  }
 
   if (!params.data) return null
+
+  const body = (text) => (
+    <span className="status-trigger-body">
+      <span className="status-trigger-text">{text}</span>
+      {details && <span className="status-trigger-sub">{details}</span>}
+    </span>
+  )
+
   // Нельзя редактировать → просто текст (или прочерк)
   if (!editable) {
     return (
       <div className="status-cell-wrap">
-        <span className="status-readonly" title={tip}>{value || '—'}</span>
+        <span className="status-readonly" title={tip}>{body(value || '—')}</span>
         <CellHistoryButton bin={params.data.bin} field={key} />
       </div>
     )
@@ -268,11 +508,21 @@ const StatusCellRenderer = (params) => {
     <>
       <div className="status-cell-wrap">
         <div ref={btnRef} className="status-trigger" title={tip} onClick={(e) => (open ? (e.stopPropagation(), close()) : openMenu(e))}>
-          <span className="status-trigger-text">{value || '— нет —'}</span>
+          {body(value || '— нет —')}
           <span className="status-caret">▾</span>
         </div>
         <CellHistoryButton bin={params.data.bin} field={key} />
       </div>
+      {extrasFor && (
+        <StatusExtrasModal
+          title={params.data.bin_name || String(params.data.bin).padStart(12, '0')}
+          status={extrasFor}
+          rule={extrasDefs[extrasFor]}
+          initial={initialExtras(extrasFor)}
+          onSave={(vals) => ctx.onStatusChange(key, params.data, extrasFor, vals)}
+          onClose={() => setExtrasFor(null)}
+        />
+      )}
       {open && rect && createPortal(
         <div ref={menuRef} className="status-menu" style={{ left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}>
           <div className={`status-opt${!value ? ' sel' : ''}`} onClick={() => pick('')}>— нет —</div>
@@ -409,7 +659,7 @@ const Dashboard = () => {
 
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
-  const [statusOptions, setStatusOptions] = useState({ status: [], kgit_status: [], meeting_status: [] })
+  const [statusOptions, setStatusOptions] = useState({ status: [], kgit_status: [], meeting_status: [], extras: {} })
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 100
 
@@ -1013,6 +1263,18 @@ const Dashboard = () => {
     setTimeout(() => fetchAll(1), 0)
   }
 
+  // Клик по уведомлению: раздел «Страхование» + фильтр по этому БИН
+  const openBinFromNotification = (bin) => {
+    const b = String(bin).padStart(12, '0')
+    switchSection('insurance')
+    if (gridRef.current?.api) gridRef.current.api.setFilterModel(null)
+    setFilters({ ...EMPTY_FILTERS, bin: b })
+    const params = { bin: b }
+    fetchMetrics(params)
+    fetchData(1, params)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   // Отправка файла + опрос фоновой задачи.
   // Фаза 'sending' — реальный % передачи байтов; 'processing' — реальный %
   // разбора строк на сервере (сервер обновляет счётчик, мы опрашиваем статус).
@@ -1149,24 +1411,34 @@ const Dashboard = () => {
   const goToPage = (page) => { if (page >= 1 && page <= totalPages) fetchAll(page) }
 
   // Сохранение статуса по БИН в один из трёх столбцов (field)
-  const onStatusChange = useCallback(async (field, row, status) => {
+  // Возвращает true/false — форма доп. данных закрывается только при успехе.
+  const onStatusChange = useCallback(async (field, row, status, extras = {}) => {
     const bin = row?.bin
-    if (bin == null) return
-    // front-поле, которое хранит значение в rowData
-    const rowKey = field === 'status' ? 'manual_status' : field
+    if (bin == null) return false
+    const body = { bin, field, status }
+    ;['date', 'time', 'place', 'reason'].forEach((k) => {
+      const v = extras[k]
+      if (v != null && String(v).trim() !== '') body[k] = String(v).trim()
+    })
     try {
-      await api.patch('/api/insurance/status', { bin, field, status })
+      const res = await api.patch('/api/insurance/status', body)
+      // Берём то, что реально сохранил сервер (все три столбца + их данные)
+      const saved = res.data?.row || {}
+      const nowIso = new Date().toISOString()
       setRowData((prev) => prev.map((r) => {
         if (r.bin !== bin) return r
-        const next = { ...r, [rowKey]: status }
-        // снятие «Статуса КГИТ» очищает и «Статус встречи»
-        if (field === 'kgit_status' && !status) next.meeting_status = null
-        return next
+        return {
+          ...r,
+          ...saved,
+          status_meta: { ...(r.status_meta || {}), [field]: { by: user?.username, at: nowIso } },
+        }
       }))
+      return true
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Не удалось сохранить статус')
+      return false
     }
-  }, [])
+  }, [user])
 
   // Контекст для AG Grid: справочники трёх столбцов + роль + обработчик
   const gridContext = useMemo(
@@ -1264,6 +1536,7 @@ const Dashboard = () => {
               </button>
             )}
           </div>
+          <NotificationBell onOpenBin={openBinFromNotification} />
           <span>{user?.username}</span>
           {!isAdmin() && !isManager() && !isDkgit() && (
             <button onClick={openFiles} className="files-btn">

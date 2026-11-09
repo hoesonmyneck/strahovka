@@ -61,6 +61,57 @@ with engine.connect() as _conn:
            )""",
         "CREATE INDEX IF NOT EXISTS idx_bsh_bin_field_at ON bin_status_history (bin, field, changed_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_bsh_changed_at ON bin_status_history (changed_at)",
+        # Схема статусов v2: доп. данные к статусам (только ADD — данные не трогаем)
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS status_date DATE",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_date DATE",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_time VARCHAR(10)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_place VARCHAR(300)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_reason VARCHAR(500)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS meeting_date DATE",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS meeting_reason VARCHAR(500)",
+        # Перенос старых значений «Статус встречи» в новую схему. Идемпотентно
+        # (срабатывает только по СТАРЫМ названиям) и атомарно: UPDATE и запись
+        # в журнал — один оператор (CTE), без риска дублей при сбое.
+        # 1) старое «Встреча проведена - …» означает, что встреча прошла →
+        #    «Статус КГИТ» таких строк = «Встреча проведена»
+        """WITH old AS (
+               SELECT bin, kgit_status FROM bin_status
+               WHERE meeting_status IN ('Встреча проведена - планирует заключить с ГАК',
+                                        'Встреча проведена - не будет заключать договор с ГАК')
+                 AND kgit_status IS DISTINCT FROM 'Встреча проведена'
+           ), upd AS (
+               UPDATE bin_status b SET kgit_status = 'Встреча проведена'
+               FROM old WHERE b.bin = old.bin RETURNING b.bin
+           )
+           INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
+           SELECT old.bin, 'kgit_status', old.kgit_status, 'Встреча проведена', 'system-migration', NOW()
+           FROM old JOIN upd ON upd.bin = old.bin""",
+        # 2) переименование самих значений итога
+        """WITH old AS (
+               SELECT bin, meeting_status FROM bin_status
+               WHERE meeting_status IN ('Встреча проведена - планирует заключить с ГАК',
+                                        'Встреча проведена - не будет заключать договор с ГАК')
+           ), upd AS (
+               UPDATE bin_status b SET meeting_status = CASE old.meeting_status
+                   WHEN 'Встреча проведена - планирует заключить с ГАК' THEN 'Планирует заключить с ГАК'
+                   ELSE 'Не будет заключать' END
+               FROM old WHERE b.bin = old.bin RETURNING b.bin, b.meeting_status
+           )
+           INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
+           SELECT old.bin, 'meeting_status', old.meeting_status, upd.meeting_status, 'system-migration', NOW()
+           FROM old JOIN upd ON upd.bin = old.bin""",
+        # Уведомления (колокольчик)
+        """CREATE TABLE IF NOT EXISTS notifications (
+               id         SERIAL PRIMARY KEY,
+               user_id    INTEGER,
+               bin        BIGINT,
+               kind       VARCHAR(40),
+               message    VARCHAR(500),
+               created_by VARCHAR(50),
+               created_at TIMESTAMP DEFAULT NOW(),
+               read_at    TIMESTAMP
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_notif_user_read ON notifications (user_id, read_at, created_at DESC)",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
@@ -1036,8 +1087,7 @@ def expiry_list(
     bins = [it.bin for it in items if it.bin is not None]
     if bins:
         B = models.BinStatus
-        st = {r.bin: r for r in db.query(B.bin, B.status, B.kgit_status, B.meeting_status)
-              .filter(B.bin.in_(bins)).all()}
+        st = {r.bin: r for r in db.query(B).filter(B.bin.in_(bins)).all()}
         meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
         for it in items:
             r = st.get(it.bin)
@@ -1045,6 +1095,13 @@ def expiry_list(
                 it.manual_status = r.status
                 it.kgit_status = r.kgit_status
                 it.meeting_status = r.meeting_status
+                it.status_date = r.status_date
+                it.kgit_date = r.kgit_date
+                it.kgit_time = r.kgit_time
+                it.kgit_place = r.kgit_place
+                it.kgit_reason = r.kgit_reason
+                it.meeting_date = r.meeting_date
+                it.meeting_reason = r.meeting_reason
             it.status_meta = meta.get(it.bin)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
@@ -1125,14 +1182,25 @@ INSURANCE_STATUSES = [
     "Для работы ДКГИТ",
     "Иное",
 ]
-KGIT_STATUSES = ["Встреча назначена", "В работе"]
+KGIT_STATUSES = [
+    "В работе",
+    "Встреча назначена",
+    "Встреча перенесена",
+    "Встреча не состоялась",
+    "Встреча проведена",
+    "Отказано во встрече",
+]
 MEETING_STATUSES = [
-    "Встреча проведена - планирует заключить с ГАК",
-    "Встреча проведена - не будет заключать договор с ГАК",
+    "Планирует заключить с ГАК",
+    "Договор заключён",
+    "Не будет заключать",
+    "Повторная встреча",
 ]
 
 # Какие строки (по основному статусу) видит роль ДКГИТ в таблице страхования.
 DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ"]
+# «Итог» (Статус встречи) ставится только после этого статуса КГИТ
+MEETING_REQUIRES_KGIT = "Встреча проведена"
 
 # Описание столбцов статусов: справочник, поле модели, кто ставит.
 STATUS_FIELDS = {
@@ -1141,12 +1209,84 @@ STATUS_FIELDS = {
     "meeting_status": {"options": MEETING_STATUSES,   "dkgit_only": False},
 }
 
+# Доп. данные статусов по схеме: какие колонки у столбца и что обязательно
+# для конкретного значения. extra-ключи: date, time, place, reason.
+STATUS_EXTRA_COLS = {
+    "status":         {"date": "status_date"},
+    "kgit_status":    {"date": "kgit_date", "time": "kgit_time",
+                       "place": "kgit_place", "reason": "kgit_reason"},
+    "meeting_status": {"date": "meeting_date", "reason": "meeting_reason"},
+}
+STATUS_EXTRAS = {
+    # «Статус» (ГАК): итоговые и «Для работы ДКГИТ» — с датой; «В работе» — без
+    "status": {s: {"required": [] if s == "В работе" else ["date"], "optional": []}
+               for s in INSURANCE_STATUSES},
+    "kgit_status": {
+        "В работе":              {"required": [], "optional": []},
+        "Встреча назначена":     {"required": ["date", "time", "place"], "optional": []},
+        "Встреча перенесена":    {"required": ["date"], "optional": ["time", "place"]},
+        "Встреча не состоялась": {"required": ["date", "reason"], "optional": []},
+        "Встреча проведена":     {"required": ["date"], "optional": []},
+        "Отказано во встрече":   {"required": ["date", "reason"], "optional": []},
+    },
+    "meeting_status": {
+        "Планирует заключить с ГАК": {"required": ["date"], "optional": []},
+        "Договор заключён":          {"required": ["date"], "optional": []},
+        "Не будет заключать":        {"required": ["date", "reason"], "optional": []},
+        "Повторная встреча":         {"required": ["date"], "optional": []},
+    },
+}
+EXTRA_LABELS = {"date": "дата", "time": "время", "place": "место", "reason": "причина"}
+
+# Уведомления: какое событие кому уходит.
+#   to_dkgit — новый БИН / повторная встреча → ДКГИТ;
+#   to_gak   — ДКГИТ вернул ГАК (встреча проведена, отказ, не состоялась).
+NOTIFY_RULES = {
+    ("status", "Для работы ДКГИТ"):          ("to_dkgit", "Новый БИН для работы ДКГИТ"),
+    ("meeting_status", "Повторная встреча"):  ("to_dkgit", "Повторная встреча — назначьте встречу"),
+    ("kgit_status", "Встреча проведена"):     ("to_gak", "Встреча проведена — проставьте итог"),
+    ("kgit_status", "Отказано во встрече"):   ("to_gak", "ДКГИТ: отказано во встрече"),
+    ("kgit_status", "Встреча не состоялась"): ("to_gak", "ДКГИТ: встреча не состоялась"),
+}
+
 
 @app.get("/api/insurance/statuses")
 def get_insurance_statuses(current_user: models.User = Depends(auth.get_current_active_user)):
-    """Справочники всех трёх столбцов статусов."""
+    """Справочники всех трёх столбцов статусов + требования к доп. данным."""
     return {"status": INSURANCE_STATUSES, "kgit_status": KGIT_STATUSES,
-            "meeting_status": MEETING_STATUSES}
+            "meeting_status": MEETING_STATUSES, "extras": STATUS_EXTRAS}
+
+
+def _fmt_status_details(field, status_val, ex: dict) -> str:
+    """Текст для журнала: «Встреча назначена (12.11.2026 14:00, Офис)»."""
+    if not status_val:
+        return None
+    parts = []
+    if ex.get("date"):
+        parts.append(ex["date"].strftime("%d.%m.%Y") + (f" {ex['time']}" if ex.get("time") else ""))
+    elif ex.get("time"):
+        parts.append(ex["time"])
+    if ex.get("place"):
+        parts.append(ex["place"])
+    if ex.get("reason"):
+        parts.append(ex["reason"])
+    return f"{status_val} ({', '.join(parts)})" if parts else status_val
+
+
+def _notify(db, *, bin_, target, message, actor, now):
+    """Создать уведомления получателям по региону БИН (кроме автора)."""
+    S, U = models.CompanySummary, models.User
+    info = db.query(S.obl_name, S.bin_name).filter(S.bin == bin_).first()
+    region = info.obl_name if info else None
+    name = (info.bin_name if info else None) or str(bin_).zfill(12)
+    roles = ["dkgit"] if target == "to_dkgit" else ["user", "manager"]
+    q = db.query(U.id).filter(U.role.in_(roles), U.is_active == 1, U.username != actor)
+    if region:
+        q = q.filter(or_(U.region == region, U.region.is_(None)))
+    text_ = f"{message}: {name}"[:500]
+    for (uid,) in q.all():
+        db.add(models.Notification(user_id=uid, bin=bin_, kind=target, message=text_,
+                                   created_by=actor, created_at=now))
 
 
 @app.patch("/api/insurance/status")
@@ -1157,7 +1297,8 @@ def set_bin_status(
 ):
     """Установить/снять статус по БИН в одном из трёх столбцов (data.field).
     Пустая строка — снять. Роль ДКГИТ ставит только kgit_status; обычные — status
-    и meeting_status (последний только когда заполнен kgit_status)."""
+    и meeting_status (последний только после «Встреча проведена»). К статусу
+    прикладываются доп. данные (дата/время/место/причина) по схеме STATUS_EXTRAS."""
     field = (data.field or "status")
     if field not in STATUS_FIELDS:
         raise HTTPException(400, "Неизвестный столбец статуса")
@@ -1173,50 +1314,90 @@ def set_bin_status(
     if status_val and status_val not in spec["options"]:
         raise HTTPException(400, "Неизвестный статус для этого столбца")
 
+    # Доп. данные: берём только разрешённые для этого значения, проверяем обязательные
+    cols = STATUS_EXTRA_COLS[field]
+    ex = {}
+    if status_val:
+        rule = STATUS_EXTRAS[field].get(status_val, {"required": [], "optional": []})
+        allowed = set(rule["required"]) | set(rule["optional"])
+        raw = {"date": data.date, "time": (data.time or "").strip() or None,
+               "place": (data.place or "").strip() or None,
+               "reason": (data.reason or "").strip() or None}
+        ex = {k: v for k, v in raw.items() if k in allowed and v}
+        missing = [EXTRA_LABELS[k] for k in rule["required"] if not ex.get(k)]
+        if missing:
+            raise HTTPException(400, f"Для статуса «{status_val}» укажите: {', '.join(missing)}")
+        if ex.get("time") and not re.fullmatch(r"\d{1,2}:\d{2}", ex["time"]):
+            raise HTTPException(400, "Время в формате ЧЧ:ММ")
+    # Значения всех доп. колонок столбца: неприменимые к статусу — обнуляем,
+    # чтобы не висели «чужие» дата/место от прошлого статуса.
+    extra_vals = {col: ex.get(k) for k, col in cols.items()}
+
     B = models.BinStatus
     now = datetime.now()
 
-    # Текущее состояние строки: старое значение поля (для журнала) и kgit (для проверки)
-    cur = db.query(B.status, B.kgit_status, B.meeting_status).filter(B.bin == data.bin).first()
+    # Текущее состояние строки: старое значение (для журнала) и kgit (для проверки)
+    cur = db.query(B).filter(B.bin == data.bin).first()
     old_val = getattr(cur, field) if cur else None
+    old_ex = ({k: getattr(cur, col) for k, col in cols.items()} if cur else {})
 
-    # «Статус встречи» доступен только когда заполнен «Статус КГИТ»
+    # «Итог» доступен только после «Встреча проведена»
     if field == "meeting_status" and status_val:
-        if not (cur and cur.kgit_status):
-            raise HTTPException(400, "Сначала должен быть заполнен «Статус КГИТ»")
+        if not (cur and cur.kgit_status == MEETING_REQUIRES_KGIT):
+            raise HTTPException(400, f"«Статус встречи» ставится после «{MEETING_REQUIRES_KGIT}» в «Статус КГИТ»")
 
-    def log_change(new_val):
-        # Журнал: пишем только реальное изменение (в той же транзакции)
-        if (old_val or None) == (new_val or None):
-            return
-        db.add(models.BinStatusHistory(
-            bin=data.bin, field=field, old_value=old_val, new_value=new_val,
-            changed_by=current_user.username, changed_at=now))
+    new_detail = _fmt_status_details(field, status_val, ex)
+    old_detail = _fmt_status_details(field, old_val, old_ex) if old_val else None
 
-    if not status_val:  # снять значение в этом столбце
+    if not status_val:  # снять значение в этом столбце (вместе с его доп. данными)
         db.query(B).filter(B.bin == data.bin).update(
-            {field: None, "updated_by": current_user.username, "updated_at": now},
+            {field: None, **extra_vals, "updated_by": current_user.username, "updated_at": now},
             synchronize_session=False)
         # если все три столбца пусты — удаляем строку
         db.query(B).filter(B.bin == data.bin, B.status.is_(None),
                            B.kgit_status.is_(None), B.meeting_status.is_(None)).delete(
             synchronize_session=False)
-        log_change(None)
-        db.commit()
-        return {"bin": data.bin, "field": field, "status": ""}
+    else:
+        # Атомарный upsert ПО ПОЛЯМ ЭТОГО СТОЛБЦА: не перетирает другие столбцы
+        # и не падает на гонке (дубликат PK при одновременном первом вводе).
+        vals = {field: status_val, **extra_vals,
+                "updated_by": current_user.username, "updated_at": now}
+        stmt = pg_insert(B.__table__).values(bin=data.bin, **vals)
+        stmt = stmt.on_conflict_do_update(index_elements=["bin"], set_=vals)
+        db.execute(stmt)
 
-    # Атомарный upsert ПО ОДНОМУ полю: не перетирает остальные столбцы и не
-    # падает на гонке (дубликат PK при одновременном первом редактировании).
-    stmt = pg_insert(B.__table__).values(
-        bin=data.bin, updated_by=current_user.username, updated_at=now,
-        **{field: status_val})
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["bin"],
-        set_={field: status_val, "updated_by": current_user.username, "updated_at": now})
-    db.execute(stmt)
-    log_change(status_val)
+    # Журнал — только реальное изменение (значение или его данные)
+    if (old_detail or None) != (new_detail or None):
+        db.add(models.BinStatusHistory(
+            bin=data.bin, field=field, old_value=old_detail, new_value=new_detail,
+            changed_by=current_user.username, changed_at=now))
+
+    # Уведомления — только при смене самого значения на «сигнальное»
+    if status_val and status_val != old_val:
+        rule = NOTIFY_RULES.get((field, status_val))
+        if rule:
+            _notify(db, bin_=data.bin, target=rule[0], message=rule[1],
+                    actor=current_user.username, now=now)
+
     db.commit()
-    return {"bin": data.bin, "field": field, "status": status_val}
+    row = db.query(B).filter(B.bin == data.bin).first()
+    return {"bin": data.bin, "field": field, "status": status_val,
+            "row": _bin_status_row_dict(row)}
+
+
+def _bin_status_row_dict(r):
+    """Все поля статусов строки bin_status для фронта (или пусто, если строки нет)."""
+    if not r:
+        return {"manual_status": None, "kgit_status": None, "meeting_status": None,
+                "status_date": None, "kgit_date": None, "kgit_time": None,
+                "kgit_place": None, "kgit_reason": None,
+                "meeting_date": None, "meeting_reason": None}
+    iso = lambda d: d.isoformat() if d else None
+    return {"manual_status": r.status, "kgit_status": r.kgit_status,
+            "meeting_status": r.meeting_status,
+            "status_date": iso(r.status_date), "kgit_date": iso(r.kgit_date),
+            "kgit_time": r.kgit_time, "kgit_place": r.kgit_place, "kgit_reason": r.kgit_reason,
+            "meeting_date": iso(r.meeting_date), "meeting_reason": r.meeting_reason}
 
 
 # Последнее изменение по каждому (БИН, столбец) — для подсказки «кто/когда» в ячейке.
@@ -1259,6 +1440,69 @@ def get_bin_status_history(
     } for r in rows]
 
 
+# ============ УВЕДОМЛЕНИЯ (колокольчик) ============
+
+def _unread_count(db, user_id) -> int:
+    N = models.Notification
+    return db.query(func.count(N.id)).filter(N.user_id == user_id, N.read_at.is_(None)).scalar() or 0
+
+
+@app.get("/api/notifications/unread-count")
+def notifications_unread_count(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    """Число непрочитанных — для красного счётчика (лёгкий запрос для опроса)."""
+    return {"unread": _unread_count(db, current_user.id)}
+
+
+@app.get("/api/notifications")
+def list_notifications(
+    limit: int = Query(30, ge=1, le=200),
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    """Последние уведомления пользователя (непрочитанные сверху, затем по дате)."""
+    N = models.Notification
+    rows = (db.query(N).filter(N.user_id == current_user.id)
+            .order_by(N.read_at.isnot(None), N.created_at.desc(), N.id.desc())
+            .limit(limit).all())
+    return {
+        "unread": _unread_count(db, current_user.id),
+        "items": [{
+            "id": r.id, "bin": r.bin, "kind": r.kind, "message": r.message,
+            "created_by": r.created_by,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "read": r.read_at is not None,
+        } for r in rows],
+    }
+
+
+@app.post("/api/notifications/{notif_id}/read")
+def mark_notification_read(
+    notif_id: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    N = models.Notification
+    db.query(N).filter(N.id == notif_id, N.user_id == current_user.id, N.read_at.is_(None)) \
+        .update({"read_at": datetime.now()}, synchronize_session=False)
+    db.commit()
+    return {"unread": _unread_count(db, current_user.id)}
+
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    N = models.Notification
+    db.query(N).filter(N.user_id == current_user.id, N.read_at.is_(None)) \
+        .update({"read_at": datetime.now()}, synchronize_session=False)
+    db.commit()
+    return {"unread": 0}
+
+
 @app.get("/api/insurance/status/export")
 def export_bin_status(
     only_set: bool = False,
@@ -1278,16 +1522,18 @@ def export_bin_status(
     wb = xlsxwriter.Workbook(tmp.name, {'constant_memory': True})
     ws = wb.add_worksheet('Статусы')
     header_fmt = wb.add_format({'bold': True})
-    ws.set_column(0, 0, 16)
-    ws.set_column(1, 1, 60)
-    ws.set_column(2, 2, 24)
-    ws.set_column(3, 3, 52)
-    for c, h in enumerate(['БИН', 'Статус', 'Статус КГИТ', 'Статус встречи']):
+    headers = ['БИН', 'Статус', 'Дата статуса',
+               'Статус КГИТ', 'Дата КГИТ', 'Время', 'Место', 'Причина (КГИТ)',
+               'Статус встречи', 'Дата итога', 'Причина (итог)']
+    widths = [16, 50, 13, 24, 12, 8, 30, 36, 28, 12, 36]
+    for c, (h, w) in enumerate(zip(headers, widths)):
+        ws.set_column(c, c, w)
         ws.write_string(0, c, h, header_fmt)
     ws.freeze_panes(1, 0)
 
     S, B = models.CompanySummary, models.BinStatus
-    cols = (B.status, B.kgit_status, B.meeting_status)
+    cols = (B.status, B.status_date, B.kgit_status, B.kgit_date, B.kgit_time,
+            B.kgit_place, B.kgit_reason, B.meeting_status, B.meeting_date, B.meeting_reason)
     if only_set:
         q = db.query(B.bin, *cols).order_by(B.bin)
     else:
@@ -1296,13 +1542,19 @@ def export_bin_status(
              .outerjoin(B, B.bin == S.bin)
              .order_by(S.bin))
 
+    def cell(v):
+        if v is None:
+            return ''
+        if hasattr(v, 'strftime'):
+            return v.strftime('%d.%m.%Y')
+        return str(v)
+
     row = 0
-    for b, s, k, mt in q.yield_per(5000):
+    for rec in q.yield_per(5000):
         row += 1
-        ws.write_string(row, 0, bin12(b))
-        ws.write_string(row, 1, s or '')
-        ws.write_string(row, 2, k or '')
-        ws.write_string(row, 3, mt or '')
+        ws.write_string(row, 0, bin12(rec[0]))
+        for c, v in enumerate(rec[1:], start=1):
+            ws.write_string(row, c, cell(v))
     wb.close()
 
     return FileResponse(
@@ -1390,8 +1642,7 @@ def get_records(
     bins = [it.bin for it in items if it.bin is not None]
     if bins:
         B = models.BinStatus
-        st = {r.bin: r for r in db.query(B.bin, B.status, B.kgit_status, B.meeting_status)
-              .filter(B.bin.in_(bins)).all()}
+        st = {r.bin: r for r in db.query(B).filter(B.bin.in_(bins)).all()}
         meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
         for it in items:
             r = st.get(it.bin)
@@ -1399,6 +1650,13 @@ def get_records(
                 it.manual_status = r.status
                 it.kgit_status = r.kgit_status
                 it.meeting_status = r.meeting_status
+                it.status_date = r.status_date
+                it.kgit_date = r.kgit_date
+                it.kgit_time = r.kgit_time
+                it.kgit_place = r.kgit_place
+                it.kgit_reason = r.kgit_reason
+                it.meeting_date = r.meeting_date
+                it.meeting_reason = r.meeting_reason
             it.status_meta = meta.get(it.bin)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)

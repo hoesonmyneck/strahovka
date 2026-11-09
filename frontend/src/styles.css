@@ -933,6 +933,88 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Значение + подпись (дата/время/место/причина) — в две строки */
+.status-cell-wrap .status-trigger { height: auto; min-height: 28px; padding: 3px 8px; }
+.status-trigger-body {
+  display: flex; flex-direction: column; justify-content: center;
+  flex: 1 1 auto; min-width: 0; line-height: 1.2;
+}
+.status-trigger-sub {
+  font-size: 10.5px; color: #8a94a8; line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.status-readonly .status-trigger-body { width: 100%; }
+
+/* Форма доп. данных статуса (дата/время/место/причина) */
+.sx-overlay {
+  position: fixed; inset: 0; z-index: 10050; background: rgba(15, 23, 42, .35);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.sx-modal {
+  width: min(420px, 100%); background: #fff; border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .25); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.sx-head { padding: 14px 18px 10px; border-bottom: 1px solid #eef1f6; }
+.sx-title { font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-status { font-size: 15px; font-weight: 700; color: #1f2937; margin-top: 3px; }
+.sx-body { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+.sx-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #555; }
+.sx-field i { color: #e5484d; font-style: normal; margin-left: 2px; }
+.sx-field input, .sx-field textarea {
+  font: inherit; font-size: 13px; color: #1f2937; padding: 7px 9px;
+  border: 1px solid #c9d2e3; border-radius: 6px; outline: none; resize: vertical;
+}
+.sx-field input:focus, .sx-field textarea:focus { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, .15); }
+.sx-err { font-size: 12px; color: #c62828; background: #fdecea; border-radius: 6px; padding: 7px 9px; }
+.sx-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; background: #f7f8fb; border-top: 1px solid #eef1f6; }
+.sx-cancel, .sx-save { font: inherit; font-size: 13px; padding: 7px 16px; border-radius: 6px; cursor: pointer; }
+.sx-cancel { background: #fff; border: 1px solid #c9d2e3; color: #444; }
+.sx-save { background: #667eea; border: 1px solid #667eea; color: #fff; font-weight: 600; }
+.sx-save:disabled { opacity: .6; cursor: default; }
+
+/* Колокольчик уведомлений */
+.notif-wrap { position: relative; display: inline-flex; }
+.notif-btn {
+  position: relative; width: 38px; height: 38px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #f3f5fa; border: 1px solid #dfe3ec; border-radius: 50%;
+  color: #4b5563; cursor: pointer; transition: background .15s, color .15s;
+}
+.notif-btn:hover, .notif-btn.on { background: #eef1fb; color: #4a5bd0; border-color: #c9d2f0; }
+.notif-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #e5484d; color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+  border-radius: 999px; border: 2px solid #fff; box-sizing: content-box;
+}
+.notif-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 10020;
+  width: 380px; max-height: 460px; display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #c9d2e3; border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .2); overflow: hidden; text-align: left;
+}
+.notif-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
+  font-size: 13px; font-weight: 700; color: #1f2937; background: #f5f7fb; border-bottom: 1px solid #e3e8f2;
+}
+.notif-head button { background: none; border: none; color: #4a5bd0; font-size: 12px; cursor: pointer; padding: 0; }
+.notif-body { overflow-y: auto; min-height: 0; }
+.notif-empty { padding: 22px 14px; font-size: 12px; color: #888; text-align: center; }
+.notif-item {
+  display: flex; gap: 10px; width: 100%; padding: 10px 14px; text-align: left;
+  background: #fff; border: none; border-bottom: 1px solid #eef1f6; cursor: pointer; font: inherit;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: #f6f8fd; }
+.notif-item.unread { background: #f3f6ff; }
+.notif-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; background: transparent; }
+.notif-item.unread .notif-dot { background: #4a5bd0; }
+.notif-item.unread .notif-dot.to_gak { background: #e08a00; }
+.notif-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.notif-msg { font-size: 13px; color: #1f2937; line-height: 1.3; }
+.notif-item.unread .notif-msg { font-weight: 600; }
+.notif-meta { font-size: 11px; color: #888; }
 .status-caret { color: #888; font-size: 10px; flex: 0 0 auto; }
 
 .status-menu {

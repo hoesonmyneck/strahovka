@@ -622,6 +622,20 @@
   box-shadow: var(--h-glow);
 }
 
+/* колокольчик в HUD-шапке */
+.hud-active .notif-btn {
+  background: rgba(10, 24, 60, .7);
+  border: 1px solid var(--h-line);
+  color: #eaf4ff;
+}
+.hud-active .notif-btn:hover,
+.hud-active .notif-btn.on {
+  background: rgba(34, 211, 238, .14);
+  border-color: var(--h-line-hi);
+  color: #fff;
+}
+.hud-active .notif-badge { border-color: #0b1a3d; }
+
 /* переключатель разделов — тёмная капсула */
 .hud-active .section-toggle {
   background: rgba(8, 20, 52, .72);

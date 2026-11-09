@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
+import datetime as _dt  # для поля с именем «date» (чтобы имя не затеняло тип)
 
 class InsuranceRecordBase(BaseModel):
     row_num: Optional[int] = None
@@ -42,6 +43,14 @@ class InsuranceRecordResponse(InsuranceRecordBase):
     manual_status: Optional[str] = None   # «Статус» (обзвон)
     kgit_status: Optional[str] = None     # «Статус КГИТ»
     meeting_status: Optional[str] = None  # «Статус встречи»
+    # Доп. данные статусов (дата/время/место/причина)
+    status_date: Optional[date] = None
+    kgit_date: Optional[date] = None
+    kgit_time: Optional[str] = None
+    kgit_place: Optional[str] = None
+    kgit_reason: Optional[str] = None
+    meeting_date: Optional[date] = None
+    meeting_reason: Optional[str] = None
     # Кто/когда последний раз менял каждый столбец: {field: {by, at}}
     status_meta: Optional[dict] = None
 
@@ -53,6 +62,11 @@ class BinStatusUpdate(BaseModel):
     bin: int
     status: Optional[str] = None
     field: Optional[str] = "status"       # status | kgit_status | meeting_status
+    # Доп. данные к статусу (что обязательно — см. STATUS_EXTRAS на бэкенде)
+    date: Optional[_dt.date] = None
+    time: Optional[str] = None
+    place: Optional[str] = None
+    reason: Optional[str] = None
 
 class InsuranceRecordList(BaseModel):
     items: List[InsuranceRecordResponse]
