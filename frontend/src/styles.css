@@ -933,17 +933,28 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Значение + подпись (дата/время/место/причина) — в две строки */
-.status-cell-wrap .status-trigger { height: auto; min-height: 28px; padding: 3px 8px; }
+/* Ячейки трёх столбцов статусов: содержимое — на всю ширину столбца,
+   независимо от выбранного значения (иначе обёртка сжималась по тексту). */
+.ag-theme-alpine .status-col-cell { padding-left: 6px; padding-right: 6px; }
+.ag-theme-alpine .status-col-cell > * { flex: 1 1 auto; width: 100%; min-width: 0; }
+.status-cell-wrap { height: 32px; }
+
+/* Поле статуса: одна высота для всех значений (с подписью и без), в строку влезает */
+.status-cell-wrap .status-trigger,
+.status-cell-wrap .status-readonly {
+  height: 32px; min-height: 0; padding: 2px 8px; box-sizing: border-box;
+  display: flex; align-items: center;
+}
+.status-cell-wrap .status-readonly { border: 1px solid transparent; }
 .status-trigger-body {
   display: flex; flex-direction: column; justify-content: center;
-  flex: 1 1 auto; min-width: 0; line-height: 1.2;
+  flex: 1 1 auto; min-width: 0;
 }
+.status-trigger-text { font-size: 12px; line-height: 14px; }
 .status-trigger-sub {
-  font-size: 10.5px; color: #8a94a8; line-height: 1.15;
+  font-size: 10px; color: #8a94a8; line-height: 12px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.status-readonly .status-trigger-body { width: 100%; }
 
 /* Форма доп. данных статуса (дата/время/место/причина) */
 .sx-overlay {

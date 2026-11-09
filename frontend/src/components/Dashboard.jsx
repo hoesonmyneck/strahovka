@@ -807,6 +807,7 @@ const Dashboard = () => {
       filter: false,
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'status' },
+      cellClass: 'status-col-cell',
       cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
     {
@@ -819,6 +820,7 @@ const Dashboard = () => {
       headerClass: 'kgit-header',
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'kgit_status' },
+      cellClass: 'status-col-cell',
       cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center', background: '#eceef2' },
     },
     {
@@ -830,6 +832,7 @@ const Dashboard = () => {
       filter: false,
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'meeting_status' },
+      cellClass: 'status-col-cell',
       cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
   ], [])  // useMemo — колонки не пересоздаются при ре-рендере
