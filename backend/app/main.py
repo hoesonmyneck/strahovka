@@ -102,8 +102,9 @@ with engine.connect() as _conn:
            FROM old JOIN upd ON upd.bin = old.bin""",
         # «Статус» (ГАК): старые длинные названия → короткие со схемы статусов.
         # Идемпотентно (только по старым названиям), атомарно (CTE), в журнал.
+        # («Контактный номер некорректный/отключен/отсутствует» — ОТДЕЛЬНЫЙ
+        #  статус, не «Нет номера»: в переименование не входит.)
         """WITH map(old_v, new_v) AS (VALUES
-               ('Контактный номер некорректный/отключен/отсутствует', 'Нет номера'),
                ('Заключил/планирует заключить договор ОСНС в другом КСЖ', 'В другом КСЖ'),
                ('Отказ от заключения договора ОСНС', 'Отказ'),
                ('Отсутствие наемных работников', 'Нет работников'),
@@ -120,6 +121,29 @@ with engine.connect() as _conn:
            INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
            SELECT old.bin, 'status', old.old_v, old.new_v, 'system-migration', NOW()
            FROM old JOIN upd ON upd.bin = old.bin""",
+        # Откат ошибочного переименования «Контактный номер…» → «Нет номера».
+        # Возвращаем ТОЛЬКО строки, где последнее изменение «Статус» — это та
+        # самая миграция (пользователь после неё ничего не менял). Если человек
+        # сам поставил «Нет номера» — не трогаем. Идемпотентно: после отката
+        # последняя запись журнала — уже откат, условие больше не выполняется.
+        """WITH last AS (
+               SELECT DISTINCT ON (bin) bin, changed_by, old_value, new_value
+               FROM bin_status_history WHERE field = 'status'
+               ORDER BY bin, changed_at DESC, id DESC
+           ), old AS (
+               SELECT b.bin FROM bin_status b JOIN last l ON l.bin = b.bin
+               WHERE b.status = 'Нет номера'
+                 AND l.changed_by = 'system-migration'
+                 AND l.old_value = 'Контактный номер некорректный/отключен/отсутствует'
+                 AND l.new_value = 'Нет номера'
+           ), upd AS (
+               UPDATE bin_status b SET status = 'Контактный номер некорректный/отключен/отсутствует'
+               FROM old WHERE b.bin = old.bin RETURNING b.bin
+           )
+           INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
+           SELECT upd.bin, 'status', 'Нет номера',
+                  'Контактный номер некорректный/отключен/отсутствует', 'system-migration', NOW()
+           FROM upd""",
         # Уведомления (колокольчик)
         """CREATE TABLE IF NOT EXISTS notifications (
                id         SERIAL PRIMARY KEY,
@@ -936,11 +960,17 @@ def dashboard_kpis(
     by_size.sort(key=lambda x: SIZE_ORDER.get(x["label"], 99))
 
     # Ручные статусы (глобально; привязка к региону — через join, для простоты опускаем)
-    by_status = [
-        {"label": r[0], "value": r[1]}
-        for r in db.query(models.BinStatus.status, func.count())
-        .group_by(models.BinStatus.status).order_by(func.count().desc()).all()
-    ]
+    # Рейтинг по каждому из трёх столбцов: ГАК (status), КГИТ, итог встречи.
+    def _status_rank(col):
+        return [
+            {"label": r[0], "value": r[1]}
+            for r in db.query(col, func.count())
+            .filter(col.isnot(None), col != "")
+            .group_by(col).order_by(func.count().desc()).all()
+        ]
+    by_status = _status_rank(models.BinStatus.status)
+    by_status_kgit = _status_rank(models.BinStatus.kgit_status)
+    by_status_meeting = _status_rank(models.BinStatus.meeting_status)
 
     # Рейтинг заполненности статусов по регионам: из всех предприятий региона
     # (как в таблице страхования) сколько уже имеют проставленный статус.
@@ -979,6 +1009,8 @@ def dashboard_kpis(
         "by_region": by_region,
         "by_insurer": by_insurer,
         "by_status": by_status,
+        "by_status_kgit": by_status_kgit,
+        "by_status_meeting": by_status_meeting,
         "by_size": by_size,
         "region_table": region_table,
         "status_fill": status_fill,
@@ -1132,35 +1164,63 @@ def status_activity(
     year: int,
     month: int = Query(..., ge=1, le=12),
     region: Optional[str] = None,
+    field: str = "status",
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
     """Активность проставления статусов: по каждому статусу — сколько проставлено
-    в каждый день выбранного месяца. Фильтр по региону (через company_summary)."""
+    в каждый день выбранного месяца. Фильтр по региону (через company_summary).
+    field: status (ГАК, как раньше — по текущим статусам и дате обновления),
+    kgit_status / meeting_status — по журналу изменений (дата смены именно этого
+    столбца; updated_at строки общий на три столбца и для них не годится)."""
     import calendar
     B = models.BinStatus
     S = models.CompanySummary
+    H = models.BinStatusHistory
+    if field not in ("status", "kgit_status", "meeting_status"):
+        raise HTTPException(400, "Неизвестный столбец статуса")
     # Региональный пользователь — только свой регион
     if current_user.region:
         region = current_user.region
 
     days_in_month = calendar.monthrange(year, month)[1]
-    day_expr = func.extract('day', B.updated_at)
-
-    q = (db.query(B.status, day_expr.label('d'), func.count().label('c'))
-         .filter(B.status.isnot(None), B.status != "",
-                 func.extract('year', B.updated_at) == year,
-                 func.extract('month', B.updated_at) == month))
-    if region:
-        q = q.join(S, S.bin == B.bin).filter(S.obl_name == region)
-    rows = q.group_by(B.status, day_expr).all()
-
     agg = {}
-    for status, d, c in rows:
-        agg.setdefault(status, {})[int(d)] = int(c)
+
+    if field == "status":
+        day_expr = func.extract('day', B.updated_at)
+        q = (db.query(B.status, day_expr.label('d'), func.count().label('c'))
+             .filter(B.status.isnot(None), B.status != "",
+                     func.extract('year', B.updated_at) == year,
+                     func.extract('month', B.updated_at) == month))
+        if region:
+            q = q.join(S, S.bin == B.bin).filter(S.obl_name == region)
+        for status, d, c in q.group_by(B.status, day_expr).all():
+            agg.setdefault(status, {})[int(d)] = int(c)
+        base_list = INSURANCE_STATUSES
+    else:
+        base_list = KGIT_STATUSES if field == "kgit_status" else MEETING_STATUSES
+        # В журнале значение с деталями: «Встреча назначена (12.11.2026 14:00, …)»
+        known = sorted(base_list, key=len, reverse=True)
+        def base_of(v):
+            for s in known:
+                if v == s or v.startswith(s + " ("):
+                    return s
+            return v.split(" (")[0]
+        q = (db.query(H.new_value, H.changed_at)
+             .filter(H.field == field, H.new_value.isnot(None),
+                     H.changed_by != "system-migration",
+                     func.extract('year', H.changed_at) == year,
+                     func.extract('month', H.changed_at) == month))
+        if region:
+            q = q.join(S, S.bin == H.bin).filter(S.obl_name == region)
+        for val, at in q.all():
+            s = base_of(val)
+            day = at.day
+            agg.setdefault(s, {})
+            agg[s][day] = agg[s].get(day, 0) + 1
 
     # Ось Y: все статусы из справочника + любые нестандартные, что встретились
-    status_order = list(INSURANCE_STATUSES)
+    status_order = list(base_list)
     for s in agg:
         if s not in status_order:
             status_order.append(s)
@@ -1201,6 +1261,7 @@ INSURANCE_STATUSES = [
     "Ликвидация",
     "Филиал/ГУ",
     "Нет номера",
+    "Контактный номер некорректный/отключен/отсутствует",
     "Иное",
     "Для работы ДКГИТ",
 ]
@@ -1311,6 +1372,20 @@ def _notify(db, *, bin_, target, message, actor, now):
                                    created_by=actor, created_at=now))
 
 
+STATUS_FIELD_TITLES = {"status": "Статус ГАК", "kgit_status": "Статус КГИТ",
+                       "meeting_status": "Статус встречи"}
+
+
+def _notify_admins(db, *, bin_, field, old_val, new_val, actor, now):
+    """Всем активным админам — о любой смене статуса (в т.ч. своей)."""
+    S, U = models.CompanySummary, models.User
+    name = db.query(S.bin_name).filter(S.bin == bin_).scalar() or str(bin_).zfill(12)
+    msg = f"{STATUS_FIELD_TITLES.get(field, field)}: {old_val or '—'} → {new_val or '—'}: {name}"[:500]
+    for (uid,) in db.query(U.id).filter(U.role == "admin", U.is_active == 1).all():
+        db.add(models.Notification(user_id=uid, bin=bin_, kind="to_admin", message=msg,
+                                   created_by=actor, created_at=now))
+
+
 @app.patch("/api/insurance/status")
 def set_bin_status(
     data: schemas.BinStatusUpdate,
@@ -1326,11 +1401,13 @@ def set_bin_status(
         raise HTTPException(400, "Неизвестный столбец статуса")
     spec = STATUS_FIELDS[field]
     is_dkgit = current_user.role == "dkgit"
-    # Ролевой доступ к столбцу
-    if spec["dkgit_only"] and not is_dkgit:
-        raise HTTPException(403, "Этот столбец заполняет только ДКГИТ")
-    if not spec["dkgit_only"] and is_dkgit:
-        raise HTTPException(403, "Роль ДКГИТ заполняет только «Статус КГИТ»")
+    is_admin = current_user.role == "admin"
+    # Ролевой доступ к столбцу (админ может редактировать все три)
+    if not is_admin:
+        if spec["dkgit_only"] and not is_dkgit:
+            raise HTTPException(403, "Этот столбец заполняет только ДКГИТ")
+        if not spec["dkgit_only"] and is_dkgit:
+            raise HTTPException(403, "Роль ДКГИТ заполняет только «Статус КГИТ»")
 
     status_val = (data.status or "").strip()
     if status_val and status_val not in spec["options"]:
@@ -1400,6 +1477,11 @@ def set_bin_status(
         if rule:
             _notify(db, bin_=data.bin, target=rule[0], message=rule[1],
                     actor=current_user.username, now=now)
+    # Админам — о ЛЮБОЙ смене значения любого столбца, включая свою
+    # (для демонстраций: поменял статус — сразу видно уведомление)
+    if (status_val or None) != (old_val or None):
+        _notify_admins(db, bin_=data.bin, field=field, old_val=old_val,
+                       new_val=status_val or None, actor=current_user.username, now=now)
 
     db.commit()
     row = db.query(B).filter(B.bin == data.bin).first()

@@ -533,28 +533,65 @@ function HudExpiry() {
   )
 }
 
+// Режимы для рейтинга и активности статусов: какой из трёх столбцов показывать
+const STATUS_MODES = [
+  { key: 'status',         label: 'Статус ГАК' },
+  { key: 'kgit_status',    label: 'Статус КГИТ' },
+  { key: 'meeting_status', label: 'Статус встречи' },
+]
+function HudStatusTabs({ value, onChange }) {
+  return (
+    <div className="hud-tabs" role="tablist">
+      {STATUS_MODES.map((m) => (
+        <button key={m.key} type="button" role="tab" aria-selected={value === m.key}
+          className={'hud-tab-btn' + (value === m.key ? ' active' : '')}
+          onClick={() => onChange(m.key)}>
+          {m.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Рейтинг статусов с переключением столбца (по умолчанию — Статус ГАК)
+function HudStatusRanking({ ins }) {
+  const [mode, setMode] = useState('status')
+  const items = mode === 'kgit_status' ? (ins.by_status_kgit || [])
+    : mode === 'meeting_status' ? (ins.by_status_meeting || [])
+    : (ins.by_status || [])
+  return (
+    <HudCard id="sec-status-rank" title="Рейтинг статусов" wide>
+      <div className="hud-activity-bar"><HudStatusTabs value={mode} onChange={setMode} /></div>
+      {items.length === 0
+        ? <div className="hud-act-empty">Нет проставленных статусов</div>
+        : <HudRanking items={items} color="var(--h-blue)" />}
+    </HudCard>
+  )
+}
+
 // Активность статусов: по статусам (Y) × дни месяца, фильтры месяц + регион
 function HudStatusActivity() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [region, setRegion] = useState('')
+  const [mode, setMode] = useState('status')   // по умолчанию — Статус ГАК
   const [month, setMonth] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
 
-  const load = useCallback(async (m, reg) => {
+  const load = useCallback(async (m, reg, field) => {
     const [y, mo] = (m || '').split('-')
     if (!y || !mo) return
     setLoading(true)
     try {
-      const params = { year: Number(y), month: Number(mo) }
+      const params = { year: Number(y), month: Number(mo), field }
       if (reg) params.region = reg
       const res = await api.get('/api/dashboard/status-activity', { params })
       setData(res.data)
     } catch { setData(null) } finally { setLoading(false) }
   }, [])
-  useEffect(() => { load(month, region) }, [month, region, load])
+  useEffect(() => { load(month, region, mode) }, [month, region, mode, load])
 
   const regions = data?.regions || []
   const rows = (data?.statuses || []).filter((s) => s.total > 0)
@@ -565,6 +602,7 @@ function HudStatusActivity() {
   return (
     <HudCard id="sec-status-act" title="Активность статусов" wide>
       <div className="hud-activity-bar">
+        <HudStatusTabs value={mode} onChange={setMode} />
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
         <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
           <option value="">Все регионы</option>
@@ -763,7 +801,8 @@ const DashboardHud = () => {
     { id: 'sec-form', label: 'Форма предприятия' },
     ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Рейтинг страховых компаний' }] : []),
     ...(ins.by_size?.length ? [{ id: 'sec-size', label: 'Размер предприятия' }] : []),
-    ...(ins.by_status?.length ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
+    ...((ins.by_status?.length || ins.by_status_kgit?.length || ins.by_status_meeting?.length)
+      ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
     { id: 'sec-status-act', label: 'Активность статусов' },
     ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: 'Заполненность статусов по регионам' }] : []),
     ...(op ? [{ id: 'sec-oked', label: 'Рейтинг ОКЭД по сотрудникам' }] : []),
@@ -811,13 +850,11 @@ const DashboardHud = () => {
           </HudCard>
         </div>
       )}
-      {ins.by_status && ins.by_status.length > 0 && (
+      {(ins.by_status?.length || ins.by_status_kgit?.length || ins.by_status_meeting?.length) ? (
         <div className="hud-charts">
-          <HudCard id="sec-status-rank" title="Рейтинг статусов" wide>
-            <HudRanking items={ins.by_status} color="var(--h-blue)" />
-          </HudCard>
+          <HudStatusRanking ins={ins} />
         </div>
-      )}
+      ) : null}
       <div className="hud-charts"><HudStatusActivity /></div>
       {ins.status_fill && ins.status_fill.length > 0 && (
         <div className="hud-charts">

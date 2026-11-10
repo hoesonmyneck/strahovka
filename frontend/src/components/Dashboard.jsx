@@ -204,10 +204,12 @@ const NotificationBell = ({ onOpenBin }) => {
     const onVisible = () => { if (document.visibilityState === 'visible') loadCount() }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', loadCount)
+    window.addEventListener('notif-refresh', loadCount)   // сразу после смены статуса
     return () => {
       clearInterval(t)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', loadCount)
+      window.removeEventListener('notif-refresh', loadCount)
     }
   }, [loadCount])
 
@@ -391,8 +393,9 @@ const StatusCellRenderer = (params) => {
   const value = params.value || ''
   // Кто может редактировать этот столбец
   const isDkgit = !!ctx.isDkgit
+  const isAdminUser = !!ctx.isAdmin   // админ редактирует все три столбца
   let editable
-  if (key === 'kgit_status') editable = isDkgit
+  if (key === 'kgit_status') editable = isDkgit || isAdminUser
   else if (key === 'meeting_status') editable = !isDkgit && params.data?.kgit_status === MEETING_REQUIRES_KGIT
   else editable = !isDkgit  // status
   // Подпись под значением (дата/время/место/причина) + подсказка «кто и когда»
@@ -1431,6 +1434,8 @@ const Dashboard = () => {
           status_meta: { ...(r.status_meta || {}), [field]: { by: user?.username, at: nowIso } },
         }
       }))
+      // Колокольчик обновляем сразу (не ждём 30 с) — удобно на демонстрациях
+      window.dispatchEvent(new Event('notif-refresh'))
       return true
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Не удалось сохранить статус')
@@ -1440,7 +1445,7 @@ const Dashboard = () => {
 
   // Контекст для AG Grid: справочники трёх столбцов + роль + обработчик
   const gridContext = useMemo(
-    () => ({ statusDefs: statusOptions, isDkgit: isDkgit(), onStatusChange }),
+    () => ({ statusDefs: statusOptions, isDkgit: isDkgit(), isAdmin: isAdmin(), onStatusChange }),
     [statusOptions, onStatusChange, user],
   )
 
