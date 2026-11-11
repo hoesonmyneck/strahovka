@@ -1673,67 +1673,82 @@ def company_passport(
         return str(int(v)).zfill(12) if v is not None else None
 
     def rows(pairs):
-        # Только заполненные поля — пустые строки в паспорте не показываем
-        return [[k, v] for k, v in pairs if v not in (None, "")]
+        # КАЖДЫЙ столбец таблицы показываем всегда (пустое — «—»), чтобы в
+        # паспорте было всё, что в таблице. Подписи — как в заголовках таблицы.
+        # Служебные строки «изменил» — только если есть данные.
+        out = []
+        for k, v in pairs:
+            if v in (None, ""):
+                if k.startswith("  "):
+                    continue
+                v = "—"
+            out.append([k, v])
+        return out
 
     leader = " ".join(x for x in (s.leader_surname, s.leader_name, s.leader_middlename) if x) or None
-    ins_status = {1: "Застрахован", 0: "Не застрахован"}.get(s.status, "Не обязан / прочее")
+    # «Застрахован» — как в столбце таблицы: Да / Нет / —
+    insured = {1: "Да", 0: "Нет"}.get(s.status)
     sections = [
         {"title": "Основные сведения", "rows": rows([
             ("БИН", bin12(s.bin)),
-            ("Наименование", s.bin_name),
+            ("Название компании", s.bin_name),
             ("Форма предприятия", {1: "ИП", 0: "ЮЛ"}.get(s.ip)),
-            ("ОПФ", s.opf_name),
             ("Размер предприятия", s.org_size),
-            ("Регион", s.obl_name),
+            ("ОПФ", s.opf_name),
+            ("Код ОКЭД", s.id_oked),
+            ("Вид деятельности (ОКЭД)", s.name_oked),
+            ("Область", s.obl_name),
             ("Район", s.rai_name),
             ("Адрес", s.address),
             ("Телефон", s.phone),
             ("Руководитель", leader),
-            ("ОКЭД", " — ".join(x for x in (s.id_oked, s.name_oked) if x) or None),
-        ])},
-        {"title": "Сотрудники и ФОТ", "rows": rows([
-            ("Всего сотрудников", fn(s.total_employees_count)),
-            ("Застраховано сотрудников", fn(s.count_employees)),
-            ("Кол-во за 12 мес.", fn(s.kol_12mes)),
-            ("ФОТ за 12 мес.", fn(s.fot_12mes)),
-            ("Активные трудовые договоры", fn(s.esutd_akt_td)),
         ])},
         {"title": "Страхование", "rows": rows([
-            ("Статус страхования", ins_status),
+            ("Застрахован", insured),
+            ("БИН страховой компании", bin12(s.system_delimiter_bin)),
             ("Страховая компания", s.system_delimiter_bin_name),
-            ("БИН страховой", bin12(s.system_delimiter_bin)),
-            ("№ договора", s.contract_number),
+            ("№ Договора", s.contract_number),
             ("Дата договора", fd(s.contract_date)),
-            ("Начало", fd(s.date_beg)),
-            ("Окончание", fd(s.date_end)),
-            ("Расторжение", fd(s.rescinding_date)),
+            ("Дата начала", fd(s.date_beg)),
+            ("Дата окончания", fd(s.date_end)),
+            ("Дата расторжения", fd(s.rescinding_date)),
             ("Сумма", fn(s.calculated_amount, 2)),
+        ])},
+        {"title": "Сотрудники и ФОТ", "rows": rows([
+            ("Застрахованных", fn(s.count_employees)),
+            ("Всего сотр.", fn(s.total_employees_count)),
+            ("Кол-во 12 мес.", fn(s.kol_12mes)),
+            ("ФОТ 12 мес.", fn(s.fot_12mes)),
+            ("Активные трудовые договора", fn(s.esutd_akt_td)),
         ])},
     ]
 
-    # Статусы обзвона / КГИТ / итога (с датами и причинами)
+    # Статусы (с датами/временем/причинами) — секция есть всегда
     def stat(v, d=None, t=None, r=None):
         if not v:
             return None
         extra = ", ".join(x for x in ((fd(d) or "") + (f" {t}" if t else ""), r or "") if x.strip())
         return f"{v} ({extra})" if extra else v
-    if st:
-        meta = _status_meta_for_bins(db, [bin_]).get(bin_, {})
-        def who(f):
-            m_ = meta.get(f)
-            if not m_:
-                return None
-            at = m_.get("at")
-            return f"{m_.get('by') or '—'} · {datetime.fromisoformat(at).strftime('%d.%m.%Y %H:%M') if at else ''}"
-        sections.append({"title": "Статусы", "rows": rows([
-            ("Статус ГАК", stat(st.status, st.status_date)),
-            ("  изменил", who("status")),
-            ("Статус КГИТ", stat(st.kgit_status, st.kgit_date, st.kgit_time, st.kgit_reason)),
-            ("  изменил", who("kgit_status")),
-            ("Статус встречи", stat(st.meeting_status, st.meeting_date, None, st.meeting_reason)),
-            ("  изменил", who("meeting_status")),
-        ])})
+    meta = _status_meta_for_bins(db, [bin_]).get(bin_, {}) if st else {}
+    def who(f):
+        m_ = meta.get(f)
+        if not m_:
+            return None
+        at = m_.get("at")
+        return f"{m_.get('by') or '—'} · {datetime.fromisoformat(at).strftime('%d.%m.%Y %H:%M') if at else ''}"
+    sections.append({"title": "Статусы", "rows": rows([
+        ("Статус", stat(st.status, st.status_date) if st else None),
+        ("  изменил", who("status")),
+        ("Статус КГИТ", stat(st.kgit_status, st.kgit_date, st.kgit_time, st.kgit_reason) if st else None),
+        ("  изменил", who("kgit_status")),
+        ("Статус встречи", stat(st.meeting_status, st.meeting_date, None, st.meeting_reason) if st else None),
+        ("  изменил", who("meeting_status")),
+    ])})
+    # Скрытые в таблице столбцы (есть в данных и в выгрузке)
+    sections.append({"title": "Служебные", "rows": rows([
+        ("ТИП", fn(s.tip)),
+        ("Флаг", fn(s.flag_head)),
+    ])})
 
     # Все договоры по БИН из исходной выгрузки (новые сверху)
     contracts = [{
