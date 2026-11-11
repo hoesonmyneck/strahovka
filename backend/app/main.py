@@ -144,6 +144,23 @@ with engine.connect() as _conn:
            SELECT upd.bin, 'status', 'Нет номера',
                   'Контактный номер некорректный/отключен/отсутствует', 'system-migration', NOW()
            FROM upd""",
+        # «Статус встречи»: «Договор заключён» → «Договор заключен с ГАК»,
+        # «Не будет заключать» → «Отказ в заключении с ГАК». Идемпотентно,
+        # атомарно (CTE), в журнал. Дата/причина итога сохраняются как были.
+        """WITH map(old_v, new_v) AS (VALUES
+               ('Договор заключён', 'Договор заключен с ГАК'),
+               ('Договор заключен', 'Договор заключен с ГАК'),
+               ('Не будет заключать', 'Отказ в заключении с ГАК')
+           ), old AS (
+               SELECT b.bin, b.meeting_status AS old_v, map.new_v
+               FROM bin_status b JOIN map ON b.meeting_status = map.old_v
+           ), upd AS (
+               UPDATE bin_status b SET meeting_status = old.new_v
+               FROM old WHERE b.bin = old.bin RETURNING b.bin
+           )
+           INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
+           SELECT old.bin, 'meeting_status', old.old_v, old.new_v, 'system-migration', NOW()
+           FROM old JOIN upd ON upd.bin = old.bin""",
         # Уведомления (колокольчик)
         """CREATE TABLE IF NOT EXISTS notifications (
                id         SERIAL PRIMARY KEY,
@@ -1200,12 +1217,15 @@ def status_activity(
     else:
         base_list = KGIT_STATUSES if field == "kgit_status" else MEETING_STATUSES
         # В журнале значение с деталями: «Встреча назначена (12.11.2026 14:00, …)»
-        known = sorted(base_list, key=len, reverse=True)
+        # Старые названия итога в журнале сводим к новым
+        aliases = MEETING_RENAMES if field == "meeting_status" else {}
+        known = sorted(list(base_list) + list(aliases), key=len, reverse=True)
         def base_of(v):
             for s in known:
                 if v == s or v.startswith(s + " ("):
-                    return s
-            return v.split(" (")[0]
+                    return aliases.get(s, s)
+            b = v.split(" (")[0]
+            return aliases.get(b, b)
         q = (db.query(H.new_value, H.changed_at)
              .filter(H.field == field, H.new_value.isnot(None),
                      H.changed_by != "system-migration",
@@ -1275,10 +1295,18 @@ KGIT_STATUSES = [
 ]
 MEETING_STATUSES = [
     "Планирует заключить с ГАК",
-    "Договор заключён",
-    "Не будет заключать",
+    "Клиент принимает решение",
+    "Договор заключен с ГАК",
+    "Договор заключен с другим КСЖ",
+    "Отказ в заключении с ГАК",
     "Повторная встреча",
 ]
+# Переименованные значения итога (для журнала/активности: старое → новое).
+# Уже проставленные значения переводит автомиграция.
+MEETING_RENAMES = {
+    "Договор заключён": "Договор заключен с ГАК",
+    "Не будет заключать": "Отказ в заключении с ГАК",
+}
 
 # Какие строки (по основному статусу) видит роль ДКГИТ в таблице страхования.
 DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ"]
@@ -1293,11 +1321,12 @@ STATUS_FIELDS = {
 }
 
 # Доп. данные статусов по схеме: какие колонки у столбца и что обязательно
-# для конкретного значения. extra-ключи: date, time, place, reason.
+# для конкретного значения. extra-ключи: date, time, reason.
+# «Место» убрано (все встречи онлайн): колонку kgit_place больше не пишем и не
+# показываем, но уже сохранённые значения в базе не трогаем.
 STATUS_EXTRA_COLS = {
     "status":         {"date": "status_date"},
-    "kgit_status":    {"date": "kgit_date", "time": "kgit_time",
-                       "place": "kgit_place", "reason": "kgit_reason"},
+    "kgit_status":    {"date": "kgit_date", "time": "kgit_time", "reason": "kgit_reason"},
     "meeting_status": {"date": "meeting_date", "reason": "meeting_reason"},
 }
 STATUS_EXTRAS = {
@@ -1306,20 +1335,30 @@ STATUS_EXTRAS = {
                for s in INSURANCE_STATUSES},
     "kgit_status": {
         "В работе":              {"required": [], "optional": []},
-        "Встреча назначена":     {"required": ["date", "time", "place"], "optional": []},
-        "Встреча перенесена":    {"required": ["date"], "optional": ["time", "place"]},
+        "Встреча назначена":     {"required": ["date", "time"], "optional": []},
+        "Встреча перенесена":    {"required": ["date"], "optional": ["time"]},
         "Встреча не состоялась": {"required": ["date", "reason"], "optional": []},
         "Встреча проведена":     {"required": ["date"], "optional": []},
         "Отказано во встрече":   {"required": ["date", "reason"], "optional": []},
     },
     "meeting_status": {
-        "Планирует заключить с ГАК": {"required": ["date"], "optional": []},
-        "Договор заключён":          {"required": ["date"], "optional": []},
-        "Не будет заключать":        {"required": ["date", "reason"], "optional": []},
-        "Повторная встреча":         {"required": ["date"], "optional": []},
+        "Планирует заключить с ГАК":     {"required": ["date"], "optional": []},
+        "Клиент принимает решение":      {"required": ["date"], "optional": []},
+        "Договор заключен с ГАК":        {"required": ["date"], "optional": []},
+        "Договор заключен с другим КСЖ": {"required": ["date"], "optional": []},
+        "Отказ в заключении с ГАК":      {"required": ["date", "reason"], "optional": []},
+        "Повторная встреча":             {"required": ["date"], "optional": []},
     },
 }
 EXTRA_LABELS = {"date": "дата", "time": "время", "place": "место", "reason": "причина"}
+
+# Казахстан — единый UTC+5. «Сегодня» для запрета дат задним числом считаем по
+# нему, а не по часам сервера (в контейнере UTC — ночью дата отставала бы).
+KZ_UTC_OFFSET = timedelta(hours=5)
+
+
+def kz_today():
+    return (datetime.utcnow() + KZ_UTC_OFFSET).date()
 
 # Уведомления: какое событие кому уходит.
 #   to_dkgit — новый БИН / повторная встреча → ДКГИТ;
@@ -1428,6 +1467,9 @@ def set_bin_status(
             raise HTTPException(400, f"Для статуса «{status_val}» укажите: {', '.join(missing)}")
         if ex.get("time") and not re.fullmatch(r"\d{1,2}:\d{2}", ex["time"]):
             raise HTTPException(400, "Время в формате ЧЧ:ММ")
+        # Задним числом нельзя: только сегодня или будущее
+        if ex.get("date") and ex["date"] < kz_today():
+            raise HTTPException(400, "Нельзя ставить дату задним числом: только сегодня или позже")
     # Значения всех доп. колонок столбца: неприменимые к статусу — обнуляем,
     # чтобы не висели «чужие» дата/место от прошлого статуса.
     extra_vals = {col: ex.get(k) for k, col in cols.items()}
@@ -1595,6 +1637,141 @@ def mark_notification_read(
     return {"unread": _unread_count(db, current_user.id)}
 
 
+@app.get("/api/company/{bin_}/passport")
+def company_passport(
+    bin_: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    """Паспорт предприятия: реестр, текущий договор, все договоры, статусы, ОПВР.
+    Права — как в таблице: регион. пользователь — только свой регион, ДКГИТ —
+    только свои строки, ОПВР — только при доступе к ОПВР."""
+    S, B, M = models.CompanySummary, models.BinStatus, models.InsuranceRecord
+    s = db.query(S).filter(S.bin == bin_).first()
+    if not s:
+        raise HTTPException(404, "Предприятие не найдено")
+    if current_user.region and s.obl_name != current_user.region:
+        raise HTTPException(403, "Нет доступа к предприятию другого региона")
+    st = db.query(B).filter(B.bin == bin_).first()
+    if current_user.role == "dkgit" and not (st and st.status in DKGIT_VIEW_STATUSES):
+        raise HTTPException(403, "Нет доступа")
+
+    def fd(d):
+        return d.strftime("%d.%m.%Y") if d else None
+
+    def fn(v, dec=0):
+        if v is None:
+            return None
+        try:
+            x = float(v)
+        except Exception:
+            return str(v)
+        s_ = f"{x:,.{dec}f}".replace(",", " ")
+        return s_.replace(".", ",") if dec else s_
+
+    def bin12(v):
+        return str(int(v)).zfill(12) if v is not None else None
+
+    def rows(pairs):
+        # Только заполненные поля — пустые строки в паспорте не показываем
+        return [[k, v] for k, v in pairs if v not in (None, "")]
+
+    leader = " ".join(x for x in (s.leader_surname, s.leader_name, s.leader_middlename) if x) or None
+    ins_status = {1: "Застрахован", 0: "Не застрахован"}.get(s.status, "Не обязан / прочее")
+    sections = [
+        {"title": "Основные сведения", "rows": rows([
+            ("БИН", bin12(s.bin)),
+            ("Наименование", s.bin_name),
+            ("Форма предприятия", {1: "ИП", 0: "ЮЛ"}.get(s.ip)),
+            ("ОПФ", s.opf_name),
+            ("Размер предприятия", s.org_size),
+            ("Регион", s.obl_name),
+            ("Район", s.rai_name),
+            ("Адрес", s.address),
+            ("Телефон", s.phone),
+            ("Руководитель", leader),
+            ("ОКЭД", " — ".join(x for x in (s.id_oked, s.name_oked) if x) or None),
+        ])},
+        {"title": "Сотрудники и ФОТ", "rows": rows([
+            ("Всего сотрудников", fn(s.total_employees_count)),
+            ("Застраховано сотрудников", fn(s.count_employees)),
+            ("Кол-во за 12 мес.", fn(s.kol_12mes)),
+            ("ФОТ за 12 мес.", fn(s.fot_12mes)),
+            ("Активные трудовые договоры", fn(s.esutd_akt_td)),
+        ])},
+        {"title": "Страхование", "rows": rows([
+            ("Статус страхования", ins_status),
+            ("Страховая компания", s.system_delimiter_bin_name),
+            ("БИН страховой", bin12(s.system_delimiter_bin)),
+            ("№ договора", s.contract_number),
+            ("Дата договора", fd(s.contract_date)),
+            ("Начало", fd(s.date_beg)),
+            ("Окончание", fd(s.date_end)),
+            ("Расторжение", fd(s.rescinding_date)),
+            ("Сумма", fn(s.calculated_amount, 2)),
+        ])},
+    ]
+
+    # Статусы обзвона / КГИТ / итога (с датами и причинами)
+    def stat(v, d=None, t=None, r=None):
+        if not v:
+            return None
+        extra = ", ".join(x for x in ((fd(d) or "") + (f" {t}" if t else ""), r or "") if x.strip())
+        return f"{v} ({extra})" if extra else v
+    if st:
+        meta = _status_meta_for_bins(db, [bin_]).get(bin_, {})
+        def who(f):
+            m_ = meta.get(f)
+            if not m_:
+                return None
+            at = m_.get("at")
+            return f"{m_.get('by') or '—'} · {datetime.fromisoformat(at).strftime('%d.%m.%Y %H:%M') if at else ''}"
+        sections.append({"title": "Статусы", "rows": rows([
+            ("Статус ГАК", stat(st.status, st.status_date)),
+            ("  изменил", who("status")),
+            ("Статус КГИТ", stat(st.kgit_status, st.kgit_date, st.kgit_time, st.kgit_reason)),
+            ("  изменил", who("kgit_status")),
+            ("Статус встречи", stat(st.meeting_status, st.meeting_date, None, st.meeting_reason)),
+            ("  изменил", who("meeting_status")),
+        ])})
+
+    # Все договоры по БИН из исходной выгрузки (новые сверху)
+    contracts = [{
+        "insurer": r.system_delimiter_bin_name,
+        "number": r.contract_number,
+        "date": fd(r.contract_date),
+        "beg": fd(r.date_beg),
+        "end": fd(r.date_end),
+        "rescinded": fd(r.rescinding_date),
+        "amount": fn(r.calculated_amount, 2),
+        "employees": fn(r.count_employees),
+    } for r in db.query(M).filter(M.bin == bin_)
+        .order_by(M.date_beg.desc().nullslast(), M.id.desc()).limit(50).all()]
+
+    # ОПВР — только при доступе к разделу
+    oppv = None
+    if current_user.role == "admin" or current_user.appvr_access:
+        O = models.OppvRecord
+        b12 = bin12(bin_)
+        orow = db.query(
+            func.count(O.id), func.coalesce(func.sum(O.count), 0),
+            func.coalesce(func.sum(O.fot), 0), func.avg(O.smz),
+            func.coalesce(func.sum(case((O.gender == "Мужской", O.count), else_=0)), 0),
+            func.coalesce(func.sum(case((O.gender == "Женский", O.count), else_=0)), 0),
+        ).filter(O.bin == b12).one()
+        if orow[0]:
+            oppv = rows([
+                ("Записей ОПВР", fn(orow[0])),
+                ("Сотрудников (по ОПВР)", fn(orow[1])),
+                ("Мужчин / женщин", f"{fn(orow[4])} / {fn(orow[5])}"),
+                ("ФОТ", fn(orow[2], 0)),
+                ("Средняя СМЗ", fn(orow[3], 0)),
+            ])
+
+    return {"bin": bin12(bin_), "name": s.bin_name, "sections": sections,
+            "contracts": contracts, "oppv": oppv}
+
+
 @app.post("/api/notifications/read-all")
 def mark_all_notifications_read(
     current_user: models.User = Depends(auth.get_current_active_user),
@@ -1627,9 +1804,9 @@ def export_bin_status(
     ws = wb.add_worksheet('Статусы')
     header_fmt = wb.add_format({'bold': True})
     headers = ['БИН', 'Статус', 'Дата статуса',
-               'Статус КГИТ', 'Дата КГИТ', 'Время', 'Место', 'Причина (КГИТ)',
+               'Статус КГИТ', 'Дата КГИТ', 'Время', 'Причина (КГИТ)',
                'Статус встречи', 'Дата итога', 'Причина (итог)']
-    widths = [16, 50, 13, 24, 12, 8, 30, 36, 28, 12, 36]
+    widths = [16, 50, 13, 24, 12, 8, 36, 30, 12, 36]
     for c, (h, w) in enumerate(zip(headers, widths)):
         ws.set_column(c, c, w)
         ws.write_string(0, c, h, header_fmt)
@@ -1637,7 +1814,7 @@ def export_bin_status(
 
     S, B = models.CompanySummary, models.BinStatus
     cols = (B.status, B.status_date, B.kgit_status, B.kgit_date, B.kgit_time,
-            B.kgit_place, B.kgit_reason, B.meeting_status, B.meeting_date, B.meeting_reason)
+            B.kgit_reason, B.meeting_status, B.meeting_date, B.meeting_reason)
     if only_set:
         q = db.query(B.bin, *cols).order_by(B.bin)
     else:

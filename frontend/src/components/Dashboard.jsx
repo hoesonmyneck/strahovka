@@ -182,6 +182,114 @@ const CellHistoryButton = ({ bin, field }) => {
   )
 }
 
+// ─── Название компании в таблице: клик открывает паспорт предприятия ─────────
+const CompanyNameCell = (params) => {
+  if (!params.data) return null
+  const name = params.value || '—'
+  return (
+    <span className="company-link"
+      onClick={(e) => { e.stopPropagation(); params.context?.onOpenPassport?.(params.data.bin) }}>
+      {name}
+    </span>
+  )
+}
+
+// ─── Паспорт предприятия: вся информация по БИН ─────────────────────────────
+const CompanyPassportModal = ({ bin, onClose }) => {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    setData(null); setErr('')
+    api.get(`/api/company/${bin}/passport`)
+      .then((r) => { if (alive) setData(r.data) })
+      .catch((e) => { if (alive) setErr(e.response?.data?.detail || 'Не удалось загрузить паспорт') })
+    return () => { alive = false }
+  }, [bin])
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div className="pp-overlay" onMouseDown={onClose}>
+      <div className="pp-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="pp-head">
+          <div className="pp-head-text">
+            <div className="pp-kicker">Паспорт предприятия</div>
+            <div className="pp-title">{data?.name || (err ? '—' : 'Загрузка…')}</div>
+            <div className="pp-bin">БИН {data?.bin || String(bin).padStart(12, '0')}</div>
+          </div>
+          <button type="button" className="pp-close" onClick={onClose} aria-label="Закрыть"><X size={18} /></button>
+        </div>
+        <div className="pp-body">
+          {err ? (
+            <div className="pp-empty">{err}</div>
+          ) : !data ? (
+            <div className="pp-empty">Загрузка…</div>
+          ) : (
+            <>
+              <div className="pp-grid">
+                {data.sections.filter((s) => s.rows.length).map((s) => (
+                  <section key={s.title} className="pp-section">
+                    <h4>{s.title}</h4>
+                    <dl>
+                      {s.rows.map(([k, v], i) => (
+                        <div key={i} className={'pp-row' + (k.startsWith('  ') ? ' sub' : '')}>
+                          <dt>{k.trim()}</dt><dd>{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ))}
+                {data.oppv && data.oppv.length > 0 && (
+                  <section className="pp-section">
+                    <h4>ОПВР</h4>
+                    <dl>
+                      {data.oppv.map(([k, v], i) => (
+                        <div key={i} className="pp-row"><dt>{k}</dt><dd>{v}</dd></div>
+                      ))}
+                    </dl>
+                  </section>
+                )}
+              </div>
+              {data.contracts.length > 0 && (
+                <section className="pp-section pp-contracts">
+                  <h4>Договоры ({data.contracts.length})</h4>
+                  <div className="pp-table-wrap">
+                    <table className="pp-table">
+                      <thead>
+                        <tr>
+                          <th>Страховая компания</th><th>№ договора</th><th>Дата</th>
+                          <th>Начало</th><th>Окончание</th><th>Расторжение</th>
+                          <th className="num">Сумма</th><th className="num">Застрах.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.contracts.map((c, i) => (
+                          <tr key={i}>
+                            <td>{c.insurer || '—'}</td><td>{c.number || '—'}</td><td>{c.date || '—'}</td>
+                            <td>{c.beg || '—'}</td><td>{c.end || '—'}</td><td>{c.rescinded || '—'}</td>
+                            <td className="num">{c.amount || '—'}</td><td className="num">{c.employees || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 // ─── Колокольчик уведомлений: красный счётчик + список ──────────────────────
 // Счётчик опрашивается раз в 30 с и при возврате на вкладку (лёгкий запрос).
 // Клик по уведомлению: отметить прочитанным и открыть этот БИН в таблице.
@@ -295,9 +403,10 @@ const NotificationBell = ({ onOpenBin }) => {
 // зависит от роли и заполненности предыдущего столбца. ────────────────────────
 
 // Доп. данные статусов: какие поля строки хранят дату/время/место/причину столбца
+// («Место» убрано — все встречи онлайн; старые значения в базе не показываем)
 const STATUS_EXTRA_COLS = {
   status:         { date: 'status_date' },
-  kgit_status:    { date: 'kgit_date', time: 'kgit_time', place: 'kgit_place', reason: 'kgit_reason' },
+  kgit_status:    { date: 'kgit_date', time: 'kgit_time', reason: 'kgit_reason' },
   meeting_status: { date: 'meeting_date', reason: 'meeting_reason' },
 }
 // «Итог» ставится только после этого статуса КГИТ
@@ -336,11 +445,17 @@ const StatusExtrasModal = ({ title, status, rule, initial, onSave, onClose }) =>
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const minDate = todayIso()   // задним числом нельзя — только сегодня и позже
+
   const submit = async (e) => {
     e.preventDefault()
     const missing = rule.required.filter((f) => !String(vals[f] || '').trim())
     if (missing.length) {
       setErr('Заполните: ' + missing.map((f) => EXTRA_FIELD_LABELS[f].toLowerCase()).join(', '))
+      return
+    }
+    if (vals.date && vals.date < minDate) {
+      setErr('Нельзя ставить дату задним числом: только сегодня или позже')
       return
     }
     setSaving(true)
@@ -366,9 +481,8 @@ const StatusExtrasModal = ({ title, status, rule, initial, onSave, onClose }) =>
             return (
               <label key={f} className="sx-field">
                 <span>{EXTRA_FIELD_LABELS[f]}{req && <i>*</i>}</span>
-                {f === 'date' && <input type="date" {...common} autoFocus />}
+                {f === 'date' && <input type="date" min={minDate} {...common} autoFocus />}
                 {f === 'time' && <input type="time" {...common} />}
-                {f === 'place' && <input type="text" maxLength={300} placeholder="Адрес / место встречи" {...common} />}
                 {f === 'reason' && <textarea rows={3} maxLength={500} placeholder="Укажите причину" {...common} />}
               </label>
             )
@@ -466,15 +580,18 @@ const StatusCellRenderer = (params) => {
   }
 
   // Предзаполнение формы: тот же статус — текущие данные; новый — сегодняшняя
-  // дата (+ место/время из строки, если новый статус их допускает: «перенесена»)
+  // дата (+ время из строки, если новый статус его допускает: «перенесена»).
+  // Прошедшую дату не подставляем — задним числом ставить нельзя.
   const initialExtras = (v) => {
     const c = STATUS_EXTRA_COLS[key] || {}
     const d = params.data || {}
     const same = v === value
     const rule = extrasDefs[v] || { required: [], optional: [] }
     const allowed = new Set([...rule.required, ...rule.optional])
-    const init = { date: (same && c.date && d[c.date]) ? String(d[c.date]).slice(0, 10) : todayIso() }
-    ;['time', 'place', 'reason'].forEach((f) => {
+    const today = todayIso()
+    const cur = (same && c.date && d[c.date]) ? String(d[c.date]).slice(0, 10) : ''
+    const init = { date: cur && cur >= today ? cur : today }
+    ;['time', 'reason'].forEach((f) => {
       if (!c[f] || !allowed.has(f)) return
       if (same || f !== 'reason') init[f] = d[c[f]] || ''
     })
@@ -656,6 +773,7 @@ const Dashboard = () => {
   const [rowData, setRowData] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
   const [statusOptions, setStatusOptions] = useState({ status: [], kgit_status: [], meeting_status: [], extras: {} })
+  const [passportBin, setPassportBin] = useState(null)   // открытый паспорт предприятия
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 100
 
@@ -720,6 +838,7 @@ const Dashboard = () => {
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
       minWidth: 250,
       tooltipField: 'bin_name',   // полное название при наведении
+      cellRenderer: CompanyNameCell,   // клик — паспорт предприятия
     },
     {
       field: 'is_insured',
@@ -1445,7 +1564,8 @@ const Dashboard = () => {
 
   // Контекст для AG Grid: справочники трёх столбцов + роль + обработчик
   const gridContext = useMemo(
-    () => ({ statusDefs: statusOptions, isDkgit: isDkgit(), isAdmin: isAdmin(), onStatusChange }),
+    () => ({ statusDefs: statusOptions, isDkgit: isDkgit(), isAdmin: isAdmin(), onStatusChange,
+             onOpenPassport: setPassportBin }),
     [statusOptions, onStatusChange, user],
   )
 
@@ -2096,6 +2216,10 @@ const Dashboard = () => {
       )}
 
       {hudTransition && <div className="hud-transition" />}
+
+      {passportBin != null && (
+        <CompanyPassportModal bin={passportBin} onClose={() => setPassportBin(null)} />
+      )}
 
       {section === 'oppv' && canAppvr && <OppvSection />}
 
