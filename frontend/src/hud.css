@@ -638,6 +638,15 @@
   box-shadow: 0 0 12px rgba(34, 211, 238, .35);
 }
 .hud-activity-bar { flex-wrap: wrap; }
+.hud-export-btn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: #eaf4ff; background: rgba(10, 24, 60, .7);
+  border: 1px solid var(--h-line); border-radius: 999px;
+  transition: background .15s, border-color .15s;
+}
+.hud-export-btn:hover:not(:disabled) { background: rgba(34, 211, 238, .14); border-color: var(--h-line-hi); }
+.hud-export-btn:disabled { opacity: .6; cursor: default; }
 
 /* колокольчик в HUD-шапке */
 .hud-active .notif-btn {

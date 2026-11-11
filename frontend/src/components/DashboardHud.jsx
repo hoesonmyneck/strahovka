@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../utils/api.js'
-import { Shield, Coins, Activity } from 'lucide-react'
+import { Shield, Coins, Activity, Download } from 'lucide-react'
 import { ThinkingOrb } from 'thinking-orbs'
 import { KpiSpark, CountUp } from './KpiSpark.jsx'
 
@@ -599,6 +599,31 @@ function HudStatusActivity() {
   const dayTotals = Array.from({ length: dim }, (_, di) => rows.reduce((s, r) => s + (r.days[di] || 0), 0))
   const grandTotal = rows.reduce((s, r) => s + r.total, 0)
 
+  // Excel за выбранный месяц: 3 листа (ГАК / КГИТ / встречи), регионы × статусы
+  const [exporting, setExporting] = useState(false)
+  const exportExcel = async () => {
+    const [y, mo] = (month || '').split('-')
+    if (!y || !mo) return
+    setExporting(true)
+    try {
+      const res = await api.get('/api/dashboard/status-activity/export', {
+        params: { year: Number(y), month: Number(mo) }, responseType: 'blob',
+      })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.setAttribute('download', `Активность_статусов_${y}_${mo}.xlsx`)
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      alert('Не удалось сформировать Excel')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <HudCard id="sec-status-act" title="Активность статусов" wide>
       <div className="hud-activity-bar">
@@ -608,6 +633,10 @@ function HudStatusActivity() {
           <option value="">Все регионы</option>
           {regions.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
+        <button type="button" className="hud-export-btn" onClick={exportExcel} disabled={exporting}
+          title="Excel за выбранный месяц: листы «Статус ГАК», «Статус КГИТ», «Статус встречи» (регионы × статусы)">
+          <Download size={15} /> {exporting ? 'Формирую…' : 'Скачать Excel'}
+        </button>
       </div>
       {loading && !data ? (
         <div className="hud-act-empty">Загрузка…</div>

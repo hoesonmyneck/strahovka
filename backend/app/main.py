@@ -1190,6 +1190,23 @@ def expiry_list(
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
 
+def _history_base_mapper(field):
+    """Функция «значение из журнала → название статуса». В журнале значение с
+    деталями («Встреча назначена (12.11.2026 14:00)»); старые названия итога
+    сводятся к новым (MEETING_RENAMES)."""
+    base_list = KGIT_STATUSES if field == "kgit_status" else MEETING_STATUSES
+    aliases = MEETING_RENAMES if field == "meeting_status" else {}
+    known = sorted(list(base_list) + list(aliases), key=len, reverse=True)
+
+    def base_of(v):
+        for s in known:
+            if v == s or v.startswith(s + " ("):
+                return aliases.get(s, s)
+        b = v.split(" (")[0]
+        return aliases.get(b, b)
+    return base_of
+
+
 @app.get("/api/dashboard/status-activity")
 def status_activity(
     year: int,
@@ -1230,16 +1247,7 @@ def status_activity(
         base_list = INSURANCE_STATUSES
     else:
         base_list = KGIT_STATUSES if field == "kgit_status" else MEETING_STATUSES
-        # В журнале значение с деталями: «Встреча назначена (12.11.2026 14:00, …)»
-        # Старые названия итога в журнале сводим к новым
-        aliases = MEETING_RENAMES if field == "meeting_status" else {}
-        known = sorted(list(base_list) + list(aliases), key=len, reverse=True)
-        def base_of(v):
-            for s in known:
-                if v == s or v.startswith(s + " ("):
-                    return aliases.get(s, s)
-            b = v.split(" (")[0]
-            return aliases.get(b, b)
+        base_of = _history_base_mapper(field)
         q = (db.query(H.new_value, H.changed_at)
              .filter(H.field == field, H.new_value.isnot(None),
                      H.changed_by != "system-migration",
@@ -1276,6 +1284,129 @@ def status_activity(
 
     return {'year': year, 'month': month, 'days_in_month': days_in_month,
             'statuses': statuses, 'regions': regions}
+
+
+# Порядок регионов в выгрузке — как в отчётной форме (остальные — в конце по алфавиту)
+REPORT_REGION_ORDER = [
+    "Жамбылская область", "Жетісу", "Туркестанская область", "г.Алматы", "Улытау",
+    "Кызылординская область", "Алматинская область", "г.Шымкент", "г.Астана",
+    "Павлодарская область", "Карагандинская область", "Западно-Казахстанская область",
+    "Восточно-Казахстанская область", "Мангистауская область", "Костанайская область",
+    "Северо-Казахстанская область", "Актюбинская область", "Акмолинская область",
+    "Абай", "Атырауская область",
+]
+MONTHS_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль",
+             "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+
+
+def _status_region_counts(db, field, year, month, region=None):
+    """{(регион, статус): кол-во} за месяц — та же логика, что у таблицы
+    «Активность статусов»: ГАК — по текущим статусам и дате обновления,
+    КГИТ/встречи — по журналу (дата смены этого столбца)."""
+    B, S, H = models.BinStatus, models.CompanySummary, models.BinStatusHistory
+    counts = {}
+    if field == "status":
+        q = (db.query(S.obl_name, B.status, func.count())
+             .select_from(B).outerjoin(S, S.bin == B.bin)
+             .filter(B.status.isnot(None), B.status != "",
+                     func.extract('year', B.updated_at) == year,
+                     func.extract('month', B.updated_at) == month))
+        if region:
+            q = q.filter(S.obl_name == region)
+        for reg, st, c in q.group_by(S.obl_name, B.status).all():
+            counts[(reg or "Без региона", st)] = counts.get((reg or "Без региона", st), 0) + int(c)
+    else:
+        base_of = _history_base_mapper(field)
+        q = (db.query(S.obl_name, H.new_value)
+             .select_from(H).outerjoin(S, S.bin == H.bin)
+             .filter(H.field == field, H.new_value.isnot(None),
+                     H.changed_by != "system-migration",
+                     func.extract('year', H.changed_at) == year,
+                     func.extract('month', H.changed_at) == month))
+        if region:
+            q = q.filter(S.obl_name == region)
+        for reg, val in q.all():
+            k = (reg or "Без региона", base_of(val))
+            counts[k] = counts.get(k, 0) + 1
+    return counts
+
+
+@app.get("/api/dashboard/status-activity/export")
+def status_activity_export(
+    year: int,
+    month: int = Query(..., ge=1, le=12),
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Excel «Активность статусов»: 3 листа — Статус ГАК, Статус КГИТ, Статус
+    встречи. На каждом — регионы × статусы за месяц + «ИТОГО» по строкам и
+    столбцам. Региональный пользователь — только свой регион."""
+    region = current_user.region or None
+    S = models.CompanySummary
+    if region:
+        regions = [region]
+    else:
+        present = {r[0] for r in db.query(S.obl_name).distinct().all() if r[0]}
+        regions = ([r for r in REPORT_REGION_ORDER if r in present]
+                   + sorted(present - set(REPORT_REGION_ORDER)))
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    wb = xlsxwriter.Workbook(tmp.name)
+    f_title = wb.add_format({'bold': True, 'font_size': 13})
+    f_head = wb.add_format({'bold': True, 'border': 1, 'align': 'center', 'valign': 'vcenter',
+                            'text_wrap': True, 'bg_color': '#E8EDF7'})
+    f_reg = wb.add_format({'bold': True, 'border': 1})
+    f_num = wb.add_format({'border': 1, 'align': 'center'})
+    f_tot = wb.add_format({'bold': True, 'border': 1, 'align': 'center', 'bg_color': '#F2F4F8'})
+    f_tot_l = wb.add_format({'bold': True, 'border': 1, 'bg_color': '#F2F4F8'})
+
+    sheets = [("status", "Статус ГАК", INSURANCE_STATUSES),
+              ("kgit_status", "Статус КГИТ", KGIT_STATUSES),
+              ("meeting_status", "Статус встречи", MEETING_STATUSES)]
+    period = f"{MONTHS_RU[month - 1]} {year}"
+    for field, title, base_list in sheets:
+        counts = _status_region_counts(db, field, year, month, region)
+        statuses = list(base_list) + sorted({s for (_, s) in counts} - set(base_list))
+        rows = list(regions)
+        if any(r == "Без региона" for (r, _) in counts) and not region:
+            rows.append("Без региона")
+
+        ws = wb.add_worksheet(title)
+        ws.write(0, 0, f"Активность статусов — {title}, {period}", f_title)
+        ws.write(2, 0, "Регионы/Статусы", f_head)
+        for j, st in enumerate(statuses, start=1):
+            ws.write(2, j, st, f_head)
+        ws.write(2, len(statuses) + 1, "ИТОГО", f_head)
+        ws.set_row(2, 48)
+        ws.set_column(0, 0, 34)
+        ws.set_column(1, len(statuses), 16)
+        ws.set_column(len(statuses) + 1, len(statuses) + 1, 12)
+
+        col_tot = [0] * len(statuses)
+        for i, reg in enumerate(rows, start=3):
+            ws.write(i, 0, reg, f_reg)
+            row_tot = 0
+            for j, st in enumerate(statuses):
+                v = counts.get((reg, st), 0)
+                ws.write_number(i, j + 1, v, f_num)
+                row_tot += v
+                col_tot[j] += v
+            ws.write_number(i, len(statuses) + 1, row_tot, f_tot)
+        last = 3 + len(rows)
+        ws.write(last, 0, "ИТОГО", f_tot_l)
+        for j, v in enumerate(col_tot):
+            ws.write_number(last, j + 1, v, f_tot)
+        ws.write_number(last, len(statuses) + 1, sum(col_tot), f_tot)
+        ws.freeze_panes(3, 1)
+    wb.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"activity_statuses_{year}_{month:02d}.xlsx",
+        background=BackgroundTask(os.unlink, tmp.name),
+    )
 
 
 # ============ RECORDS ============
