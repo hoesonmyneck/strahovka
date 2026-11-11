@@ -509,7 +509,8 @@ const StatusCellRenderer = (params) => {
   const isDkgit = !!ctx.isDkgit
   const isAdminUser = !!ctx.isAdmin   // админ редактирует все три столбца
   let editable
-  if (key === 'kgit_status') editable = isDkgit || isAdminUser
+  if (isAdminUser) editable = true   // у админа все три выпадашки активны всегда
+  else if (key === 'kgit_status') editable = isDkgit
   else if (key === 'meeting_status') editable = !isDkgit && params.data?.kgit_status === MEETING_REQUIRES_KGIT
   else editable = !isDkgit  // status
   // Подпись под значением (дата/время/место/причина) + подсказка «кто и когда»

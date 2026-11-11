@@ -1482,8 +1482,8 @@ def set_bin_status(
     old_val = getattr(cur, field) if cur else None
     old_ex = ({k: getattr(cur, col) for k, col in cols.items()} if cur else {})
 
-    # «Итог» доступен только после «Встреча проведена»
-    if field == "meeting_status" and status_val:
+    # «Итог» доступен только после «Встреча проведена» (админ — без ограничений)
+    if field == "meeting_status" and status_val and not is_admin:
         if not (cur and cur.kgit_status == MEETING_REQUIRES_KGIT):
             raise HTTPException(400, f"«Статус встречи» ставится после «{MEETING_REQUIRES_KGIT}» в «Статус КГИТ»")
 
