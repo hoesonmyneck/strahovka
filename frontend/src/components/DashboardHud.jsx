@@ -542,10 +542,6 @@ function HudOverdueCalendar() {
           </>
         )}
       </div>
-      <div className="hud-od-note">
-        Встречи КГИТ («назначена», «перенесена», «проведена»), дата которых уже прошла, а «Статус встречи»
-        после неё не обновлён. Нажмите на день — список предприятий.
-      </div>
       {loading && !data ? (
         <div className="hud-act-empty">Загрузка…</div>
       ) : !data ? (
