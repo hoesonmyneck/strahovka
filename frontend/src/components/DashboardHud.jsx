@@ -398,6 +398,202 @@ const fmtDate = (s) => {
 }
 const bin12 = (b) => (b == null ? '' : String(b).padStart(12, '0'))
 
+const fmtDT = (s) => (s
+  ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  : '—')
+
+// Универсальное окно «список предприятий» для провалов из карточек дашборда.
+// load() → Promise<{items, limited?}>; columns: [{key, label, mono?, render?}]
+function HudListModal({ title, subtitle, load, columns, onClose }) {
+  const [items, setItems] = useState(null)
+  const [limited, setLimited] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    load()
+      .then((d) => { if (alive) { setItems(d.items || []); setLimited(!!d.limited) } })
+      .catch((e) => { if (alive) { setErr(e.response?.data?.detail || 'Не удалось загрузить список'); setItems([]) } })
+    return () => { alive = false }
+  }, [])   // загрузка один раз при открытии
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="hud-modal-overlay" onClick={onClose}>
+      <div className="hud-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="hud-modal-head">
+          <div>
+            <div className="hud-modal-title">{title}</div>
+            <div className="hud-modal-sub">
+              {subtitle}
+              {items && !err && <> · предприятий: <b>{fmtNum(items.length)}</b>{limited ? ' (показаны первые 1000)' : ''}</>}
+            </div>
+          </div>
+          <button className="hud-modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="hud-modal-body">
+          {items === null ? (
+            <div className="hud-act-empty">Загрузка…</div>
+          ) : err ? (
+            <div className="hud-act-empty">{err}</div>
+          ) : items.length === 0 ? (
+            <div className="hud-act-empty">Нет предприятий</div>
+          ) : (
+            <table className="hud-modal-table">
+              <thead>
+                <tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i}>
+                    {columns.map((c) => {
+                      const v = c.render ? c.render(it) : it[c.key]
+                      return (
+                        <td key={c.key} className={c.mono ? 'mono' : ''} title={typeof v === 'string' ? v : undefined}>
+                          {v == null || v === '' ? '—' : v}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Календарь: встречи КГИТ с прошедшей датой, по которым не обновлён итог.
+// Клик по дню — список предприятий (с областью); «Всего» — за всё время.
+const WEEKDAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const OVERDUE_COLUMNS = [
+  { key: 'bin', label: 'БИН', mono: true },
+  { key: 'bin_name', label: 'Предприятие' },
+  { key: 'region', label: 'Область' },
+  { key: 'kgit_status', label: 'Статус КГИТ' },
+  { key: 'kgit_date', label: 'Дата встречи', mono: true,
+    render: (it) => (it.kgit_date ? fmtDate(it.kgit_date) + (it.kgit_time ? ` ${it.kgit_time}` : '') : '—') },
+  { key: 'meeting_status', label: 'Итог (не обновлён)',
+    render: (it) => (it.meeting_status ? `${it.meeting_status}${it.meeting_date ? ` (${fmtDate(it.meeting_date)})` : ''}` : '— нет —') },
+  { key: 'days_overdue', label: 'Просрочено', mono: true,
+    render: (it) => (it.days_overdue != null ? `${it.days_overdue} ${plural(it.days_overdue, 'день', 'дня', 'дней')}` : '—') },
+]
+
+function HudOverdueCalendar() {
+  const [month, setMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [region, setRegion] = useState('')
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [drill, setDrill] = useState(null)   // {day} | {all: true}
+
+  const load = useCallback(async (m, reg) => {
+    const [y, mo] = (m || '').split('-')
+    if (!y || !mo) return
+    setLoading(true)
+    try {
+      const params = { year: Number(y), month: Number(mo) }
+      if (reg) params.region = reg
+      const res = await api.get('/api/dashboard/overdue-meetings', { params })
+      setData(res.data)
+    } catch { setData(null) } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load(month, region) }, [month, region, load])
+
+  const [y, mo] = month.split('-').map(Number)
+  const cells = []
+  if (data) {
+    for (let i = 0; i < data.first_weekday; i++) cells.push(null)
+    for (let d = 1; d <= data.days_in_month; d++) cells.push(d)
+  }
+  const isoOf = (d) => `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+
+  const openList = (drillSpec) => {
+    const params = {}
+    if (region) params.region = region
+    if (!drillSpec.all) { params.year = y; params.month = mo; params.day = drillSpec.day }
+    return api.get('/api/dashboard/overdue-meetings/list', { params }).then((r) => r.data)
+  }
+
+  return (
+    <HudCard id="sec-overdue" title="Итог не обновлён после встречи" wide>
+      <div className="hud-activity-bar">
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
+        <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
+          <option value="">Все регионы</option>
+          {(data?.regions || []).map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        {data && (
+          <>
+            <span className="hud-od-sum">За месяц: <b>{fmtNum(data.total_month)}</b></span>
+            <button type="button" className="hud-export-btn" disabled={!data.total_all}
+              onClick={() => setDrill({ all: true })}>
+              Всего просрочено: <b>{fmtNum(data.total_all)}</b>
+            </button>
+          </>
+        )}
+      </div>
+      <div className="hud-od-note">
+        Встречи КГИТ («назначена», «перенесена», «проведена»), дата которых уже прошла, а «Статус встречи»
+        после неё не обновлён. Нажмите на день — список предприятий.
+      </div>
+      {loading && !data ? (
+        <div className="hud-act-empty">Загрузка…</div>
+      ) : !data ? (
+        <div className="hud-act-empty">Нет данных</div>
+      ) : (
+        <div className="hud-od-cal">
+          {WEEKDAYS_SHORT.map((w) => <div key={w} className="hud-od-wd">{w}</div>)}
+          {cells.map((d, i) => {
+            if (d == null) return <div key={`b${i}`} className="hud-od-blank" />
+            const c = data.days[d] || 0
+            const iso = isoOf(d)
+            const cls = 'hud-od-day' + (c > 0 ? ' hot' : '') + (iso === data.today ? ' today' : '')
+              + (iso > data.today ? ' future' : '')
+            return (
+              <button type="button" key={d} className={cls} disabled={!c}
+                title={c ? `${d} ${MONTHS_FULL[mo - 1].toLowerCase()}: ${c} ${plural(c, 'встреча', 'встречи', 'встреч')} без итога` : undefined}
+                onClick={() => c && setDrill({ day: d })}>
+                <span className="hud-od-num">{d}</span>
+                {c > 0 && <span className="hud-od-count">{fmtNum(c)}</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {drill && (
+        <HudListModal
+          title={drill.all ? 'Итог не обновлён — все просроченные встречи'
+            : `Итог не обновлён — встречи ${drill.day} ${MONTHS_FULL[mo - 1].toLowerCase()} ${y}`}
+          subtitle={region || 'Все регионы'}
+          load={() => openList(drill)}
+          columns={OVERDUE_COLUMNS}
+          onClose={() => setDrill(null)}
+        />
+      )}
+    </HudCard>
+  )
+}
+
+// Столбцы окна «кто стоит за ячейкой Активности статусов»
+const ACTIVITY_LIST_COLUMNS = [
+  { key: 'bin', label: 'БИН', mono: true },
+  { key: 'bin_name', label: 'Предприятие' },
+  { key: 'region', label: 'Область' },
+  { key: 'detail', label: 'Статус' },
+  { key: 'by', label: 'Кто поставил' },
+  { key: 'at', label: 'Когда', mono: true, render: (it) => fmtDT(it.at) },
+]
+
 function HudExpiryModal({ year, month, region, onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -599,6 +795,18 @@ function HudStatusActivity() {
   const dayTotals = Array.from({ length: dim }, (_, di) => rows.reduce((s, r) => s + (r.days[di] || 0), 0))
   const grandTotal = rows.reduce((s, r) => s + r.total, 0)
 
+  // Провал в ячейку: {status?, day?} — список предприятий за ней
+  const [drill, setDrill] = useState(null)
+  const modeLabel = (STATUS_MODES.find((m) => m.key === mode) || {}).label
+  const [ay, amo] = (month || '').split('-').map(Number)
+  const openActivityList = (spec) => {
+    const params = { year: ay, month: amo, field: mode }
+    if (spec.day) params.day = spec.day
+    if (spec.status) params.status = spec.status
+    if (region) params.region = region
+    return api.get('/api/dashboard/status-activity/list', { params }).then((r) => r.data)
+  }
+
   // Excel за выбранный месяц: 3 листа (ГАК / КГИТ / встречи), регионы × статусы
   const [exporting, setExporting] = useState(false)
   const exportExcel = async () => {
@@ -653,15 +861,17 @@ function HudStatusActivity() {
                   {r.days.map((c, di) => (
                     <div className="hud-hm-day" key={di}>
                       <span className="hud-hm-daynum">{di + 1}</span>
-                      <span className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
-                        title={`${di + 1} число: ${c} ${plural(c, 'статус', 'статуса', 'статусов')}`}
-                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                      <span className={'hud-hm-cell' + (c > 0 ? ' on click' : '')}
+                        title={`${di + 1} число: ${c} ${plural(c, 'статус', 'статуса', 'статусов')}${c > 0 ? ' — нажмите, чтобы посмотреть предприятия' : ''}`}
+                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}
+                        onClick={() => c > 0 && setDrill({ status: r.status, day: di + 1 })}>
                         {c > 0 ? fmtNum(c) : ''}
                       </span>
                     </div>
                   ))}
                 </div>
-                <span className="hud-hm-tot"><b>{fmtNum(r.total)}</b> за месяц</span>
+                <span className="hud-hm-tot click" title="Предприятия за месяц"
+                  onClick={() => setDrill({ status: r.status })}><b>{fmtNum(r.total)}</b> за месяц</span>
               </div>
             )
           })}
@@ -675,19 +885,30 @@ function HudStatusActivity() {
                   {dayTotals.map((c, di) => (
                     <div className="hud-hm-day" key={di}>
                       <span className="hud-hm-daynum">{di + 1}</span>
-                      <span className={'hud-hm-cell' + (c > 0 ? ' on' : '')}
-                        title={`${di + 1} число: ${c} ${plural(c, 'статус', 'статуса', 'статусов')}`}
-                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
+                      <span className={'hud-hm-cell' + (c > 0 ? ' on click' : '')}
+                        title={`${di + 1} число: ${c} ${plural(c, 'статус', 'статуса', 'статусов')}${c > 0 ? ' — нажмите, чтобы посмотреть предприятия' : ''}`}
+                        style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}
+                        onClick={() => c > 0 && setDrill({ day: di + 1 })}>
                         {c > 0 ? fmtNum(c) : ''}
                       </span>
                     </div>
                   ))}
                 </div>
-                <span className="hud-hm-tot"><b>{fmtNum(grandTotal)}</b> за месяц</span>
+                <span className="hud-hm-tot click" title="Все предприятия за месяц"
+                  onClick={() => setDrill({})}><b>{fmtNum(grandTotal)}</b> за месяц</span>
               </div>
             )
           })()}
         </div>
+      )}
+      {drill && (
+        <HudListModal
+          title={`Активность — ${modeLabel}: ${drill.status || 'все статусы'}`}
+          subtitle={`${drill.day ? `${drill.day} ` : ''}${(MONTHS_FULL[amo - 1] || '').toLowerCase()} ${ay} · ${region || 'все регионы'}`}
+          load={() => openActivityList(drill)}
+          columns={ACTIVITY_LIST_COLUMNS}
+          onClose={() => setDrill(null)}
+        />
       )}
     </HudCard>
   )
@@ -833,6 +1054,7 @@ const DashboardHud = () => {
     ...((ins.by_status?.length || ins.by_status_kgit?.length || ins.by_status_meeting?.length)
       ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
     { id: 'sec-status-act', label: 'Активность статусов' },
+    { id: 'sec-overdue', label: 'Итог не обновлён после встречи' },
     ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: 'Заполненность статусов по регионам' }] : []),
     ...(op ? [{ id: 'sec-oked', label: 'Рейтинг ОКЭД по сотрудникам' }] : []),
     { id: 'sec-activity', label: 'Активность заходов' },
@@ -885,6 +1107,7 @@ const DashboardHud = () => {
         </div>
       ) : null}
       <div className="hud-charts"><HudStatusActivity /></div>
+      <div className="hud-charts"><HudOverdueCalendar /></div>
       {ins.status_fill && ins.status_fill.length > 0 && (
         <div className="hud-charts">
           <HudCard id="sec-status-fill" title="Рейтинг регионов по заполненности статусов" wide>

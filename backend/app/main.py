@@ -1409,6 +1409,161 @@ def status_activity_export(
     )
 
 
+def _bin12(v):
+    return str(int(v)).zfill(12) if v is not None else None
+
+
+def _fd_iso(d):
+    return d.isoformat() if d else None
+
+
+# ── Список предприятий по клику в «Активности статусов» ──────────────────────
+@app.get("/api/dashboard/status-activity/list")
+def status_activity_list(
+    year: int,
+    month: int = Query(..., ge=1, le=12),
+    field: str = "status",
+    day: Optional[int] = Query(None, ge=1, le=31),
+    status: Optional[str] = None,
+    region: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Какие предприятия стоят за ячейкой «Активности статусов»: статус (или все)
+    × день (или весь месяц). Та же логика, что у таблицы: ГАК — по текущим
+    статусам и дате обновления, КГИТ/встречи — по журналу."""
+    if field not in ("status", "kgit_status", "meeting_status"):
+        raise HTTPException(400, "Неизвестный столбец статуса")
+    if current_user.region:
+        region = current_user.region
+    B, S, H = models.BinStatus, models.CompanySummary, models.BinStatusHistory
+    LIMIT = 1000
+    items = []
+    if field == "status":
+        q = (db.query(B.bin, B.status, B.status_date, B.updated_by, B.updated_at,
+                      S.bin_name, S.obl_name)
+             .outerjoin(S, S.bin == B.bin)
+             .filter(B.status.isnot(None), B.status != "",
+                     func.extract('year', B.updated_at) == year,
+                     func.extract('month', B.updated_at) == month))
+        if day:
+            q = q.filter(func.extract('day', B.updated_at) == day)
+        if status:
+            q = q.filter(B.status == status)
+        if region:
+            q = q.filter(S.obl_name == region)
+        for r in q.order_by(B.updated_at.desc()).limit(LIMIT).all():
+            items.append({"bin": _bin12(r.bin), "bin_name": r.bin_name, "region": r.obl_name,
+                          "status": r.status,
+                          "detail": r.status + (f" ({r.status_date.strftime('%d.%m.%Y')})" if r.status_date else ""),
+                          "by": r.updated_by, "at": r.updated_at.isoformat() if r.updated_at else None})
+    else:
+        base_of = _history_base_mapper(field)
+        q = (db.query(H.bin, H.new_value, H.changed_by, H.changed_at, S.bin_name, S.obl_name)
+             .outerjoin(S, S.bin == H.bin)
+             .filter(H.field == field, H.new_value.isnot(None),
+                     H.changed_by != "system-migration",
+                     func.extract('year', H.changed_at) == year,
+                     func.extract('month', H.changed_at) == month))
+        if day:
+            q = q.filter(func.extract('day', H.changed_at) == day)
+        if region:
+            q = q.filter(S.obl_name == region)
+        for r in q.order_by(H.changed_at.desc()).all():
+            st_ = base_of(r.new_value)
+            if status and st_ != status:
+                continue
+            items.append({"bin": _bin12(r.bin), "bin_name": r.bin_name, "region": r.obl_name,
+                          "status": st_, "detail": r.new_value,
+                          "by": r.changed_by, "at": r.changed_at.isoformat() if r.changed_at else None})
+            if len(items) >= LIMIT:
+                break
+    return {"items": items, "total": len(items), "limited": len(items) >= LIMIT}
+
+
+# ── Календарь «итог не обновлён, хотя дата встречи прошла» ───────────────────
+def _overdue_meetings_query(db, region=None):
+    """Встречи КГИТ (назначена/перенесена/проведена) с прошедшей датой, у которых
+    итог не обновлялся после встречи: итога нет или он поставлен раньше даты
+    встречи (например, «Повторная встреча» до новой встречи)."""
+    B, S = models.BinStatus, models.CompanySummary
+    q = (db.query(B, S.bin_name, S.obl_name)
+         .outerjoin(S, S.bin == B.bin)
+         .filter(B.kgit_status.in_(MEETING_DATE_KGIT),
+                 B.kgit_date.isnot(None),
+                 B.kgit_date < kz_today(),
+                 or_(B.meeting_status.is_(None), B.meeting_status == "",
+                     B.meeting_date.is_(None), B.meeting_date < B.kgit_date)))
+    if region:
+        q = q.filter(S.obl_name == region)
+    return q
+
+
+@app.get("/api/dashboard/overdue-meetings")
+def overdue_meetings(
+    year: int,
+    month: int = Query(..., ge=1, le=12),
+    region: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Счётчики для календаря: по дням месяца (дата встречи) — сколько встреч
+    прошло без обновлённого итога; + всего за всё время."""
+    import calendar
+    if current_user.region:
+        region = current_user.region
+    B, S = models.BinStatus, models.CompanySummary
+    base = _overdue_meetings_query(db, region)
+    total_all = base.count()
+    rows = (base.filter(func.extract('year', B.kgit_date) == year,
+                        func.extract('month', B.kgit_date) == month)
+            .with_entities(func.extract('day', B.kgit_date), func.count())
+            .group_by(func.extract('day', B.kgit_date)).all())
+    days = {int(d): int(c) for d, c in rows}
+    if current_user.region:
+        regions = [current_user.region]
+    else:
+        regions = sorted(r[0] for r in db.query(S.obl_name).distinct().all() if r[0])
+    return {"year": year, "month": month,
+            "days_in_month": calendar.monthrange(year, month)[1],
+            "first_weekday": calendar.monthrange(year, month)[0],   # 0 = понедельник
+            "today": kz_today().isoformat(),
+            "days": days, "total_month": sum(days.values()), "total_all": total_all,
+            "regions": regions}
+
+
+@app.get("/api/dashboard/overdue-meetings/list")
+def overdue_meetings_list(
+    year: Optional[int] = None,
+    month: Optional[int] = Query(None, ge=1, le=12),
+    day: Optional[int] = Query(None, ge=1, le=31),
+    region: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Предприятия с просроченным итогом: за день / месяц / всё время."""
+    if current_user.region:
+        region = current_user.region
+    B = models.BinStatus
+    q = _overdue_meetings_query(db, region)
+    if year:
+        q = q.filter(func.extract('year', B.kgit_date) == year)
+    if month:
+        q = q.filter(func.extract('month', B.kgit_date) == month)
+    if day:
+        q = q.filter(func.extract('day', B.kgit_date) == day)
+    today = kz_today()
+    items = []
+    for b, name, reg in q.order_by(B.kgit_date.asc(), B.bin.asc()).limit(1000).all():
+        items.append({
+            "bin": _bin12(b.bin), "bin_name": name, "region": reg,
+            "kgit_status": b.kgit_status, "kgit_date": _fd_iso(b.kgit_date), "kgit_time": b.kgit_time,
+            "meeting_status": b.meeting_status, "meeting_date": _fd_iso(b.meeting_date),
+            "days_overdue": (today - b.kgit_date).days if b.kgit_date else None,
+        })
+    return {"items": items, "total": len(items)}
+
+
 # ============ RECORDS ============
 
 # Три независимых столбца статусов по БИН:
@@ -1454,8 +1609,10 @@ MEETING_RENAMES = {
 
 # Какие строки (по основному статусу) видит роль ДКГИТ в таблице страхования.
 DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ"]
-# «Итог» (Статус встречи) ставится только после этого статуса КГИТ
-MEETING_REQUIRES_KGIT = "Встреча проведена"
+# «Итог» (Статус встречи) ГАК может ставить, когда в КГИТ одно из этих значений
+MEETING_ALLOWED_KGIT = ["Встреча назначена", "Встреча перенесена", "Встреча проведена"]
+# КГИТ-статусы с датой встречи — для календаря «итог не обновлён после встречи»
+MEETING_DATE_KGIT = MEETING_ALLOWED_KGIT
 
 # Описание столбцов статусов: справочник, поле модели, кто ставит.
 STATUS_FIELDS = {
@@ -1626,10 +1783,11 @@ def set_bin_status(
     old_val = getattr(cur, field) if cur else None
     old_ex = ({k: getattr(cur, col) for k, col in cols.items()} if cur else {})
 
-    # «Итог» доступен только после «Встреча проведена» (админ — без ограничений)
+    # «Итог» доступен, когда встреча назначена/перенесена/проведена (админ — всегда)
     if field == "meeting_status" and status_val and not is_admin:
-        if not (cur and cur.kgit_status == MEETING_REQUIRES_KGIT):
-            raise HTTPException(400, f"«Статус встречи» ставится после «{MEETING_REQUIRES_KGIT}» в «Статус КГИТ»")
+        if not (cur and cur.kgit_status in MEETING_ALLOWED_KGIT):
+            raise HTTPException(400, "«Статус встречи» доступен, когда в «Статус КГИТ»: "
+                                     + ", ".join(f"«{s}»" for s in MEETING_ALLOWED_KGIT))
 
     new_detail = _fmt_status_details(field, status_val, ex)
     old_detail = _fmt_status_details(field, old_val, old_ex) if old_val else None

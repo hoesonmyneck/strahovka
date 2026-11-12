@@ -409,8 +409,8 @@ const STATUS_EXTRA_COLS = {
   kgit_status:    { date: 'kgit_date', time: 'kgit_time', reason: 'kgit_reason' },
   meeting_status: { date: 'meeting_date', reason: 'meeting_reason' },
 }
-// «Итог» ставится только после этого статуса КГИТ
-const MEETING_REQUIRES_KGIT = 'Встреча проведена'
+// «Итог» ГАК может ставить, когда в КГИТ одно из этих значений
+const MEETING_ALLOWED_KGIT = ['Встреча назначена', 'Встреча перенесена', 'Встреча проведена']
 const isoToRu = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('.') : '')
 const todayIso = () => {
   const d = new Date()
@@ -511,7 +511,7 @@ const StatusCellRenderer = (params) => {
   let editable
   if (isAdminUser) editable = true   // у админа все три выпадашки активны всегда
   else if (key === 'kgit_status') editable = isDkgit
-  else if (key === 'meeting_status') editable = !isDkgit && params.data?.kgit_status === MEETING_REQUIRES_KGIT
+  else if (key === 'meeting_status') editable = !isDkgit && MEETING_ALLOWED_KGIT.includes(params.data?.kgit_status)
   else editable = !isDkgit  // status
   // Подпись под значением (дата/время/место/причина) + подсказка «кто и когда»
   const details = value ? statusDetails(key, params.data) : ''

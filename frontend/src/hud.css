@@ -647,6 +647,43 @@
 }
 .hud-export-btn:hover:not(:disabled) { background: rgba(34, 211, 238, .14); border-color: var(--h-line-hi); }
 .hud-export-btn:disabled { opacity: .6; cursor: default; }
+.hud-export-btn b { color: #6fe6ff; margin-left: 2px; }
+
+/* кликабельные ячейки/итоги в «Активности статусов» */
+.hud-hm-cell.click { cursor: pointer; }
+.hud-hm-cell.click:hover { outline: 2px solid rgba(111, 230, 255, .8); outline-offset: 1px; }
+.hud-hm-tot.click { cursor: pointer; }
+.hud-hm-tot.click:hover { color: var(--h-tx); text-decoration: underline dotted; }
+
+/* календарь «итог не обновлён после встречи» */
+.hud-od-sum { color: var(--h-dim); font-size: 13px; margin-left: auto; }
+.hud-od-sum b { color: var(--h-tx); }
+.hud-od-sum + .hud-export-btn { margin-left: 0; }
+.hud-od-note { color: var(--h-dim); font-size: 12.5px; margin: -2px 0 12px; }
+.hud-od-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.hud-od-wd {
+  text-align: center; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--h-dim); padding-bottom: 2px;
+}
+.hud-od-blank { min-height: 58px; }
+.hud-od-day {
+  position: relative; min-height: 58px; padding: 6px 8px; text-align: left;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background: rgba(10, 24, 60, .55); border: 1px solid rgba(56, 189, 248, .14);
+  border-radius: 10px; color: var(--h-tx); font: inherit; cursor: default;
+}
+.hud-od-day.future { opacity: .45; }
+.hud-od-day.today { border-color: var(--h-cyan); box-shadow: 0 0 10px rgba(34, 211, 238, .35); }
+.hud-od-num { font-size: 12px; color: var(--h-dim); font-variant-numeric: tabular-nums; }
+.hud-od-day.hot {
+  cursor: pointer; background: rgba(229, 72, 77, .16); border-color: rgba(255, 107, 112, .55);
+  transition: transform .12s, box-shadow .12s;
+}
+.hud-od-day.hot:hover { transform: translateY(-2px); box-shadow: 0 0 14px rgba(255, 107, 112, .45); }
+.hud-od-count {
+  align-self: flex-end; font-size: 20px; font-weight: 800; line-height: 1;
+  color: #ff8a8e; font-variant-numeric: tabular-nums;
+}
 
 /* колокольчик в HUD-шапке */
 .hud-active .notif-btn {
