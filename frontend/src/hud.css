@@ -418,14 +418,38 @@
 .hud-exp-row .hud-exp-cell:disabled { cursor: default; }
 
 /* модалка со списком предприятий */
+/* Модалки дашборда рендерятся порталом в body (внутри карточки с
+   backdrop-filter position:fixed считался бы от карточки и обрезался ею).
+   В body нет переменных .hud-view — задаём их на обёртке портала. */
+.hud-portal {
+  --h-cyan: #22d3ee;
+  --h-blue: #4a9bff;
+  --h-tx: #eaf4ff;
+  --h-dim: #8fa8d4;
+  --h-line: rgba(56, 189, 248, .22);
+  --h-line-hi: rgba(56, 189, 248, .48);
+  color: var(--h-tx);
+}
 .hud-modal-overlay {
   position: fixed; inset: 0; z-index: 1000; background: rgba(2, 8, 22, .72);
-  backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px;
+  backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center;
+  padding: 16px;
 }
 .hud-modal {
-  width: min(1100px, 96vw); max-height: 88vh; display: flex; flex-direction: column;
+  /* по высоте экрана с отступами — на низких ноутбуках шапка и низ видны */
+  width: min(1100px, 96vw); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px);
+  display: flex; flex-direction: column; min-height: 0;
   background: #071226; border: 1px solid rgba(56, 189, 248, .25); border-radius: 14px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .6); overflow: hidden;
+}
+.hud-modal-head { flex: 0 0 auto; }
+.hud-modal-body { flex: 1 1 auto; min-height: 0; }
+.hud-modal-foot { flex: 0 0 auto; }
+@media (max-height: 700px) {
+  .hud-modal-overlay { padding: 8px; }
+  .hud-modal { max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
+  .hud-modal-head { padding: 10px 16px; }
+  .hud-modal-table th, .hud-modal-table td { padding-top: 6px; padding-bottom: 6px; }
 }
 .hud-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--h-line); }
 .hud-modal-title { color: var(--h-tx); font-size: 16px; font-weight: 700; }

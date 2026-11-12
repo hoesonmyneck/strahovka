@@ -423,7 +423,8 @@ function HudListModal({ title, subtitle, load, columns, onClose }) {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  return (
+  return createPortal(
+    <div className="hud-portal">
     <div className="hud-modal-overlay" onClick={onClose}>
       <div className="hud-modal" onClick={(e) => e.stopPropagation()}>
         <div className="hud-modal-head">
@@ -467,6 +468,8 @@ function HudListModal({ title, subtitle, load, columns, onClose }) {
         </div>
       </div>
     </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -609,7 +612,8 @@ function HudExpiryModal({ year, month, region, onClose }) {
   const total = data?.total || 0
   const pages = Math.max(1, Math.ceil(total / pageSize))
 
-  return (
+  return createPortal(
+    <div className="hud-portal">
     <div className="hud-modal-overlay" onClick={onClose}>
       <div className="hud-modal" onClick={(e) => e.stopPropagation()}>
         <div className="hud-modal-head">
@@ -656,6 +660,8 @@ function HudExpiryModal({ year, month, region, onClose }) {
         )}
       </div>
     </div>
+    </div>,
+    document.body,
   )
 }
 
