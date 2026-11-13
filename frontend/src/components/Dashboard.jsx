@@ -1378,10 +1378,16 @@ const Dashboard = () => {
     fetchAll(1)
   }
 
+  // Сброс: грузим данные с ЯВНО пустыми параметрами. Раньше вызывался fetchAll
+  // из этого же рендера — он «помнил» старые фильтры (в т.ч. БИН из
+  // уведомления), и таблица перезагружалась с ними же.
   const resetFilters = () => {
     if (gridRef.current?.api) gridRef.current.api.setFilterModel(null)
+    lastFetchedFilterModelRef.current = '{}'
     setFilters(EMPTY_FILTERS)
-    setTimeout(() => fetchAll(1), 0)
+    const params = {}
+    fetchMetrics(params)
+    fetchData(1, params)
   }
 
   // Клик по уведомлению: раздел «Страхование» + фильтр по этому БИН
