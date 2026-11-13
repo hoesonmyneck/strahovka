@@ -410,7 +410,7 @@ const STATUS_EXTRA_COLS = {
   meeting_status: { date: 'meeting_date', reason: 'meeting_reason' },
 }
 // «Итог» ГАК может ставить, когда в КГИТ одно из этих значений
-const MEETING_ALLOWED_KGIT = ['Встреча назначена', 'Встреча перенесена', 'Встреча проведена']
+const MEETING_ALLOWED_KGIT = ['Встреча назначена', 'Встреча перенесена']
 const isoToRu = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('.') : '')
 const todayIso = () => {
   const d = new Date()

@@ -175,6 +175,22 @@ with engine.connect() as _conn:
            INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
            SELECT old.bin, 'meeting_status', old.old_v, old.new_v, 'system-migration', NOW()
            FROM old JOIN upd ON upd.bin = old.bin""",
+        # «Статус КГИТ»: убраны «Встреча проведена» (→ «Встреча назначена») и
+        # «Встреча не состоялась» (→ «Встреча перенесена»). Идемпотентно,
+        # атомарно (CTE), в журнал; дата/время/причина сохраняются.
+        """WITH map(old_v, new_v) AS (VALUES
+               ('Встреча проведена', 'Встреча назначена'),
+               ('Встреча не состоялась', 'Встреча перенесена')
+           ), old AS (
+               SELECT b.bin, b.kgit_status AS old_v, map.new_v
+               FROM bin_status b JOIN map ON b.kgit_status = map.old_v
+           ), upd AS (
+               UPDATE bin_status b SET kgit_status = old.new_v
+               FROM old WHERE b.bin = old.bin RETURNING b.bin
+           )
+           INSERT INTO bin_status_history (bin, field, old_value, new_value, changed_by, changed_at)
+           SELECT old.bin, 'kgit_status', old.old_v, old.new_v, 'system-migration', NOW()
+           FROM old JOIN upd ON upd.bin = old.bin""",
         # Уведомления (колокольчик)
         """CREATE TABLE IF NOT EXISTS notifications (
                id         SERIAL PRIMARY KEY,
@@ -394,9 +410,15 @@ def apply_filters(query, model, params: dict, force_region: str = None):
 
     bin_ = params.get("bin")
     if bin_:
-        # Убираем ведущие нули чтобы "000101651508" находил число 101651508
-        bin_stripped = bin_.lstrip('0') or bin_
-        query = query.filter(M.bin.cast(String).like(f"%{bin_stripped}%"))
+        bin_ = str(bin_).strip()
+        if len(bin_) == 12 and bin_.isdigit():
+            # Полный БИН — точное совпадение (иначе «000000050265» → «50265»
+            # находил бы все БИН, где встречаются эти цифры)
+            query = query.filter(M.bin == int(bin_))
+        else:
+            # Часть БИН — поиск подстрокой (ведущие нули убираем)
+            bin_stripped = bin_.lstrip('0') or bin_
+            query = query.filter(M.bin.cast(String).like(f"%{bin_stripped}%"))
 
     if params.get("bin_name"):
         query = query.filter(M.bin_name.ilike(f"%{params['bin_name']}%"))
@@ -584,8 +606,12 @@ def apply_summary_filters(query, params: dict, force_region: str = None):
 
     bin_ = params.get("bin")
     if bin_:
-        b = bin_.lstrip('0') or bin_
-        query = query.filter(S.bin.cast(String).like(f"%{b}%"))
+        bin_ = str(bin_).strip()
+        if len(bin_) == 12 and bin_.isdigit():
+            query = query.filter(S.bin == int(bin_))   # полный БИН — точно
+        else:
+            b = bin_.lstrip('0') or bin_
+            query = query.filter(S.bin.cast(String).like(f"%{b}%"))
     if params.get("bin_name"):
         query = query.filter(S.bin_name.ilike(f"%{params['bin_name']}%"))
     if params.get("system_delimiter_bin"):
@@ -1193,9 +1219,9 @@ def expiry_list(
 def _history_base_mapper(field):
     """Функция «значение из журнала → название статуса». В журнале значение с
     деталями («Встреча назначена (12.11.2026 14:00)»); старые названия итога
-    сводятся к новым (MEETING_RENAMES)."""
+    сводятся к новым (MEETING_RENAMES / KGIT_RENAMES)."""
     base_list = KGIT_STATUSES if field == "kgit_status" else MEETING_STATUSES
-    aliases = MEETING_RENAMES if field == "meeting_status" else {}
+    aliases = KGIT_RENAMES if field == "kgit_status" else MEETING_RENAMES
     known = sorted(list(base_list) + list(aliases), key=len, reverse=True)
 
     def base_of(v):
@@ -1588,10 +1614,14 @@ KGIT_STATUSES = [
     "В работе",
     "Встреча назначена",
     "Встреча перенесена",
-    "Встреча не состоялась",
-    "Встреча проведена",
     "Отказано во встрече",
 ]
+# Убранные статусы КГИТ → во что переведены (для журнала/активности).
+# Уже проставленные значения переводит автомиграция.
+KGIT_RENAMES = {
+    "Встреча проведена": "Встреча назначена",
+    "Встреча не состоялась": "Встреча перенесена",
+}
 MEETING_STATUSES = [
     "Планирует заключить с ГАК",
     "Клиент принимает решение",
@@ -1610,7 +1640,7 @@ MEETING_RENAMES = {
 # Какие строки (по основному статусу) видит роль ДКГИТ в таблице страхования.
 DKGIT_VIEW_STATUSES = ["Для работы ДКГИТ"]
 # «Итог» (Статус встречи) ГАК может ставить, когда в КГИТ одно из этих значений
-MEETING_ALLOWED_KGIT = ["Встреча назначена", "Встреча перенесена", "Встреча проведена"]
+MEETING_ALLOWED_KGIT = ["Встреча назначена", "Встреча перенесена"]
 # КГИТ-статусы с датой встречи — для календаря «итог не обновлён после встречи»
 MEETING_DATE_KGIT = MEETING_ALLOWED_KGIT
 
@@ -1631,15 +1661,13 @@ STATUS_EXTRA_COLS = {
     "meeting_status": {"date": "meeting_date", "reason": "meeting_reason"},
 }
 STATUS_EXTRAS = {
-    # «Статус» (ГАК): итоговые и «Для работы ДКГИТ» — с датой; «В работе» — без
-    "status": {s: {"required": [] if s == "В работе" else ["date"], "optional": []}
-               for s in INSURANCE_STATUSES},
+    # «Статус» (ГАК): дату НЕ спрашиваем — сервер ставит сегодняшнюю сам
+    # (STATUS_AUTO_DATE); «В работе» — без даты
+    "status": {s: {"required": [], "optional": []} for s in INSURANCE_STATUSES},
     "kgit_status": {
         "В работе":              {"required": [], "optional": []},
         "Встреча назначена":     {"required": ["date", "time"], "optional": []},
         "Встреча перенесена":    {"required": ["date"], "optional": ["time"]},
-        "Встреча не состоялась": {"required": ["date", "reason"], "optional": []},
-        "Встреча проведена":     {"required": ["date"], "optional": []},
         "Отказано во встрече":   {"required": ["date", "reason"], "optional": []},
     },
     "meeting_status": {
@@ -1652,6 +1680,8 @@ STATUS_EXTRAS = {
     },
 }
 EXTRA_LABELS = {"date": "дата", "time": "время", "place": "место", "reason": "причина"}
+# «Статус» (ГАК): дата ставится автоматически (сегодня), кроме этих значений
+STATUS_NO_DATE = {"В работе"}
 
 # Казахстан — единый UTC+5. «Сегодня» для запрета дат задним числом считаем по
 # нему, а не по часам сервера (в контейнере UTC — ночью дата отставала бы).
@@ -1663,13 +1693,13 @@ def kz_today():
 
 # Уведомления: какое событие кому уходит.
 #   to_dkgit — новый БИН / повторная встреча → ДКГИТ;
-#   to_gak   — ДКГИТ вернул ГАК (встреча проведена, отказ, не состоялась).
+#   to_gak   — ДКГИТ: встреча назначена/перенесена, отказано во встрече.
 NOTIFY_RULES = {
     ("status", "Для работы ДКГИТ"):          ("to_dkgit", "Новый БИН для работы ДКГИТ"),
     ("meeting_status", "Повторная встреча"):  ("to_dkgit", "Повторная встреча — назначьте встречу"),
-    ("kgit_status", "Встреча проведена"):     ("to_gak", "Встреча проведена — проставьте итог"),
+    ("kgit_status", "Встреча назначена"):     ("to_gak", "ДКГИТ: встреча назначена — после встречи проставьте итог"),
+    ("kgit_status", "Встреча перенесена"):    ("to_gak", "ДКГИТ: встреча перенесена"),
     ("kgit_status", "Отказано во встрече"):   ("to_gak", "ДКГИТ: отказано во встрече"),
-    ("kgit_status", "Встреча не состоялась"): ("to_gak", "ДКГИТ: встреча не состоялась"),
 }
 
 
@@ -1771,6 +1801,9 @@ def set_bin_status(
         # Задним числом нельзя: только сегодня или будущее
         if ex.get("date") and ex["date"] < kz_today():
             raise HTTPException(400, "Нельзя ставить дату задним числом: только сегодня или позже")
+        # «Статус» (ГАК): дату не спрашиваем — ставим сегодняшнюю автоматически
+        if field == "status" and status_val not in STATUS_NO_DATE:
+            ex["date"] = kz_today()
     # Значения всех доп. колонок столбца: неприменимые к статусу — обнуляем,
     # чтобы не висели «чужие» дата/место от прошлого статуса.
     extra_vals = {col: ex.get(k) for k, col in cols.items()}
