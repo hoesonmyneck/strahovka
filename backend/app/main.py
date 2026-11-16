@@ -1508,18 +1508,46 @@ def status_activity_list(
 
 
 # ── Календарь «итог не обновлён, хотя дата встречи прошла» ───────────────────
+# Итоги, после которых по встрече делать больше нечего — в просрочку не попадают.
+MEETING_FINAL_STATUSES = ["Договор заключен с ГАК", "Договор заключен с другим КСЖ",
+                          "Отказ в заключении с ГАК"]
+
+
 def _overdue_meetings_query(db, region=None):
-    """Встречи КГИТ (назначена/перенесена/проведена) с прошедшей датой, у которых
-    итог не обновлялся после встречи: итога нет или он поставлен раньше даты
-    встречи (например, «Повторная встреча» до новой встречи)."""
-    B, S = models.BinStatus, models.CompanySummary
+    """Встречи КГИТ (назначена/перенесена) с прошедшей датой, по которым ГАК не
+    обновил итог ПОСЛЕ того, как ДКГИТ назначил/перенёс встречу.
+
+    Сравниваем момент изменения (журнал), а не даты: итог могут проставить и
+    заранее, за день до встречи — это уже обновлённый итог. Просрочка:
+      • итога нет;
+      • итог не финальный и последний раз менялся раньше последнего изменения
+        КГИТ (например, «Повторная встреча» → ДКГИТ назначил новую встречу);
+      • если по КГИТ нет записи в журнале (старые данные) — прежнее правило:
+        дата итога раньше даты встречи.
+    Финальные итоги (договор с ГАК / с другим КСЖ / отказ) не просрочены."""
+    B, S, H = models.BinStatus, models.CompanySummary, models.BinStatusHistory
+
+    def _last_change(field):
+        return (db.query(H.bin.label("bin"), func.max(H.changed_at).label("at"))
+                .filter(H.field == field, H.changed_by != "system-migration")
+                .group_by(H.bin).subquery())
+
+    kh, mh = _last_change("kgit_status"), _last_change("meeting_status")
+    no_meeting = or_(B.meeting_status.is_(None), B.meeting_status == "")
     q = (db.query(B, S.bin_name, S.obl_name)
          .outerjoin(S, S.bin == B.bin)
+         .outerjoin(kh, kh.c.bin == B.bin)
+         .outerjoin(mh, mh.c.bin == B.bin)
          .filter(B.kgit_status.in_(MEETING_DATE_KGIT),
                  B.kgit_date.isnot(None),
                  B.kgit_date < kz_today(),
-                 or_(B.meeting_status.is_(None), B.meeting_status == "",
-                     B.meeting_date.is_(None), B.meeting_date < B.kgit_date)))
+                 or_(no_meeting,
+                     and_(B.meeting_status.notin_(MEETING_FINAL_STATUSES),
+                          or_(and_(kh.c.at.isnot(None),
+                                   or_(mh.c.at.is_(None), mh.c.at < kh.c.at)),
+                              and_(kh.c.at.is_(None),
+                                   or_(B.meeting_date.is_(None),
+                                       B.meeting_date < B.kgit_date)))))))
     if region:
         q = q.filter(S.obl_name == region)
     return q
