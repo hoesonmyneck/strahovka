@@ -1052,6 +1052,7 @@ const DashboardHud = () => {
     { id: 'sec-expiry', label: 'Окончание страховки' },
     { id: 'sec-form', label: 'Форма предприятия' },
     ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Рейтинг страховых компаний' }] : []),
+    ...(ins.by_insurer_emp?.length ? [{ id: 'sec-insurer-emp', label: 'Рейтинг страховых по людям' }] : []),
     ...(ins.by_size?.length ? [{ id: 'sec-size', label: 'Размер предприятия' }] : []),
     ...((ins.by_status?.length || ins.by_status_kgit?.length || ins.by_status_meeting?.length)
       ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
@@ -1093,6 +1094,13 @@ const DashboardHud = () => {
         <div className="hud-charts">
           <HudCard id="sec-insurer" title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
             <HudRanking items={ins.by_insurer} color="var(--h-teal)" />
+          </HudCard>
+        </div>
+      )}
+      {ins.by_insurer_emp && ins.by_insurer_emp.length > 0 && (
+        <div className="hud-charts">
+          <HudCard id="sec-insurer-emp" title="Рейтинг страховых компаний по застрахованным людям" wide>
+            <HudRanking items={ins.by_insurer_emp} color="var(--h-cyan)" />
           </HudCard>
         </div>
       )}

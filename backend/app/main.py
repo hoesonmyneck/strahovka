@@ -1003,6 +1003,21 @@ def dashboard_kpis(
         .order_by(func.count().desc()).limit(10).all()
     ]
 
+    # Рейтинг страховых компаний по числу застрахованных людей (COUNT_EMPLOYEES)
+    # среди застрахованных предприятий — та же выборка, что и по предприятиям.
+    emp_sum = func.coalesce(func.sum(S.count_employees), 0)
+    by_insurer_emp = [
+        {"label": r.ins_name, "value": int(r.emp or 0)}
+        for r in scope(db.query(
+            S.system_delimiter_bin_name.label("ins_name"),
+            emp_sum.label("emp"),
+        ).filter(S.status == 1,
+                 S.system_delimiter_bin_name.isnot(None),
+                 S.system_delimiter_bin_name != ""))
+        .group_by(S.system_delimiter_bin_name)
+        .order_by(emp_sum.desc()).limit(10).all()
+    ]
+
     # Разбивка по размеру предприятия (Крупное → Среднее → Малое; «Не указан» не показываем)
     SIZE_ORDER = {"Крупное": 0, "Среднее": 1, "Малое": 2}
     by_size = [
@@ -1065,6 +1080,7 @@ def dashboard_kpis(
         "ul_ins": tot.ul_ins or 0,
         "by_region": by_region,
         "by_insurer": by_insurer,
+        "by_insurer_emp": by_insurer_emp,
         "by_status": by_status,
         "by_status_kgit": by_status_kgit,
         "by_status_meeting": by_status_meeting,
