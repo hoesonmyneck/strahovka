@@ -57,6 +57,7 @@ class InsuranceRecordResponse(InsuranceRecordBase):
     meeting_rep_name: Optional[str] = None
     meeting_rep_position: Optional[str] = None
     # «Светофор» ячеек: green / yellow / red / None (считает сервер)
+    status_light: Optional[str] = None
     kgit_light: Optional[str] = None
     meeting_light: Optional[str] = None
     # Кто/когда последний раз менял каждый столбец: {field: {by, at}}

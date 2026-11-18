@@ -401,9 +401,10 @@ const NotificationBell = ({ onOpenBin }) => {
 }
 
 // ─── Будильник: просроченные задачи ─────────────────────────────────────────
-// Встречи, дата которых прошла, а итог не обновлён (то же правило, что календарь
-// на дашборде и красный цвет в таблице). Список живой: задача исчезает сама, как
-// только итог обновили. Иконка покачивается, пока есть непросмотренные; открыл
+// Что считается просрочкой (то же, что красный цвет в таблице):
+//   • встреча прошла, а итог не обновлён (как в календаре на дашборде);
+//   • «В работе» в «Статусе» или в «Статусе КГИТ» дольше 7 дней.
+// Список живой: задача исчезает сама, как только статус/итог обновили. Иконка покачивается, пока есть непросмотренные; открыл
 // список — просмотрел. Счётчик показывает, сколько задач просрочено всего.
 const daysRu = (n) => {
   const a = Math.abs(n) % 100, b = a % 10
@@ -411,6 +412,18 @@ const daysRu = (n) => {
   if (b === 1) return `${n} день`
   if (b >= 2 && b <= 4) return `${n} дня`
   return `${n} дней`
+}
+// Тексты задачи в списке будильника — по её виду:
+//   meeting — встреча прошла, итог не обновлён;
+//   kgit / status — «В работе» в «Статусе КГИТ» / «Статусе» дольше 7 дней.
+const alarmLine = (it) => {
+  if (it.kind === 'kgit') return `Статус КГИТ «В работе» уже ${daysRu(it.days_overdue)}`
+  if (it.kind === 'status') return `Статус «В работе» уже ${daysRu(it.days_overdue)}`
+  return `Встреча ${isoToRu(it.kgit_date)}${it.kgit_time ? ` ${it.kgit_time}` : ''} · просрочено ${daysRu(it.days_overdue)}`
+}
+const alarmNote = (it) => {
+  if (it.kind === 'kgit' || it.kind === 'status') return `В работе с ${isoToRu(it.ref_date)} — больше 7 дней`
+  return it.meeting_status ? `Итог не обновлён: ${it.meeting_status}` : 'Итог встречи не проставлен'
 }
 const OverdueAlarm = ({ onOpenBin }) => {
   const [counts, setCounts] = useState({ total: 0, unread: 0 })
@@ -498,17 +511,14 @@ const OverdueAlarm = ({ onOpenBin }) => {
             ) : items.length === 0 ? (
               <div className="notif-empty">Просроченных задач нет</div>
             ) : items.map((it) => (
-              <button type="button" key={it.bin + it.kgit_date} className={'notif-item' + (it.seen ? '' : ' unread')}
+              <button type="button" key={`${it.bin}-${it.kind}-${it.ref_date}`} className={'notif-item' + (it.seen ? '' : ' unread')}
                 onClick={() => openItem(it)}>
                 <span className="notif-dot alarm" />
                 <span className="notif-text">
                   <span className="notif-msg">{it.bin_name || `БИН ${it.bin}`}</span>
-                  <span className="notif-meta alarm-line">
-                    Встреча {isoToRu(it.kgit_date)}{it.kgit_time ? ` ${it.kgit_time}` : ''} · просрочено {daysRu(it.days_overdue)}
-                  </span>
+                  <span className="notif-meta alarm-line">{alarmLine(it)}</span>
                   <span className="notif-meta">
-                    {it.meeting_status ? `Итог не обновлён: ${it.meeting_status}` : 'Итог встречи не проставлен'}
-                    {it.region ? ` · ${it.region}` : ''}
+                    {alarmNote(it)}{it.region ? ` · ${it.region}` : ''}
                   </span>
                 </span>
               </button>
@@ -666,8 +676,12 @@ const StatusCellRenderer = (params) => {
   if (details) tipParts.push(`${value}: ${statusDetails(key, params.data, true)}`)
   if (meta) tipParts.push(`Изменил: ${meta.by || '—'} · ${fmtDateTime(meta.at)}`)
   const light = key === 'kgit_status' ? params.data?.kgit_light
-    : key === 'meeting_status' ? params.data?.meeting_light : null
-  if (light) tipParts.push(`Индикатор: ${LIGHT_TITLES[light]}`)
+    : key === 'meeting_status' ? params.data?.meeting_light : params.data?.status_light
+  if (light) {
+    tipParts.push(light === 'red' && value === 'В работе'
+      ? 'Индикатор: просрочено — «В работе» больше 7 дней'
+      : `Индикатор: ${LIGHT_TITLES[light]}`)
+  }
   const tip = tipParts.length ? tipParts.join('\n') : undefined
   const [extrasFor, setExtrasFor] = useState(null)   // статус, для которого открыта форма
   const [open, setOpen] = useState(false)
@@ -1099,6 +1113,7 @@ const Dashboard = () => {
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'status' },
       cellClass: 'status-col-cell',
+      cellClassRules: lightRules('status_light'),
       cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
     {
@@ -2662,7 +2677,7 @@ const Dashboard = () => {
         )}
         <div className="table-header">
           <span>Всего: {totalRecords.toLocaleString()} организаций</span>
-          <div className="tl-legend" title="Цвет ячеек «Статус КГИТ» и «Статус встречи» у предприятий в работе ДКГИТ">
+          <div className="tl-legend" title="Цвет ячеек «Статус КГИТ» и «Статус встречи» у предприятий в работе ДКГИТ. Красный — встреча прошла без итога или «В работе» больше 7 дней (в т.ч. в столбце «Статус»)">
             <span><i className="tl-dot green" /> выполнено</span>
             <span><i className="tl-dot yellow" /> ожидание</span>
             <span><i className="tl-dot red" /> просрочено</span>

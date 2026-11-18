@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from starlette.background import BackgroundTask
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import func, and_, or_, not_, String, case, distinct, text, select
+from sqlalchemy import func, and_, or_, not_, String, case, distinct, text, select, literal, cast, Date, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import Optional, List
 from datetime import date, datetime, timedelta
@@ -223,6 +223,12 @@ with engine.connect() as _conn:
                seen_at   TIMESTAMP DEFAULT NOW(),
                PRIMARY KEY (user_id, bin, kgit_date)
            )""",
+        # Будильник теперь показывает не только встречи, но и «В работе» дольше
+        # 7 дней — в ключ отметки «видел» добавлен вид задачи (kind). Старый
+        # первичный ключ заменён уникальным индексом (все шаги идемпотентны).
+        "ALTER TABLE overdue_seen ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'meeting'",
+        "ALTER TABLE overdue_seen DROP CONSTRAINT IF EXISTS overdue_seen_pkey",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_overdue_seen ON overdue_seen (user_id, bin, kgit_date, kind)",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
@@ -1129,9 +1135,15 @@ def dashboard_kpis(
                            for r in oscope(db.query(O.region, func.coalesce(func.sum(O.count), 0).label("c")))
                            .group_by(O.region).order_by(func.sum(O.count).desc()).limit(10).all()]
 
-            o_by_oked = [{"label": r[0] or "—", "value": int(r[1] or 0)}
-                         for r in oscope(db.query(O.oked_name_low, func.coalesce(func.sum(O.count), 0).label("c")))
-                         .group_by(O.oked_name_low).order_by(func.sum(O.count).desc()).limit(8).all()]
+            # Рейтинг ОКЭД — по НАЗВАНИЮ вида деятельности. Если в колонке
+            # названия лежит код (так бывает в выгрузке), название берём из
+            # другой колонки или из справочника «код → название», собранного
+            # по этим же данным; несколько кодов с одним названием складываются.
+            oked_groups = oscope(db.query(
+                O.oked_code_low, O.oked_name_low, O.oked_code, O.oked_name,
+                func.coalesce(func.sum(O.count), 0).label("c"),
+            )).group_by(O.oked_code_low, O.oked_name_low, O.oked_code, O.oked_name).all()
+            o_by_oked = _oked_ranking_by_name(oked_groups, limit=8)
 
             oppv = {
                 "rows": orow.rows or 0,
@@ -1148,6 +1160,39 @@ def dashboard_kpis(
         oppv = None
 
     return {"insurance": insurance, "oppv": oppv}
+
+
+def _oked_is_code(v) -> bool:
+    """«52211», «06.10», «A» — это код ОКЭД, а не название."""
+    v = (v or "").strip()
+    return bool(v) and bool(re.fullmatch(r"[0-9][0-9.\s-]*|[A-Za-zА-Яа-я]", v))
+
+
+def _oked_ranking_by_name(groups, limit=8):
+    """groups: строки (code_low, name_low, code, name, count). Возвращает топ
+    [{label: название, value: сумма}] — группировка по названию ОКЭД."""
+    norm = lambda v: (v or "").strip()
+    # справочник «код → название» из тех строк, где название — настоящее
+    names = {}
+    for code_low, name_low, code, name, _ in groups:
+        for c_, n_ in ((code_low, name_low), (code, name)):
+            c_, n_ = norm(c_), norm(n_)
+            if c_ and n_ and not _oked_is_code(n_):
+                names.setdefault(c_, n_)
+    totals = {}
+    for code_low, name_low, code, name, cnt in groups:
+        cands = [norm(name_low), norm(name)]
+        label = next((x for x in cands if x and not _oked_is_code(x)), None)
+        if not label:   # названия нет — ищем по коду (в т.ч. если код записан в колонку названия)
+            for c_ in (norm(code_low), norm(name_low), norm(code), norm(name)):
+                if c_ and c_ in names:
+                    label = names[c_]
+                    break
+        if not label:   # названия нет нигде — остаётся код
+            label = next((x for x in (norm(name_low), norm(code_low), norm(name), norm(code)) if x), "—")
+        totals[label] = totals.get(label, 0) + int(cnt or 0)
+    top = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    return [{"label": k, "value": v} for k, v in top]
 
 
 def _expiry_end_expr(S):
@@ -1640,15 +1685,50 @@ def overdue_meetings_list(
 # Список считается «вживую» тем же правилом, что календарь дашборда и красный
 # цвет «светофора»: задача пропадает сама, как только итог обновили. В базе
 # хранится только отметка «пользователь это уже видел» (overdue_seen).
-def _overdue_alerts_query(db, user):
-    """Просроченные встречи в зоне видимости пользователя (+ отметка «видел»):
-    регион — как везде; ДКГИТ — только свои строки («Для работы ДКГИТ»)."""
-    B, OS = models.BinStatus, models.OverdueSeen
-    q = _overdue_meetings_query(db, user.region)
-    if user.role == "dkgit":
-        q = q.filter(B.status.in_(DKGIT_VIEW_STATUSES))
-    return q.outerjoin(OS, and_(OS.user_id == user.id, OS.bin == B.bin,
-                                OS.kgit_date == B.kgit_date))
+def _alerts_source(db, user):
+    """Все просроченные задачи пользователя одним подзапросом (bin, kind, ref_date):
+      meeting — встреча прошла, итог не обновлён (ref_date — дата встречи);
+      kgit    — «Статус КГИТ» = «В работе» дольше 7 дней (ref_date — с какого дня);
+      status  — «Статус» (ГАК) = «В работе» дольше 7 дней.
+    Видимость: регион — как везде; ДКГИТ видит только свои строки («Для работы
+    ДКГИТ»), поэтому задачи по «Статусу» ГАК ему не показываются."""
+    B, S, H = models.BinStatus, models.CompanySummary, models.BinStatusHistory
+    is_dkgit = user.role == "dkgit"
+
+    q1 = _overdue_meetings_query(db, user.region)
+    if is_dkgit:
+        q1 = q1.filter(B.status.in_(DKGIT_VIEW_STATUSES))
+    parts = [q1.with_entities(B.bin.label("bin"), literal("meeting").label("kind"),
+                              B.kgit_date.label("ref_date"))]
+
+    # «В работе» больше STALE_IN_WORK_DAYS дней: считаем от последнего изменения
+    # столбца по журналу (нет записи — от updated_at строки).
+    cutoff = datetime.combine(kz_today() - timedelta(days=STALE_IN_WORK_DAYS), datetime.min.time())
+
+    def stale(col, kind, *extra):
+        h = (db.query(H.bin.label("bin"), func.max(H.changed_at).label("at"))
+             .filter(H.field == kind_field[kind], H.changed_by != "system-migration")
+             .group_by(H.bin).subquery())
+        since = func.coalesce(h.c.at, B.updated_at)
+        q = (db.query(B.bin.label("bin"), literal(kind).label("kind"),
+                      cast(since, Date).label("ref_date"))
+             .select_from(B).outerjoin(h, h.c.bin == B.bin)
+             .filter(col == IN_WORK, since < cutoff, *extra))
+        if user.region:
+            q = q.join(S, S.bin == B.bin).filter(S.obl_name == user.region)
+        return q
+
+    kind_field = {"kgit": "kgit_status", "status": "status"}
+    parts.append(stale(B.kgit_status, "kgit", B.status.in_(DKGIT_VIEW_STATUSES)))
+    if not is_dkgit:
+        parts.append(stale(B.status, "status"))
+    return union_all(*(q.statement for q in parts)).subquery("alerts")
+
+
+def _alerts_seen_join(u, user):
+    OS = models.OverdueSeen
+    return and_(OS.user_id == user.id, OS.bin == u.c.bin,
+                OS.kgit_date == u.c.ref_date, OS.kind == u.c.kind)
 
 
 @app.get("/api/overdue-alerts/count")
@@ -1657,12 +1737,11 @@ def overdue_alerts_count(
     db: Session = Depends(database.get_db),
 ):
     """Счётчики будильника: всего просрочено / из них ещё не просмотрено."""
-    B = models.BinStatus
     OS = models.OverdueSeen
-    total, unread = (_overdue_alerts_query(db, current_user)
-                     .with_entities(func.count(B.bin),
-                                    func.coalesce(func.sum(case((OS.user_id.is_(None), 1), else_=0)), 0))
-                     .one())
+    u = _alerts_source(db, current_user)
+    total, unread = (db.query(func.count(u.c.bin),
+                              func.coalesce(func.sum(case((OS.user_id.is_(None), 1), else_=0)), 0))
+                     .select_from(u).outerjoin(OS, _alerts_seen_join(u, current_user)).one())
     return {"total": int(total or 0), "unread": int(unread or 0)}
 
 
@@ -1672,22 +1751,29 @@ def overdue_alerts(
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db),
 ):
-    """Список просроченных задач: непросмотренные сверху, затем свежие встречи."""
-    B, OS = models.BinStatus, models.OverdueSeen
-    q = _overdue_alerts_query(db, current_user).add_columns(OS.user_id.label("seen_uid"))
-    total = q.count()
+    """Список просроченных задач: непросмотренные сверху, затем самые свежие."""
+    B, S, OS = models.BinStatus, models.CompanySummary, models.OverdueSeen
+    u = _alerts_source(db, current_user)
+    total = db.query(func.count(u.c.bin)).select_from(u).scalar() or 0
+    rows = (db.query(u.c.kind, u.c.ref_date, B, S.bin_name, S.obl_name, OS.user_id)
+            .select_from(u).join(B, B.bin == u.c.bin).outerjoin(S, S.bin == B.bin)
+            .outerjoin(OS, _alerts_seen_join(u, current_user))
+            .order_by(OS.user_id.isnot(None), u.c.ref_date.desc(), u.c.bin.asc())
+            .limit(limit).all())
     today = kz_today()
     items = []
-    for b, name, reg, seen_uid in (q.order_by(OS.user_id.isnot(None), B.kgit_date.desc(), B.bin.asc())
-                                   .limit(limit).all()):
+    for kind, ref_date, b, name, reg, seen_uid in rows:
         items.append({
+            "kind": kind, "ref_date": _fd_iso(ref_date),
             "bin": _bin12(b.bin), "bin_name": name, "region": reg,
+            "status": b.status,
             "kgit_status": b.kgit_status, "kgit_date": _fd_iso(b.kgit_date), "kgit_time": b.kgit_time,
             "meeting_status": b.meeting_status, "meeting_date": _fd_iso(b.meeting_date),
-            "days_overdue": (today - b.kgit_date).days,
+            # для встречи — дней после встречи; для «В работе» — сколько дней в работе
+            "days_overdue": (today - ref_date).days if ref_date else None,
             "seen": seen_uid is not None,
         })
-    return {"items": items, "total": total,
+    return {"items": items, "total": int(total),
             "unread": sum(1 for i in items if not i["seen"])}
 
 
@@ -1697,14 +1783,16 @@ def overdue_alerts_seen(
     db: Session = Depends(database.get_db),
 ):
     """Пользователь открыл будильник — все текущие просрочки считаем просмотренными."""
-    B, OS = models.BinStatus, models.OverdueSeen
-    pairs = (_overdue_alerts_query(db, current_user)
-             .filter(OS.user_id.is_(None))
-             .with_entities(B.bin, B.kgit_date).all())
-    if pairs:
+    OS = models.OverdueSeen
+    u = _alerts_source(db, current_user)
+    new = (db.query(u.c.bin, u.c.ref_date, u.c.kind).select_from(u)
+           .outerjoin(OS, _alerts_seen_join(u, current_user))
+           .filter(OS.user_id.is_(None), u.c.ref_date.isnot(None)).all())
+    if new:
         now = datetime.now()
         stmt = pg_insert(OS.__table__).values(
-            [{"user_id": current_user.id, "bin": b, "kgit_date": d, "seen_at": now} for b, d in pairs])
+            [{"user_id": current_user.id, "bin": b, "kgit_date": d, "kind": k, "seen_at": now}
+             for b, d, k in new])
         db.execute(stmt.on_conflict_do_nothing())
         db.commit()
     return {"unread": 0}
@@ -1807,6 +1895,10 @@ EXTRA_LABELS = {"date": "дата", "time": "время", "place": "место",
                 "rep_name": "Ф.И.О. представителя", "rep_position": "должность представителя"}
 # «Статус» (ГАК): дата ставится автоматически (сегодня), кроме этих значений
 STATUS_NO_DATE = {"В работе"}
+# «В работе» (в «Статусе» ГАК или в «Статусе КГИТ») дольше стольких дней —
+# просрочка: ячейка красная, задача попадает в будильник.
+IN_WORK = "В работе"
+STALE_IN_WORK_DAYS = 7
 
 # Казахстан — единый UTC+5. «Сегодня» для запрета дат задним числом считаем по
 # нему, а не по часам сервера (в контейнере UTC — ночью дата отставала бы).
@@ -2000,7 +2092,7 @@ def set_bin_status(
     out = _bin_status_row_dict(row)
     if row:   # «светофор» пересчитываем сразу — ячейки перекрашиваются без перезагрузки
         ts = _status_change_times(db, [data.bin]).get(data.bin, {})
-        out["kgit_light"], out["meeting_light"] = _status_lights(row, ts, kz_today())
+        out["status_light"], out["kgit_light"], out["meeting_light"] = _status_lights(row, ts, kz_today())
     return {"bin": data.bin, "field": field, "status": status_val, "row": out}
 
 
@@ -2013,7 +2105,7 @@ def _bin_status_row_dict(r):
                 "meeting_date": None, "meeting_reason": None,
                 "kgit_rep_name": None, "kgit_rep_position": None,
                 "meeting_rep_name": None, "meeting_rep_position": None,
-                "kgit_light": None, "meeting_light": None}
+                "status_light": None, "kgit_light": None, "meeting_light": None}
     iso = lambda d: d.isoformat() if d else None
     return {"manual_status": r.status, "kgit_status": r.kgit_status,
             "meeting_status": r.meeting_status,
@@ -2022,7 +2114,7 @@ def _bin_status_row_dict(r):
             "meeting_date": iso(r.meeting_date), "meeting_reason": r.meeting_reason,
             "kgit_rep_name": r.kgit_rep_name, "kgit_rep_position": r.kgit_rep_position,
             "meeting_rep_name": r.meeting_rep_name, "meeting_rep_position": r.meeting_rep_position,
-            "kgit_light": None, "meeting_light": None}
+            "status_light": None, "kgit_light": None, "meeting_light": None}
 
 
 # Последнее изменение по каждому (БИН, столбец) — для подсказки «кто/когда» в ячейке.
@@ -2049,7 +2141,7 @@ def _status_change_times(db, bins):
         return {}
     H = models.BinStatusHistory
     rows = (db.query(H.bin, H.field, func.max(H.changed_at))
-            .filter(H.bin.in_(bins), H.field.in_(("kgit_status", "meeting_status")),
+            .filter(H.bin.in_(bins), H.field.in_(("status", "kgit_status", "meeting_status")),
                     H.changed_by != "system-migration")
             .group_by(H.bin, H.field).all())
     out = {}
@@ -2074,23 +2166,43 @@ def _is_meeting_overdue(r, ts, today) -> bool:
     return r.meeting_date is None or r.meeting_date < r.kgit_date
 
 
+def _in_work_days(r, ts, field, today):
+    """Сколько дней в столбце field стоит «В работе» (None — там другое значение).
+    Отсчёт — от последнего изменения столбца по журналу, иначе от updated_at."""
+    if getattr(r, field) != IN_WORK:
+        return None
+    at = ts.get(field) or r.updated_at
+    return (today - at.date()).days if at else None
+
+
+def _is_stale_in_work(r, ts, field, today) -> bool:
+    d = _in_work_days(r, ts, field, today)
+    return d is not None and d > STALE_IN_WORK_DAYS
+
+
 def _status_lights(r, ts, today):
-    """«Светофор» для ячеек «Статус КГИТ» и «Статус встречи» — только у строк в
-    работе ДКГИТ. Возвращает (kgit_light, meeting_light): green / yellow / red / None.
-      КГИТ:   нет статуса или «В работе» → жёлтый (ждёт действий ДКГИТ);
+    """«Светофор» ячеек статусов. Возвращает (status_light, kgit_light,
+    meeting_light): green / yellow / red / None.
+      Статус: «В работе» дольше 7 дней → красный (у любых строк); иначе без цвета.
+    Остальное — только у строк в работе ДКГИТ:
+      КГИТ:   «В работе» дольше 7 дней → красный (просрочка);
+              нет статуса или «В работе» → жёлтый (ждёт действий ДКГИТ);
               ГАК запросил «Повторную встречу», а новой ещё нет → жёлтый;
               встреча назначена/перенесена, отказано во встрече → зелёный.
       Итог:   встреча прошла, итог не обновлён → красный (просрочка);
               договор с ГАК / с другим КСЖ / отказ → зелёный;
               встреча впереди или итог промежуточный → жёлтый;
               встречи нет → без цвета."""
+    status_light = "red" if _is_stale_in_work(r, ts, "status", today) else None
     if r.status not in DKGIT_VIEW_STATUSES:
-        return None, None
+        return status_light, None, None
     k, m = r.kgit_status, r.meeting_status
     k_at, m_at = ts.get("kgit_status"), ts.get("meeting_status")
     has_meeting = k in MEETING_DATE_KGIT
 
-    if not k or k == "В работе":
+    if _is_stale_in_work(r, ts, "kgit_status", today):
+        kgit = "red"
+    elif not k or k == IN_WORK:
         kgit = "yellow"
     elif has_meeting and m == "Повторная встреча" and m_at and (k_at is None or m_at > k_at):
         kgit = "yellow"
@@ -2105,7 +2217,7 @@ def _status_lights(r, ts, today):
         meeting = "yellow"
     else:
         meeting = None
-    return kgit, meeting
+    return status_light, kgit, meeting
 
 
 def _attach_statuses(db, items):
@@ -2136,7 +2248,7 @@ def _attach_statuses(db, items):
             it.kgit_rep_position = r.kgit_rep_position
             it.meeting_rep_name = r.meeting_rep_name
             it.meeting_rep_position = r.meeting_rep_position
-            it.kgit_light, it.meeting_light = _status_lights(r, times.get(r.bin, {}), today)
+            it.status_light, it.kgit_light, it.meeting_light = _status_lights(r, times.get(r.bin, {}), today)
         it.status_meta = meta.get(it.bin)
 
 

@@ -243,7 +243,8 @@ class OverdueSeen(Base):
 
     user_id = Column(Integer, primary_key=True)
     bin = Column(BigInteger, primary_key=True)
-    kgit_date = Column(Date, primary_key=True)
+    kgit_date = Column(Date, primary_key=True)   # опорная дата задачи: встречи / с какого дня «В работе»
+    kind = Column(String(20), primary_key=True, default="meeting")   # meeting | kgit | status
     seen_at = Column(DateTime, default=datetime.utcnow)
 
 
