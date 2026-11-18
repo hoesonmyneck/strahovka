@@ -891,8 +891,7 @@ const Dashboard = () => {
   // layout-эффект: атрибут ставится до первой отрисовки — без «белой вспышки»
   React.useLayoutEffect(() => {
     localStorage.setItem('theme', theme)
-    document.documentElement.setAttribute('data-theme', theme)
-    return () => document.documentElement.removeAttribute('data-theme')   // экран входа — без темы
+    document.documentElement.setAttribute('data-theme', theme)   // та же тема — и у страницы входа
   }, [theme])
 
   // Переход в/из «Дашборда» сопровождаем анимацией-перелистыванием

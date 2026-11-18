@@ -397,3 +397,125 @@ html[data-theme="dark"] .upload-progress-bar { background: var(--d-cyan); box-sh
    колокольчика и будильника оказывались ПОД карточками страницы. Ниже боковой
    навигации дашборда (950) и модалок (1000+). */
 .hud-active .dashboard-header { z-index: 900; }
+
+/* ═══════════════ Страница входа в стиле HUD ═══════════════
+   Та же тема, что в приложении: тёмная по умолчанию; если пользователь выбрал
+   светлую — вход остаётся светлым (стили ниже не применяются). */
+html[data-theme="dark"] .loading { color: var(--d-dim); }
+html[data-theme="dark"] .login-container {
+  color: var(--d-tx);
+  background:
+    radial-gradient(900px 620px at 50% -8%, rgba(34, 211, 238, .16), transparent 62%),
+    radial-gradient(700px 500px at 50% 108%, rgba(59, 130, 246, .14), transparent 65%),
+    linear-gradient(rgba(56, 189, 248, .05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(56, 189, 248, .05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(170deg, #081130 0%, #050b22 45%, #04081a 100%);
+}
+/* световые пятна и плавающие мини-графики — в цветах дашборда */
+html[data-theme="dark"] .auth-blob { opacity: .20; filter: blur(70px); }
+html[data-theme="dark"] .auth-blob--1 { background: #22d3ee; }
+html[data-theme="dark"] .auth-blob--2 { background: #3b82f6; }
+html[data-theme="dark"] .auth-card {
+  background: linear-gradient(160deg, rgba(30, 62, 130, .40) 0%, rgba(12, 26, 66, .55) 48%, rgba(8, 18, 48, .62) 100%);
+  border: 1px solid rgba(56, 189, 248, .28);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .5), 0 0 26px rgba(34, 211, 238, .10), inset 0 1px 0 rgba(255, 255, 255, .07);
+  backdrop-filter: blur(6px);
+}
+html[data-theme="dark"] .auth-card .axis { stroke: rgba(56, 189, 248, .30); }
+html[data-theme="dark"] .auth-card .bar { fill: #22d3ee; filter: drop-shadow(0 0 4px rgba(34, 211, 238, .5)); }
+html[data-theme="dark"] .auth-card .bar.b2 { fill: #3b82f6; }
+html[data-theme="dark"] .auth-card .bar.b3 { fill: #22d3ee; }
+html[data-theme="dark"] .auth-card .bar.b4 { fill: #2ee6c5; }
+html[data-theme="dark"] .auth-card .bar.b5 { fill: #4a9bff; }
+html[data-theme="dark"] .auth-card .line-path { stroke: #22d3ee; filter: drop-shadow(0 0 5px rgba(34, 211, 238, .7)); }
+html[data-theme="dark"] .auth-card .line-area { fill: rgba(34, 211, 238, .14); }
+html[data-theme="dark"] .auth-card .line-dot { fill: #fff; }
+html[data-theme="dark"] .auth-card .ring-bg { stroke: rgba(56, 189, 248, .16); }
+html[data-theme="dark"] .auth-card .ring-fg { stroke: #22d3ee; filter: drop-shadow(0 0 6px rgba(34, 211, 238, .7)); }
+html[data-theme="dark"] .auth-card--kpi .kpi-value { color: #fff; text-shadow: 0 0 16px rgba(34, 211, 238, .45); }
+html[data-theme="dark"] .auth-card--kpi .kpi-pct { color: #6fe6ff; }
+html[data-theme="dark"] .auth-card--kpi .kpi-spark i { background: #22d3ee; box-shadow: 0 0 6px rgba(34, 211, 238, .6); }
+html[data-theme="dark"] .auth-card .pie-seg.p1 { stroke: #22d3ee; }
+html[data-theme="dark"] .auth-card .pie-seg.p2 { stroke: #3b82f6; }
+html[data-theme="dark"] .auth-card .pie-seg.p3 { stroke: #ffb347; }
+html[data-theme="dark"] .auth-card .a-back { fill: rgba(59, 130, 246, .20); }
+html[data-theme="dark"] .auth-card .a-front { fill: rgba(34, 211, 238, .20); }
+html[data-theme="dark"] .auth-card .l-back { stroke: #4a9bff; }
+html[data-theme="dark"] .auth-card .l-front { stroke: #22d3ee; }
+html[data-theme="dark"] .auth-card--prog .prog-row { background: rgba(56, 189, 248, .13); }
+html[data-theme="dark"] .auth-card--prog .prog-fill { background: #22d3ee; box-shadow: 0 0 8px rgba(34, 211, 238, .6); }
+html[data-theme="dark"] .auth-card--prog .pf2 { background: #3b82f6; }
+html[data-theme="dark"] .auth-card--prog .pf3 { background: #2ee6c5; }
+html[data-theme="dark"] .auth-card .gauge-bg { stroke: rgba(56, 189, 248, .16); }
+html[data-theme="dark"] .auth-card .gauge-fg { stroke: #22d3ee; }
+html[data-theme="dark"] .auth-card .gauge-needle { stroke: #ffb347; }
+html[data-theme="dark"] .auth-card .gauge-hub { fill: #ffb347; }
+
+/* форма входа — стеклянная HUD-карточка с угловыми скобками */
+html[data-theme="dark"] .login-box {
+  padding: 40px 38px 36px; max-width: 420px; border-radius: 18px;
+  background:
+    linear-gradient(90deg, transparent, #22d3ee, rgba(59, 130, 246, .85), transparent) no-repeat top left 18px / calc(100% - 36px) 1px,
+    linear-gradient(160deg, rgba(22, 48, 108, .86) 0%, rgba(11, 24, 62, .92) 50%, rgba(7, 16, 44, .95) 100%);
+  border: 1px solid rgba(56, 189, 248, .36);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, .06), 0 24px 70px rgba(0, 0, 0, .6),
+    0 0 60px rgba(34, 211, 238, .14), inset 0 1px 0 rgba(255, 255, 255, .08);
+  backdrop-filter: blur(16px) saturate(1.2);
+}
+html[data-theme="dark"] .login-box::before {
+  content: ""; position: absolute; inset: 8px; border-radius: 13px; pointer-events: none;
+  --c: rgba(34, 211, 238, .9);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / 16px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 1px 16px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 16px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 1px 16px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 16px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 1px 16px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 16px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 1px 16px no-repeat;
+  opacity: .4;
+}
+html[data-theme="dark"] .login-box h1 {
+  color: #fff; font-size: 22px; line-height: 1.3; letter-spacing: .2px;
+  text-shadow: 0 0 22px rgba(34, 211, 238, .35);
+}
+/* логотип: тёмные буквы становятся светлыми (оранжевый знак остаётся) */
+html[data-theme="dark"] #auth-logo [fill="#18140F"] { fill: #eaf4ff; }
+html[data-theme="dark"] #auth-logo [stroke="#18140F"] { stroke: #eaf4ff; }
+html[data-theme="dark"] #auth-logo { filter: drop-shadow(0 0 14px rgba(34, 211, 238, .22)); }
+
+html[data-theme="dark"] .input-icon { color: var(--d-dim); transition: color .2s; }
+html[data-theme="dark"] .input-group:focus-within .input-icon { color: var(--d-cyan); }
+html[data-theme="dark"] .input-group input {
+  background: var(--d-field); border: 1px solid rgba(56, 189, 248, .32); color: var(--d-tx);
+  color-scheme: dark; transition: border-color .2s, box-shadow .2s;
+}
+html[data-theme="dark"] .input-group input::placeholder { color: rgba(143, 168, 212, .6); }
+html[data-theme="dark"] .input-group input:focus {
+  border-color: var(--d-cyan); box-shadow: 0 0 0 3px rgba(34, 211, 238, .16), 0 0 18px rgba(34, 211, 238, .18);
+}
+/* автозаполнение браузера не должно красить поле в светлый */
+html[data-theme="dark"] .input-group input:-webkit-autofill,
+html[data-theme="dark"] .input-group input:-webkit-autofill:hover,
+html[data-theme="dark"] .input-group input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #eaf4ff; caret-color: #eaf4ff;
+  box-shadow: 0 0 0 1000px #0b1a40 inset; transition: background-color 9999s ease-out;
+}
+html[data-theme="dark"] .login-box button {
+  background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #04162a; font-weight: 700;
+  box-shadow: 0 0 22px rgba(34, 211, 238, .35), inset 0 1px 0 rgba(255, 255, 255, .3);
+}
+html[data-theme="dark"] .login-box button:hover:not(:disabled) {
+  box-shadow: 0 6px 30px rgba(34, 211, 238, .55), inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+html[data-theme="dark"] .login-box .spinner { border-color: rgba(4, 22, 42, .28); border-top-color: #04162a; }
+
+/* шаг подтверждения по ЭЦП */
+html[data-theme="dark"] .eds-icon { color: var(--d-cyan); filter: drop-shadow(0 0 10px rgba(34, 211, 238, .6)); }
+html[data-theme="dark"] .eds-title { color: #fff; }
+html[data-theme="dark"] .eds-progress { color: var(--d-dim); }
+html[data-theme="dark"] .login-box .spinner--dark { border-color: rgba(34, 211, 238, .25); border-top-color: #22d3ee; }
+html[data-theme="dark"] .eds-error { color: #ff9a9e; }
+html[data-theme="dark"] .login-box .eds-back { color: #6fe6ff !important; }
+html[data-theme="dark"] .login-box .eds-back:hover { color: #fff !important; }
