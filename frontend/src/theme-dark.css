@@ -519,3 +519,40 @@ html[data-theme="dark"] .login-box .spinner--dark { border-color: rgba(34, 211, 
 html[data-theme="dark"] .eds-error { color: #ff9a9e; }
 html[data-theme="dark"] .login-box .eds-back { color: #6fe6ff !important; }
 html[data-theme="dark"] .login-box .eds-back:hover { color: #fff !important; }
+
+/* ═══════════════ Всплывающие сообщения (react-toastify) в стиле HUD ═══════════════
+   «Успешный вход», «Не удалось сохранить статус» и т.п. В светлой теме остаются
+   прежними (белыми). Фон плотный, непрозрачный. */
+html[data-theme="dark"] {
+  --toastify-color-light: #102452;
+  --toastify-text-color-light: #eaf4ff;
+  --toastify-color-success: #2ee696;
+  --toastify-color-error: #ff6b70;
+  --toastify-color-warning: #ffb347;
+  --toastify-color-info: #22d3ee;
+  --toastify-icon-color-success: #2ee696;
+  --toastify-icon-color-error: #ff6b70;
+  --toastify-icon-color-warning: #ffb347;
+  --toastify-icon-color-info: #22d3ee;
+  --toastify-color-progress-light: linear-gradient(90deg, #22d3ee, #3b82f6);
+  --toastify-spinner-color: #22d3ee;
+  --toastify-spinner-color-empty-area: rgba(56, 189, 248, .2);
+}
+html[data-theme="dark"] .Toastify__toast {
+  background: #102452; color: #eaf4ff;
+  border: 1px solid rgba(56, 189, 248, .5); border-radius: 12px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .7), 0 0 24px rgba(34, 211, 238, .14);
+  font-family: inherit;
+}
+/* цвет рамки — по типу сообщения */
+html[data-theme="dark"] .Toastify__toast--success { border-color: rgba(46, 230, 150, .6); }
+html[data-theme="dark"] .Toastify__toast--error { border-color: rgba(255, 107, 112, .7); }
+html[data-theme="dark"] .Toastify__toast--warning { border-color: rgba(255, 179, 71, .65); }
+html[data-theme="dark"] .Toastify__toast-body { color: #eaf4ff; }
+html[data-theme="dark"] .Toastify__close-button { color: #8fa8d4; opacity: .85; }
+html[data-theme="dark"] .Toastify__close-button:hover { color: #fff; opacity: 1; }
+html[data-theme="dark"] .Toastify__progress-bar { height: 3px; }
+html[data-theme="dark"] .Toastify__progress-bar--success { background: #2ee696; }
+html[data-theme="dark"] .Toastify__progress-bar--error { background: #ff6b70; }
+html[data-theme="dark"] .Toastify__progress-bar--warning { background: #ffb347; }
+html[data-theme="dark"] .Toastify__progress-bar--info { background: #22d3ee; }
