@@ -1697,3 +1697,18 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
   .section-toggle button { padding: 7px 8px; font-size: 12.5px; }
   .logout-btn, .logs-btn, .files-btn { padding: 8px 10px; font-size: 13px; }
 }
+
+/* ─── Названия в таблице «Страхование» — в две строки ─────────────────────────
+   «Название компании» и «Страховая компания»: текст переносится на вторую
+   строку, слишком длинный обрезается многоточием (полное — в подсказке). */
+.ag-theme-alpine .cell-2l { display: flex; align-items: center; line-height: 1.3; white-space: normal; }
+.cell-2l-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 1.3;
+}
+/* у ссылки-названия пунктир теперь подчёркивает обе строки, а не низ блока */
+.ag-theme-alpine .cell-2l .company-link {
+  border-bottom: none; text-decoration: underline dashed rgba(59, 79, 196, .45);
+  text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.ag-theme-alpine .cell-2l .company-link:hover { text-decoration-color: currentColor; }

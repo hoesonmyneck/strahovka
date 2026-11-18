@@ -186,11 +186,16 @@ const CellHistoryButton = ({ bin, field }) => {
 }
 
 // ─── Название компании в таблице: клик открывает паспорт предприятия ─────────
+// Обычный текст ячейки в две строки (длинное обрезается многоточием на второй)
+const TwoLineCell = (params) => (
+  params.value == null || params.value === '' ? null : <span className="cell-2l-text">{params.value}</span>
+)
+
 const CompanyNameCell = (params) => {
   if (!params.data) return null
   const name = params.value || '—'
   return (
-    <span className="company-link"
+    <span className="company-link cell-2l-text"
       onClick={(e) => { e.stopPropagation(); params.context?.onOpenPassport?.(params.data.bin) }}>
       {name}
     </span>
@@ -1019,7 +1024,10 @@ const Dashboard = () => {
       field: 'bin_name',
       headerName: 'Название компании',
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
-      minWidth: 250,
+      // Название — в две строки. Ширина фиксированная: автоподгонка мерила бы
+      // столбец по самой длинной строке без переноса.
+      width: 340, minWidth: 220, suppressAutoSize: true,
+      cellClass: 'cell-2l',
       tooltipField: 'bin_name',   // полное название при наведении
       cellRenderer: CompanyNameCell,   // клик — паспорт предприятия
     },
@@ -1043,7 +1051,10 @@ const Dashboard = () => {
       field: 'system_delimiter_bin_name',
       headerName: 'Страховая компания',
       sortable: true, filter: 'agTextColumnFilter', floatingFilter: true,
-      minWidth: 220,
+      width: 300, minWidth: 200, suppressAutoSize: true,
+      cellClass: 'cell-2l',
+      tooltipField: 'system_delimiter_bin_name',
+      cellRenderer: TwoLineCell,
     },
     // Договор
     {
@@ -1793,7 +1804,12 @@ const Dashboard = () => {
   }, [])
 
   const onFirstDataRendered = useCallback((params) => {
-    params.api.autoSizeAllColumns(false)
+    // Автоподгонка ширины — для всех столбцов, кроме «названий в две строки»:
+    // их таблица растянула бы под самую длинную строку, и переноса бы не было.
+    const fixed = new Set(['bin_name', 'system_delimiter_bin_name'])
+    const cols = (params.api.getAllDisplayedColumns?.() || []).filter((c) => !fixed.has(c.getColId()))
+    if (cols.length) params.api.autoSizeColumns(cols, false)
+    else params.api.autoSizeAllColumns(false)
     tintKgitFilter()
   }, [tintKgitFilter])
 

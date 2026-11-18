@@ -197,12 +197,17 @@ function HudGauges({ items, color = 'var(--h-cyan)', coverage = false }) {
 }
 
 // Рейтинг-лидерборд: место, название, бар, значение (топ-3 подсвечены)
+// «Акционерное общество "…"» → «АО "…"»: в рейтингах страховых длинное название
+// не помещалось. Полное название остаётся в подсказке при наведении.
+const shortOrgName = (s) => String(s || '').replace(/акционерное\s+общество/gi, 'АО').replace(/\s{2,}/g, ' ').trim()
+const withShortNames = (items) => items.map((it) => ({ ...it, title: it.label, label: shortOrgName(it.label) }))
+
 function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
   const max = Math.max(1, ...items.map((i) => i.value))
   return (
     <div className="hud-rank">
       {items.map((it, i) => (
-        <div className="hud-rank-row" key={it.label + i} title={`${it.label}: ${format(it.value)}`}>
+        <div className="hud-rank-row" key={it.label + i} title={`${it.title || it.label}: ${format(it.value)}`}>
           <span className={'hud-rank-pos' + (i < 3 ? ' top top' + (i + 1) : '')}>{i + 1}</span>
           <span className="hud-rank-label">{it.label}</span>
           <span className="hud-rank-track">
@@ -1124,14 +1129,14 @@ const DashboardHud = () => {
       {ins.by_insurer && ins.by_insurer.length > 0 && (
         <div className="hud-charts">
           <HudCard id="sec-insurer" title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
-            <HudRanking items={ins.by_insurer} color="var(--h-teal)" />
+            <HudRanking items={withShortNames(ins.by_insurer)} color="var(--h-teal)" />
           </HudCard>
         </div>
       )}
       {ins.by_insurer_emp && ins.by_insurer_emp.length > 0 && (
         <div className="hud-charts">
           <HudCard id="sec-insurer-emp" title="Рейтинг страховых компаний по застрахованным людям" wide>
-            <HudRanking items={ins.by_insurer_emp} color="var(--h-cyan)" />
+            <HudRanking items={withShortNames(ins.by_insurer_emp)} color="var(--h-cyan)" />
           </HudCard>
         </div>
       )}

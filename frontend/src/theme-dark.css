@@ -556,3 +556,7 @@ html[data-theme="dark"] .Toastify__progress-bar--success { background: #2ee696; 
 html[data-theme="dark"] .Toastify__progress-bar--error { background: #ff6b70; }
 html[data-theme="dark"] .Toastify__progress-bar--warning { background: #ffb347; }
 html[data-theme="dark"] .Toastify__progress-bar--info { background: #22d3ee; }
+
+/* названия в две строки: цвет пунктира под ссылкой в тёмной теме */
+html[data-theme="dark"] .ag-theme-alpine .cell-2l .company-link { text-decoration-color: rgba(111, 230, 255, .45); }
+html[data-theme="dark"] .ag-theme-alpine .cell-2l .company-link:hover { text-decoration-color: #fff; }
