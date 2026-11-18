@@ -411,6 +411,9 @@ def _apply_manual_status_filter(query, bin_col, params: dict):
     query = _apply_status_col_filter(query, bin_col, params, "manual_status", B.status)
     query = _apply_status_col_filter(query, bin_col, params, "manual_kgit", B.kgit_status)
     query = _apply_status_col_filter(query, bin_col, params, "manual_meeting", B.meeting_status)
+    # Фильтр по индикатору («светофору»): список БИН готовит эндпоинт (_bins_by_light)
+    if params.get("light") in LIGHT_VALUES:
+        query = query.filter(bin_col.in_(params.get("_light_bins") or []))
     return query
 
 
@@ -893,6 +896,7 @@ def get_metrics(
     manual_status: Optional[str] = None,
     manual_kgit: Optional[str] = None,
     manual_meeting: Optional[str] = None,
+    light: Optional[str] = None,          # индикатор строки: green / yellow / red
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
@@ -905,6 +909,8 @@ def get_metrics(
     # Роль ДКГИТ видит только свои строки (по статусу)
     if current_user.role == "dkgit":
         params["_status_in"] = DKGIT_VIEW_STATUSES
+    if params.get("light") in LIGHT_VALUES:
+        params["_light_bins"] = _bins_by_light(db, params["light"])
 
     # Карточки по уникальным БИН. Правила независимы (не дополняют друг друга):
     #   Всего        — все БИН;
@@ -1057,15 +1063,14 @@ def dashboard_kpis(
     ]
     by_size.sort(key=lambda x: SIZE_ORDER.get(x["label"], 99))
 
-    # Ручные статусы (глобально; привязка к региону — через join, для простоты опускаем)
     # Рейтинг по каждому из трёх столбцов: ГАК (status), КГИТ, итог встречи.
+    # Для регионального пользователя — только предприятия его региона.
     def _status_rank(col):
-        return [
-            {"label": r[0], "value": r[1]}
-            for r in db.query(col, func.count())
-            .filter(col.isnot(None), col != "")
-            .group_by(col).order_by(func.count().desc()).all()
-        ]
+        q = db.query(col, func.count()).filter(col.isnot(None), col != "")
+        if region:
+            q = (q.join(S, S.bin == models.BinStatus.bin).filter(S.obl_name == region))
+        return [{"label": r[0], "value": r[1]}
+                for r in q.group_by(col).order_by(func.count().desc()).all()]
     by_status = _status_rank(models.BinStatus.status)
     by_status_kgit = _status_rank(models.BinStatus.kgit_status)
     by_status_meeting = _status_rank(models.BinStatus.meeting_status)
@@ -2220,6 +2225,31 @@ def _status_lights(r, ts, today):
     return status_light, kgit, meeting
 
 
+# Индикатор СТРОКИ для фильтра «Индикатор»: самый «тревожный» цвет её ячеек.
+# Есть красная ячейка → «просрочено»; иначе есть жёлтая → «ожидание»;
+# иначе есть зелёная → «выполнено». Строки без цветных ячеек в фильтр не попадают.
+LIGHT_VALUES = ("green", "yellow", "red")
+
+
+def _row_light(lights):
+    for c in ("red", "yellow", "green"):
+        if c in lights:
+            return c
+    return None
+
+
+def _bins_by_light(db, light):
+    """БИНы, у которых индикатор строки равен light. Цвета считает та же
+    функция, что красит ячейки (_status_lights), — фильтр и таблица не расходятся.
+    Цветными бывают только строки «В работе» и «Для работы ДКГИТ» — их и читаем."""
+    B = models.BinStatus
+    rows = db.query(B).filter(B.status.in_([IN_WORK, *DKGIT_VIEW_STATUSES])).all()
+    times = _status_change_times(db, [r.bin for r in rows])
+    today = kz_today()
+    return [r.bin for r in rows
+            if _row_light(_status_lights(r, times.get(r.bin, {}), today)) == light]
+
+
 def _attach_statuses(db, items):
     """Дописать к строкам страницы статусы по БИН, их доп. данные, «кто/когда
     менял» и цвета «светофора» — тремя запросами на всю страницу."""
@@ -2589,6 +2619,7 @@ def get_records(
     manual_status: Optional[str] = None,
     manual_kgit: Optional[str] = None,
     manual_meeting: Optional[str] = None,
+    light: Optional[str] = None,          # индикатор строки: green / yellow / red
     expires_in_months: Optional[int] = None,
     esutd_op: Optional[str] = None,
     esutd_val: Optional[float] = None,
@@ -2600,6 +2631,8 @@ def get_records(
     # Роль ДКГИТ видит только свои строки (по статусу)
     if current_user.role == "dkgit":
         params["_status_in"] = DKGIT_VIEW_STATUSES
+    if params.get("light") in LIGHT_VALUES:
+        params["_light_bins"] = _bins_by_light(db, params["light"])
 
     # Одна строка на БИН (реестр организаций): предрасчёт или живой дедуп
     query, Model = registry_query(db, params, force_region=current_user.region)

@@ -946,6 +946,7 @@ const Dashboard = () => {
     date_end_from: null, date_end_to: null,
     obl_name: '', rai_name: '', opf_name: '', is_insured: '', ip: '',
     org_size: '', manual_status: '', manual_kgit: '', manual_meeting: '',
+    light: '',   // индикатор строки: green / yellow / red
     // ESUTD акт. ТД — оператор сравнения + число
     esutd_op: 'gte', esutd_val: '',
     // Срок истечения — конкретный месяц (date_end_from/to считаем отдельно)
@@ -1187,6 +1188,7 @@ const Dashboard = () => {
     if (filters.manual_status) params.manual_status = filters.manual_status
     if (filters.manual_kgit) params.manual_kgit = filters.manual_kgit
     if (filters.manual_meeting) params.manual_meeting = filters.manual_meeting
+    if (filters.light) params.light = filters.light
     // ESUTD акт. ТД: применяем только когда указано число
     if (filters.esutd_val !== '' && filters.esutd_val != null) {
       params.esutd_op = filters.esutd_op
@@ -2608,6 +2610,20 @@ const Dashboard = () => {
               <option value="">Все</option>
               <option value="__empty__">Без статуса</option>
               {(statusOptions.meeting_status || []).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          {/* Индикатор («светофор») строки: самый тревожный цвет её ячеек статусов */}
+          <div className="filter-group">
+            <label>Индикатор</label>
+            <select
+              value={filters.light}
+              onChange={(e) => setFilters({ ...filters, light: e.target.value })}
+            >
+              <option value="">Все</option>
+              <option value="green">Выполнено</option>
+              <option value="yellow">Ожидание</option>
+              <option value="red">Просрочено</option>
             </select>
           </div>
 
