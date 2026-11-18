@@ -574,7 +574,6 @@ html[data-theme="dark"] .ag-theme-alpine .cell-2l .company-link:hover { text-dec
   background: linear-gradient(135deg, #ffcf70, #ffb347); color: #1a1004;
   box-shadow: 0 0 16px rgba(255, 179, 71, .45);
 }
-.hud-active .demo-note { color: #c9b48a; }
 .hud-active .demo-switch-label { color: #eaf4ff; }
 .hud-active .demo-sides { background: rgba(8, 20, 52, .85); border: 1px solid rgba(56, 189, 248, .30); }
 .hud-active .demo-side { color: #8fa8d4; }

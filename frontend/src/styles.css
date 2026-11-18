@@ -1727,7 +1727,6 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
   padding: 5px 11px; border-radius: 999px; background: #f59e0b; color: #fff;
   font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
 }
-.demo-note { color: #9a3412; font-size: 13px; }
 .demo-switch { display: inline-flex; align-items: center; gap: 10px; }
 .demo-switch-label { color: #7c2d12; font-size: 13px; font-weight: 600; white-space: nowrap; }
 .demo-sides { display: inline-flex; gap: 3px; padding: 3px; border-radius: 10px; background: #fed7aa; }
@@ -1753,5 +1752,14 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
 }
 .demo-reset:hover:not(:disabled) { background: #ffedd5; border-color: #fb923c; }
 .demo-reset:disabled { opacity: .6; cursor: default; }
-@media (max-width: 1100px) { .demo-note { display: none; } }
 @media (prefers-reduced-motion: reduce) { .demo-side-badge.pulse { animation: none; } }
+
+/* ─── Списки колокольчика и будильника: длинные названия переносятся ──────────
+   Запрет переноса у элементов шапки (.user-info > *) наследовался выпадающими
+   списками: название предприятия шло в одну строку, и появлялась прокрутка
+   вправо. Внутри списков текст снова переносится на несколько строк. */
+.notif-pop { white-space: normal; }
+.notif-body { overflow-x: hidden; }
+.notif-item { min-width: 0; }
+.notif-text { flex: 1 1 auto; }
+.notif-msg, .notif-meta { white-space: normal; overflow-wrap: anywhere; }

@@ -595,7 +595,6 @@ const DemoBar = ({ view, onSwitch, onReset }) => {
           {side('dkgit', 'ДКГИТ', 'Вид сотрудника ДКГИТ: только строки «Для работы ДКГИТ», столбец «Статус КГИТ»')}
         </div>
       </div>
-      <span className="demo-note">Изменения сохраняются в копии данных — реальные статусы не меняются</span>
       <button type="button" className="demo-reset" onClick={reset} disabled={busy}
         title="Вернуть демо-данные к копии реальных статусов">
         <RotateCcw size={14} /> Сбросить демо-данные

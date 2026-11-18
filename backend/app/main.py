@@ -302,13 +302,59 @@ with engine.connect() as _conn:
 # ── Демонстрационный режим: «песочница» в схеме demo ─────────────────────────
 # Копии таблиц статусов/журнала/уведомлений для аккаунта с ролью demo (как это
 # подключается — см. database.py). Реальные (public) таблицы здесь только ЧИТАЮТСЯ.
-def _demo_copy_from_real(conn):
+def _demo_copy_from_real(conn, region=None):
     """Заново наполнить песочницу копией реальных статусов и их журнала.
     Уведомления и отметки будильника в песочнице начинаются с чистого листа."""
     T = __import__('sqlalchemy').text
     conn.execute(T("TRUNCATE demo.bin_status, demo.bin_status_history, demo.notifications, demo.overdue_seen"))
     conn.execute(T("INSERT INTO demo.bin_status SELECT * FROM public.bin_status"))
     conn.execute(T("INSERT INTO demo.bin_status_history SELECT * FROM public.bin_status_history"))
+    _demo_seed_overdue(conn, region)
+
+
+def _demo_seed_overdue(conn, region=None, want=5):
+    """Чтобы в демонстрации было что показать в «Итог не обновлён после встречи»
+    (календарь на дашборде, красные ячейки, будильник): в песочнице должно быть
+    несколько встреч на РАЗНЫЕ прошедшие дни без итога. Если таких меньше трёх —
+    добавляем примеры: берём предприятия без статуса и записываем им обычный
+    ход работы (ГАК передал ДКГИТ → ДКГИТ назначил встречу → дата прошла).
+    Пишет только в demo.*; из public только читает список предприятий."""
+    T = __import__('sqlalchemy').text
+    today = (datetime.utcnow() + timedelta(hours=5)).date()   # Казахстан, UTC+5
+    reg_sql = " AND EXISTS (SELECT 1 FROM public.company_summary s WHERE s.bin = b.bin AND s.obl_name = :r)" if region else ""
+    # на какие прошедшие дни в песочнице уже есть встречи без итога
+    have_days = {r[0] for r in conn.execute(T(
+        "SELECT DISTINCT b.kgit_date FROM demo.bin_status b "
+        "WHERE b.kgit_status IN ('Встреча назначена', 'Встреча перенесена') "
+        "AND b.kgit_date < :t AND coalesce(b.meeting_status, '') = ''" + reg_sql),
+        {"t": today, "r": region})}
+    if len(have_days) >= 3:      # уже есть на три разных дня — примеры не нужны
+        return 0
+    # недостающие дни: ближайшие прошедшие, которых ещё нет (вчера, позавчера, …)
+    new_days = [d for d in (today - timedelta(days=n) for n in (1, 2, 4, 6, 9, 3, 5, 7, 8, 10))
+                if d not in have_days][:want - len(have_days)]
+    bins = [r[0] for r in conn.execute(T(
+        "SELECT s.bin FROM public.company_summary s "
+        "WHERE s.status = 0 AND NOT EXISTS (SELECT 1 FROM demo.bin_status b WHERE b.bin = s.bin)"
+        + (" AND s.obl_name = :r" if region else "") +
+        " ORDER BY (s.org_size = 'Крупное') DESC NULLS LAST, s.bin LIMIT :n"),
+        {"r": region, "n": len(new_days)})]
+    times = ["11:00", "15:00", "10:30", "16:00", "12:00"]
+    for i, b in enumerate(bins):
+        meet = new_days[i]
+        tm = times[i % len(times)]
+        sent = datetime(meet.year, meet.month, meet.day, 10, 0) - timedelta(days=3)   # ГАК передал ДКГИТ
+        planned = sent + timedelta(days=1, hours=2)                                   # ДКГИТ назначил встречу
+        conn.execute(T(
+            "INSERT INTO demo.bin_status (bin, status, status_date, kgit_status, kgit_date, kgit_time, updated_by, updated_at) "
+            "VALUES (:b, 'Для работы ДКГИТ', :sd, 'Встреча назначена', :kd, :kt, 'ДКГИТ (демо)', :ua)"),
+            {"b": b, "sd": sent.date(), "kd": meet, "kt": tm, "ua": planned})
+        conn.execute(T(
+            "INSERT INTO demo.bin_status_history (bin, field, old_value, new_value, changed_by, changed_at) VALUES "
+            "(:b, 'status', NULL, :sv, 'ГАК (демо)', :s_at), (:b, 'kgit_status', NULL, :kv, 'ДКГИТ (демо)', :k_at)"),
+            {"b": b, "sv": f"Для работы ДКГИТ ({sent.strftime('%d.%m.%Y')})",
+             "kv": f"Встреча назначена ({meet.strftime('%d.%m.%Y')} {tm})", "s_at": sent, "k_at": planned})
+    return len(bins)
 
 
 def _ensure_demo_schema():
@@ -331,6 +377,8 @@ def _ensure_demo_schema():
                 changed = True
         if changed:
             _demo_copy_from_real(conn)
+        else:
+            _demo_seed_overdue(conn)   # в уже существующей песочнице — добавить примеры, если их нет
 
 
 try:
@@ -943,9 +991,10 @@ def demo_state(
 @app.post("/api/demo/reset")
 def demo_reset(current_user: models.User = Depends(require_demo)):
     """Сбросить песочницу: снова скопировать реальные статусы и их журнал,
-    очистить демо-уведомления. Реальные данные только читаются."""
+    очистить демо-уведомления, добавить примеры просроченных встреч (в регионе
+    аккаунта, если он региональный). Реальные данные только читаются."""
     with engine.begin() as conn:
-        _demo_copy_from_real(conn)
+        _demo_copy_from_real(conn, current_user.region)
         n = conn.execute(text("SELECT count(*) FROM demo.bin_status")).scalar() or 0
     return {"ok": True, "statuses": int(n)}
 
