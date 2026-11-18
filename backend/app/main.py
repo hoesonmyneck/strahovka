@@ -230,6 +230,8 @@ with engine.connect() as _conn:
         "ALTER TABLE overdue_seen DROP CONSTRAINT IF EXISTS overdue_seen_pkey",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_overdue_seen ON overdue_seen (user_id, bin, kgit_date, kind)",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
+        # Рейтинги страховых за период: отбор договоров по дате начала
+        "CREATE INDEX IF NOT EXISTS idx_insurance_date_beg ON insurance_records (date_beg)",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS org_size VARCHAR(20)",
@@ -1297,6 +1299,52 @@ def dashboard_kpis(
         oppv = None
 
     return {"insurance": insurance, "oppv": oppv}
+
+
+@app.get("/api/dashboard/insurer-ranking")
+def dashboard_insurer_ranking(
+    mode: str = "enterprises",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Рейтинг страховых компаний за период: сколько предприятий (mode=enterprises)
+    или людей (mode=people) застраховано по договорам, НАЧАВШИМСЯ в этот период.
+
+    Период — по «Дате начала» договора (date_beg): с этого дня действует
+    страховая защита. Считаем по всем договорам из выгрузки (в т.ч. уже
+    закончившимся), только у обязанных предприятий — как и весь раздел.
+    Если у предприятия в периоде несколько договоров с одной страховой
+    (продление), берётся последний — людей дважды не считаем.
+    Региональный пользователь — только свой регион."""
+    if mode not in ("enterprises", "people"):
+        raise HTTPException(400, "mode: enterprises или people")
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+    M, S = models.InsuranceRecord, models.CompanySummary
+    q = (db.query(M.bin.label("bin"), M.system_delimiter_bin_name.label("ins"),
+                  M.count_employees.label("emp"))
+         .join(S, S.bin == M.bin)
+         .filter(S.status.in_((0, 1)), M.date_beg.isnot(None),
+                 M.system_delimiter_bin_name.isnot(None), M.system_delimiter_bin_name != ""))
+    if date_from:
+        q = q.filter(M.date_beg >= date_from)
+    if date_to:
+        q = q.filter(M.date_beg <= date_to)
+    if current_user.region:
+        q = q.filter(S.obl_name == current_user.region)
+    sub = (q.distinct(M.bin, M.system_delimiter_bin_name)
+           .order_by(M.bin, M.system_delimiter_bin_name, M.date_beg.desc(), M.id.desc())
+           .subquery())
+    val = func.count() if mode == "enterprises" else func.coalesce(func.sum(sub.c.emp), 0)
+    rows = db.query(sub.c.ins, val.label("v")).group_by(sub.c.ins).order_by(val.desc()).all()
+    items = [{"label": r.ins, "value": int(r.v or 0)} for r in rows]
+    return {"mode": mode,
+            "date_from": date_from.isoformat() if date_from else None,
+            "date_to": date_to.isoformat() if date_to else None,
+            "total": sum(i["value"] for i in items),
+            "items": items[:10]}
 
 
 def _oked_is_code(v) -> bool:

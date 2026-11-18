@@ -1001,6 +1001,71 @@ function HudNav({ items, open, setOpen }) {
   )
 }
 
+// ─── Рейтинг страховых компаний с фильтром по периоду ───────────────────────
+// Без периода — действующие договоры на сегодня (данные из общего запроса
+// дашборда). С периодом — договоры, НАЧАВШИЕСЯ в эти даты («Дата начала»),
+// включая уже закончившиеся: сколько предприятий / людей застраховано за период.
+function HudInsurerRanking({ id, title, mode, initial, color }) {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [data, setData] = useState(null)      // null — период не задан
+  const [loading, setLoading] = useState(false)
+  const active = !!(from || to)
+
+  useEffect(() => {
+    if (!from && !to) { setData(null); setLoading(false); return }
+    let cancelled = false
+    setLoading(true)
+    // небольшая задержка: дату часто набирают с клавиатуры по цифре
+    const t = setTimeout(() => {
+      const params = { mode }
+      if (from) params.date_from = from
+      if (to) params.date_to = to
+      api.get('/api/dashboard/insurer-ranking', { params })
+        .then((r) => { if (!cancelled) setData(r.data) })
+        .catch(() => { if (!cancelled) setData({ items: [], total: 0 }) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [from, to, mode])
+
+  const items = withShortNames(data ? data.items : initial)
+  const unit = mode === 'people' ? 'чел.' : 'предприятий'
+
+  return (
+    <HudCard id={id} title={title} wide>
+      <div className="hud-activity-bar hud-period-bar">
+        <span className="hud-period-label">Начало договора</span>
+        <label className="hud-period-field">с
+          <input type="date" className="hud-month" value={from} max={to || undefined}
+            onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="hud-period-field">по
+          <input type="date" className="hud-month" value={to} min={from || undefined}
+            onChange={(e) => setTo(e.target.value)} />
+        </label>
+        {active && (
+          <button type="button" className="hud-clear-btn" onClick={() => { setFrom(''); setTo('') }}>
+            Сбросить
+          </button>
+        )}
+        <span className="hud-od-sum">
+          {!active ? 'Действующие договоры на сегодня'
+            : loading || !data ? 'Считаем…'
+            : <>Застраховано за период: <b>{fmtNum(data.total)}</b> {unit}</>}
+        </span>
+      </div>
+      {active && !loading && data && items.length === 0 ? (
+        <div className="hud-act-empty">Договоров, начавшихся в этот период, нет</div>
+      ) : (
+        <div className={loading ? 'hud-dim' : undefined}>
+          <HudRanking items={items} color={color} />
+        </div>
+      )}
+    </HudCard>
+  )
+}
+
 // ─── Основной компонент ──────────────────────────────────────────────────────
 const DashboardHud = () => {
   const [data, setData] = useState(null)
@@ -1129,16 +1194,14 @@ const DashboardHud = () => {
       </div>
       {ins.by_insurer && ins.by_insurer.length > 0 && (
         <div className="hud-charts">
-          <HudCard id="sec-insurer" title="Рейтинг страховых компаний по застрахованным предприятиям" wide>
-            <HudRanking items={withShortNames(ins.by_insurer)} color="var(--h-teal)" />
-          </HudCard>
+          <HudInsurerRanking id="sec-insurer" mode="enterprises" initial={ins.by_insurer} color="var(--h-teal)"
+            title="Рейтинг страховых компаний по застрахованным предприятиям" />
         </div>
       )}
       {ins.by_insurer_emp && ins.by_insurer_emp.length > 0 && (
         <div className="hud-charts">
-          <HudCard id="sec-insurer-emp" title="Рейтинг страховых компаний по застрахованным людям" wide>
-            <HudRanking items={withShortNames(ins.by_insurer_emp)} color="var(--h-cyan)" />
-          </HudCard>
+          <HudInsurerRanking id="sec-insurer-emp" mode="people" initial={ins.by_insurer_emp} color="var(--h-cyan)"
+            title="Рейтинг страховых компаний по застрахованным людям" />
         </div>
       )}
       {ins.by_size && ins.by_size.length > 0 && (

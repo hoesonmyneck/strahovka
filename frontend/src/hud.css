@@ -864,3 +864,15 @@
 .hud-rank { gap: 10px; }
 .hud-rank-label, .hud-rank-val { font-size: 13.5px; }
 .hud-fill-note, .hud-activity-hint { font-size: 13px; }
+
+/* фильтр по периоду в рейтингах страховых компаний */
+.hud-period-bar { gap: 12px; margin-bottom: 18px; }
+.hud-period-label { color: var(--h-tx); font-size: 13.5px; font-weight: 600; }
+.hud-period-field { display: inline-flex; align-items: center; gap: 8px; color: var(--h-dim); font-size: 13px; }
+.hud-clear-btn {
+  padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+  background: rgba(10, 24, 60, .7); color: var(--h-tx); border: 1px solid var(--h-line);
+  transition: background .15s, border-color .15s;
+}
+.hud-clear-btn:hover { background: rgba(34, 211, 238, .14); border-color: var(--h-line-hi); }
+.hud-dim { opacity: .45; transition: opacity .15s; }
