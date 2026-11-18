@@ -1612,3 +1612,63 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
   font-size: 14px !important;
   box-shadow: none !important;
 }
+
+/* ─── «Статус КГИТ»: сероватый фон ячеек (раньше был инлайн-стилем колонки) ── */
+.ag-theme-alpine .kgit-col-cell { background: #eceef2; }
+
+/* ─── «Светофор» ячеек «Статус КГИТ» / «Статус встречи» (строки в работе ДКГИТ):
+   зелёный — выполнено, жёлтый — ожидание, красный — просрочено. Цвет считает
+   сервер (kgit_light / meeting_light), здесь только раскраска. ─────────────── */
+.ag-theme-alpine .status-col-cell.tl-green  { background: #dcfce7; }
+.ag-theme-alpine .status-col-cell.tl-yellow { background: #fef3c7; }
+.ag-theme-alpine .status-col-cell.tl-red    { background: #fee2e2; }
+.tl-green  .status-trigger { background: #bbf7d0; border-color: #4ade80; }
+.tl-yellow .status-trigger { background: #fde68a; border-color: #f59e0b; }
+.tl-red    .status-trigger { background: #fecaca; border-color: #f87171; }
+.tl-green .status-trigger-sub, .tl-yellow .status-trigger-sub, .tl-red .status-trigger-sub { color: #4b5563; }
+.tl-red .status-trigger-text, .tl-red .status-readonly { color: #b91c1c; font-weight: 600; }
+
+/* легенда над таблицей */
+.tl-legend { display: flex; align-items: center; gap: 14px; margin-left: auto; margin-right: 20px; }
+.table-header .tl-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #777; }
+.tl-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.tl-dot.green { background: #22c55e; }
+.tl-dot.yellow { background: #f59e0b; }
+.tl-dot.red { background: #ef4444; }
+@media (max-width: 900px) { .tl-legend { display: none; } }
+
+/* ─── Будильник «просроченные задачи» (рядом с колокольчиком) ──────────────── */
+.alarm-btn.has { color: #c2410c; background: #fff7ed; border-color: #fdba74; }
+.alarm-btn.has:hover, .alarm-btn.has.on { color: #9a3412; background: #ffedd5; border-color: #fb923c; }
+/* пока есть непросмотренные — будильник «звонит»: покачивается и пульсирует */
+.alarm-btn.ringing { animation: alarm-pulse 1.6s ease-out infinite; }
+.alarm-btn.ringing svg { transform-origin: 50% 60%; animation: alarm-ring 1.2s ease-in-out infinite; }
+@keyframes alarm-ring {
+  0%, 55%, 100% { transform: rotate(0); }
+  6%  { transform: rotate(-16deg); }
+  14% { transform: rotate(14deg); }
+  22% { transform: rotate(-12deg); }
+  30% { transform: rotate(10deg); }
+  38% { transform: rotate(-6deg); }
+  46% { transform: rotate(3deg); }
+}
+@keyframes alarm-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(229, 72, 77, .55); }
+  70%  { box-shadow: 0 0 0 11px rgba(229, 72, 77, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+}
+.alarm-pop { width: 420px; }
+.notif-item.unread .notif-dot.alarm { background: #e5484d; }
+.user-info .notif-wrap .notif-head .alarm-total {
+  min-width: 22px; padding: 2px 7px; border-radius: 999px; text-align: center;
+  background: #e5484d; color: #fff !important; font-size: 11px; font-weight: 700 !important;
+}
+.user-info .notif-wrap .notif-meta.alarm-line { color: #c2410c !important; font-weight: 600 !important; }
+@media (prefers-reduced-motion: reduce) {
+  .alarm-btn.ringing, .alarm-btn.ringing svg { animation: none; }
+  .alarm-btn.ringing { box-shadow: 0 0 0 3px rgba(229, 72, 77, .45); }
+}
+
+/* Форма доп. данных стала длиннее (Ф.И.О., должность) — влезает в низкий экран */
+.sx-modal { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); }
+.sx-body { overflow-y: auto; min-height: 0; }

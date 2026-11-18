@@ -1,0 +1,390 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Тёмная тема разделов «Страхование» и «Анализ ОППВ» — в стиле HUD-дашборда
+   (hud.css): тёмно-синий фон с сеткой, «стеклянные» карточки, циановые акценты.
+
+   Включается атрибутом <html data-theme="dark"> (ставит Dashboard.jsx, выбор
+   хранится в браузере; по умолчанию — тёмная). Атрибут на <html>, а не на
+   .dashboard, потому что меню статусов, паспорт предприятия и формы рендерятся
+   порталом в body. Шапка берёт готовые HUD-стили: в тёмной теме на .dashboard
+   вешается и класс .hud-active. Светлая тема этим файлом не затрагивается.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-theme="dark"] {
+  --d-tx: #eaf4ff;
+  --d-dim: #8fa8d4;
+  --d-cyan: #22d3ee;
+  --d-line: rgba(56, 189, 248, .22);
+  --d-line-hi: rgba(56, 189, 248, .48);
+  --d-field: rgba(8, 20, 52, .78);          /* поля ввода */
+  --d-pop: #0a1838;                          /* всплывающие окна (непрозрачные) */
+  --d-pop-head: #0e2150;
+  --d-row: rgba(56, 189, 248, .09);          /* разделители строк */
+  --d-hover: rgba(34, 211, 238, .10);
+  --d-glass: linear-gradient(160deg, rgba(30, 62, 130, .42) 0%, rgba(12, 26, 66, .55) 48%, rgba(8, 18, 48, .62) 100%);
+  --d-edge: linear-gradient(90deg, transparent, #22d3ee, rgba(59, 130, 246, .85), transparent);
+  scrollbar-color: #27468a #060d24;
+}
+html[data-theme="dark"] body { background-color: #04081a; }
+
+/* ── Фон страницы: как у дашборда (свечение сверху + технологическая сетка) ── */
+.dashboard.theme-dark {
+  color: var(--d-tx);
+  background:
+    radial-gradient(900px 600px at 50% -5%, rgba(34, 211, 238, .13), transparent 62%),
+    linear-gradient(rgba(56, 189, 248, .045) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(56, 189, 248, .045) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(170deg, #081130 0%, #050b22 45%, #04081a 100%);
+  background-attachment: fixed;
+}
+
+/* ── Стеклянные карточки: метрики, фильтры, таблица ── */
+html[data-theme="dark"] .metric-card,
+html[data-theme="dark"] .filters-section,
+html[data-theme="dark"] .table-section,
+html[data-theme="dark"] .upload-section {
+  position: relative;
+  background: var(--d-edge) no-repeat top left 16px / calc(100% - 32px) 1px, var(--d-glass);
+  border: 1px solid rgba(56, 189, 248, .30);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, .06), 0 14px 46px rgba(0, 0, 0, .5),
+    0 0 36px rgba(34, 211, 238, .10), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+/* угловые HUD-скобки */
+html[data-theme="dark"] .metric-card::before,
+html[data-theme="dark"] .filters-section::before,
+html[data-theme="dark"] .table-section::before {
+  content: ""; position: absolute; inset: 7px; border-radius: 12px; pointer-events: none;
+  --c: rgba(34, 211, 238, .9);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 1px 14px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 1px 14px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 1px 14px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 1px 14px no-repeat;
+  opacity: .28;
+}
+
+/* метрики */
+html[data-theme="dark"] .metric-card.insured { border-left: 3px solid #2ee6c5; }
+html[data-theme="dark"] .metric-card.not-insured { border-left: 3px solid #ff6b70; }
+html[data-theme="dark"] .metric-icon { color: var(--d-cyan); filter: drop-shadow(0 0 8px rgba(34, 211, 238, .55)); }
+html[data-theme="dark"] .metric-card.insured .metric-icon { color: #2ee6c5; filter: drop-shadow(0 0 8px rgba(46, 230, 197, .5)); }
+html[data-theme="dark"] .metric-card.not-insured .metric-icon { color: #ff8a8e; filter: drop-shadow(0 0 8px rgba(255, 107, 112, .5)); }
+html[data-theme="dark"] .metric-value { color: #fff; text-shadow: 0 0 18px rgba(34, 211, 238, .35); font-variant-numeric: tabular-nums; }
+html[data-theme="dark"] .metric-label { color: var(--d-dim); }
+html[data-theme="dark"] .metric-bins { color: #6f86b4; }
+
+/* заголовки и подписи */
+html[data-theme="dark"] .filters-section h3,
+html[data-theme="dark"] .upload-section h3 { color: #fff; text-shadow: 0 0 18px rgba(34, 211, 238, .3); }
+html[data-theme="dark"] .filters-section h3 svg { color: var(--d-cyan); }
+html[data-theme="dark"] .filter-group label { color: var(--d-dim); }
+html[data-theme="dark"] .table-header span { color: var(--d-dim); }
+html[data-theme="dark"] .table-header,
+html[data-theme="dark"] .pagination-bottom,
+html[data-theme="dark"] .filter-actions { border-color: var(--d-line); }
+html[data-theme="dark"] .table-header .tl-legend span { color: var(--d-dim); }
+html[data-theme="dark"] .tl-dot { box-shadow: 0 0 8px currentColor; }
+html[data-theme="dark"] .tl-dot.green { background: #2ee696; color: rgba(46, 230, 150, .7); }
+html[data-theme="dark"] .tl-dot.yellow { background: #ffb347; color: rgba(255, 179, 71, .7); }
+html[data-theme="dark"] .tl-dot.red { background: #ff6b70; color: rgba(255, 107, 112, .7); }
+
+/* ── Поля ввода и списки ── */
+html[data-theme="dark"] .filter-group input,
+html[data-theme="dark"] .filter-group select,
+html[data-theme="dark"] .logs-toolbar input,
+html[data-theme="dark"] .user-create-form input,
+html[data-theme="dark"] .user-create-form select,
+html[data-theme="dark"] .logs-modal input[type="text"],
+html[data-theme="dark"] .logs-modal input[type="password"],
+html[data-theme="dark"] .logs-modal select {
+  background: var(--d-field) !important;
+  border: 1px solid rgba(56, 189, 248, .32) !important;
+  color: var(--d-tx);
+  color-scheme: dark;
+}
+html[data-theme="dark"] .filter-group input::placeholder,
+html[data-theme="dark"] .logs-modal input::placeholder,
+html[data-theme="dark"] .sx-field input::placeholder,
+html[data-theme="dark"] .sx-field textarea::placeholder { color: rgba(143, 168, 212, .55); }
+html[data-theme="dark"] .filter-group input:focus,
+html[data-theme="dark"] .filter-group select:focus,
+html[data-theme="dark"] .logs-modal input:focus,
+html[data-theme="dark"] .logs-modal select:focus {
+  border-color: var(--d-cyan) !important;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, .16);
+}
+html[data-theme="dark"] .filter-group select option,
+html[data-theme="dark"] .logs-modal select option { background: #0b1a40; color: var(--d-tx); }
+
+/* автодополнение */
+html[data-theme="dark"] .suggestions-dropdown {
+  background: var(--d-pop); border-color: var(--d-line-hi);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .6); color-scheme: dark;
+}
+html[data-theme="dark"] .suggestion-item { color: var(--d-tx); border-bottom-color: var(--d-row); }
+html[data-theme="dark"] .suggestion-item:hover { background: var(--d-hover); color: #fff; }
+
+/* ── Кнопки ── */
+html[data-theme="dark"] .apply-btn {
+  background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #04162a; font-weight: 600;
+  box-shadow: 0 0 18px rgba(34, 211, 238, .35), inset 0 1px 0 rgba(255, 255, 255, .3);
+}
+html[data-theme="dark"] .apply-btn:hover { background: linear-gradient(135deg, #4be0f5, #5b9bff); box-shadow: 0 0 26px rgba(34, 211, 238, .55); }
+html[data-theme="dark"] .reset-btn {
+  background: rgba(10, 24, 60, .7); color: var(--d-tx); border: 1px solid var(--d-line);
+}
+html[data-theme="dark"] .reset-btn:hover { background: rgba(34, 211, 238, .14); border-color: var(--d-line-hi); }
+html[data-theme="dark"] .download-btn {
+  background: rgba(46, 230, 197, .13); color: #8ff5e2; border: 1px solid rgba(46, 230, 197, .45);
+}
+html[data-theme="dark"] .download-btn:hover { background: rgba(46, 230, 197, .24); border-color: rgba(46, 230, 197, .8); color: #fff; }
+html[data-theme="dark"] .pagination button,
+html[data-theme="dark"] .pagination-bottom button,
+html[data-theme="dark"] .logs-pagination button {
+  background: rgba(10, 24, 60, .7); border: 1px solid var(--d-line); color: var(--d-tx);
+}
+html[data-theme="dark"] .pagination button:hover:not(:disabled),
+html[data-theme="dark"] .pagination-bottom button:hover:not(:disabled),
+html[data-theme="dark"] .logs-pagination button:not(:disabled):hover {
+  background: rgba(34, 211, 238, .14); border-color: var(--d-line-hi);
+}
+html[data-theme="dark"] .loading-bar { background: rgba(56, 189, 248, .14); }
+html[data-theme="dark"] .loading-bar-inner { background: var(--d-cyan); box-shadow: 0 0 10px rgba(34, 211, 238, .7); }
+
+/* ── Таблица AG Grid ── */
+html[data-theme="dark"] .ag-theme-alpine {
+  --ag-foreground-color: #eaf4ff;
+  --ag-data-color: #eaf4ff;
+  --ag-secondary-foreground-color: #8fa8d4;
+  --ag-disabled-foreground-color: rgba(143, 168, 212, .5);
+  --ag-background-color: #0a1736;
+  --ag-odd-row-background-color: #0c1b40;
+  --ag-header-background-color: #0f2253;
+  --ag-header-foreground-color: #d6e6ff;
+  --ag-header-cell-hover-background-color: #16306c;
+  --ag-header-cell-moving-background-color: #16306c;
+  --ag-subheader-background-color: #0f2253;
+  --ag-control-panel-background-color: #0c1b40;
+  --ag-tooltip-background-color: #0e2150;
+  --ag-row-hover-color: rgba(34, 211, 238, .10);
+  --ag-selected-row-background-color: rgba(34, 211, 238, .18);
+  --ag-border-color: rgba(56, 189, 248, .28);
+  --ag-secondary-border-color: rgba(56, 189, 248, .12);
+  --ag-row-border-color: rgba(56, 189, 248, .10);
+  --ag-input-border-color: rgba(56, 189, 248, .35);
+  --ag-input-focus-border-color: #22d3ee;
+  --ag-input-disabled-background-color: rgba(8, 20, 52, .5);
+  --ag-input-disabled-border-color: rgba(56, 189, 248, .15);
+  --ag-alpine-active-color: #22d3ee;
+  --ag-active-color: #22d3ee;
+  --ag-range-selection-border-color: #22d3ee;
+  --ag-checkbox-unchecked-color: #8fa8d4;
+  --ag-checkbox-background-color: #0a1736;
+  --ag-icon-font-color: #8fa8d4;
+  --ag-modal-overlay-background-color: rgba(4, 8, 26, .66);
+  --ag-popup-shadow: 0 14px 40px rgba(0, 0, 0, .6);
+  --ag-card-shadow: 0 14px 40px rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
+html[data-theme="dark"] .ag-theme-alpine .ag-root-wrapper { border-radius: 10px; }
+html[data-theme="dark"] .ag-theme-alpine input[class^="ag-"],
+html[data-theme="dark"] .ag-theme-alpine .ag-picker-field-wrapper {
+  background-color: #081434; color: #eaf4ff;
+}
+html[data-theme="dark"] .ag-theme-alpine input[class^="ag-"]::placeholder { color: rgba(143, 168, 212, .55); }
+html[data-theme="dark"] .ag-theme-alpine .ag-menu,
+html[data-theme="dark"] .ag-theme-alpine .ag-select-list,
+html[data-theme="dark"] .ag-theme-alpine .ag-tooltip {
+  background-color: #0a1838; color: #eaf4ff; border-color: rgba(56, 189, 248, .4);
+}
+/* строка «Итого» в ОППВ (у неё инлайн-фон светлой темы) */
+html[data-theme="dark"] .ag-theme-alpine .ag-row-pinned {
+  background: #13295f !important; color: #fff;
+}
+
+/* сероватый столбец «Статус КГИТ» */
+html[data-theme="dark"] .ag-theme-alpine .kgit-col-cell { background: rgba(143, 168, 212, .09); }
+html[data-theme="dark"] .ag-theme-alpine [col-id="kgit_status"].ag-header-cell,
+html[data-theme="dark"] .ag-theme-alpine [col-id="kgit_status"].ag-header-cell .ag-header-cell-comp-wrapper,
+html[data-theme="dark"] .ag-theme-alpine .ag-floating-filter.kgit-ff,
+html[data-theme="dark"] .ag-theme-alpine .ag-floating-filter.kgit-ff * {
+  background: #1a2f63 !important;
+}
+
+/* ячейки */
+html[data-theme="dark"] .company-link { color: #6fe6ff; border-bottom-color: rgba(111, 230, 255, .4); }
+html[data-theme="dark"] .company-link:hover { color: #fff; border-bottom-color: #fff; }
+html[data-theme="dark"] .ins-yes { color: #5eeaa0; }
+html[data-theme="dark"] .ins-yes svg { background: #16a34a; }
+html[data-theme="dark"] .ins-no { color: #ff8a8e; }
+html[data-theme="dark"] .ins-no svg { background: #dc4046; }
+html[data-theme="dark"] .ins-na { color: #6f86b4; }
+
+/* поле статуса в ячейке */
+html[data-theme="dark"] .status-trigger {
+  background: rgba(8, 20, 52, .9); border-color: rgba(56, 189, 248, .30); color: var(--d-tx);
+}
+html[data-theme="dark"] .status-trigger:hover { border-color: var(--d-cyan); box-shadow: 0 0 10px rgba(34, 211, 238, .25); }
+html[data-theme="dark"] .status-readonly { color: #c9dcff; }
+html[data-theme="dark"] .status-trigger-sub { color: var(--d-dim); }
+html[data-theme="dark"] .status-caret { color: var(--d-dim); }
+html[data-theme="dark"] .status-hist-btn { color: var(--d-dim); }
+html[data-theme="dark"] .status-hist-btn:hover,
+html[data-theme="dark"] .status-hist-btn.on { background: var(--d-hover); color: #fff; border-color: var(--d-line-hi); }
+
+/* «светофор» на тёмном */
+html[data-theme="dark"] .ag-theme-alpine .status-col-cell.tl-green  { background: rgba(46, 230, 150, .22); }
+html[data-theme="dark"] .ag-theme-alpine .status-col-cell.tl-yellow { background: rgba(255, 179, 71, .24); }
+html[data-theme="dark"] .ag-theme-alpine .status-col-cell.tl-red    { background: rgba(255, 90, 95, .32); }
+html[data-theme="dark"] .tl-green  .status-trigger { background: rgba(46, 230, 150, .26); border-color: #2ee696; }
+html[data-theme="dark"] .tl-yellow .status-trigger { background: rgba(255, 179, 71, .30); border-color: #ffb347; }
+html[data-theme="dark"] .tl-red    .status-trigger { background: rgba(255, 90, 95, .38); border-color: #ff6b70; box-shadow: 0 0 10px rgba(255, 107, 112, .35); }
+html[data-theme="dark"] .tl-green .status-trigger-text,
+html[data-theme="dark"] .tl-yellow .status-trigger-text,
+html[data-theme="dark"] .tl-red .status-trigger-text,
+html[data-theme="dark"] .tl-red .status-readonly { color: #fff; }
+html[data-theme="dark"] .tl-green .status-trigger-sub,
+html[data-theme="dark"] .tl-yellow .status-trigger-sub,
+html[data-theme="dark"] .tl-red .status-trigger-sub { color: #dbe7ff; }
+
+/* ── Всплывающие окна (порталы в body) ── */
+html[data-theme="dark"] .status-menu,
+html[data-theme="dark"] .status-hist-pop {
+  background: var(--d-pop); border-color: var(--d-line-hi); color: var(--d-tx);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .65), 0 0 24px rgba(34, 211, 238, .12);
+  color-scheme: dark;
+}
+html[data-theme="dark"] .status-opt:hover { background: var(--d-hover); }
+html[data-theme="dark"] .status-opt.sel { background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #04162a; font-weight: 600; }
+html[data-theme="dark"] .status-hist-head { background: var(--d-pop-head); color: #fff; border-bottom-color: var(--d-line); }
+html[data-theme="dark"] .status-hist-empty { color: var(--d-dim); }
+html[data-theme="dark"] .status-hist-item { border-bottom-color: var(--d-row); }
+html[data-theme="dark"] .status-hist-when { color: var(--d-dim); }
+html[data-theme="dark"] .status-hist-when b { color: var(--d-tx); }
+html[data-theme="dark"] .status-hist-change .old { color: #6f86b4; }
+html[data-theme="dark"] .status-hist-change .arr { color: #6f86b4; }
+html[data-theme="dark"] .status-hist-change .new { color: #fff; }
+
+/* форма доп. данных статуса */
+html[data-theme="dark"] .sx-overlay,
+html[data-theme="dark"] .pp-overlay,
+html[data-theme="dark"] .logs-overlay { background: rgba(2, 8, 22, .72); backdrop-filter: blur(3px); }
+html[data-theme="dark"] .sx-modal,
+html[data-theme="dark"] .pp-modal,
+html[data-theme="dark"] .logs-modal {
+  background: #071226; color: var(--d-tx);
+  border: 1px solid rgba(56, 189, 248, .28);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65), 0 0 40px rgba(34, 211, 238, .10);
+  color-scheme: dark;
+}
+html[data-theme="dark"] .sx-head { border-bottom-color: var(--d-line); }
+html[data-theme="dark"] .sx-title { color: var(--d-dim); }
+html[data-theme="dark"] .sx-status { color: #fff; }
+html[data-theme="dark"] .sx-field { color: var(--d-dim); }
+html[data-theme="dark"] .sx-field i { color: #ff8a8e; }
+html[data-theme="dark"] .sx-field input,
+html[data-theme="dark"] .sx-field textarea {
+  background: var(--d-field); border-color: rgba(56, 189, 248, .32); color: var(--d-tx);
+}
+html[data-theme="dark"] .sx-field input:focus,
+html[data-theme="dark"] .sx-field textarea:focus { border-color: var(--d-cyan); box-shadow: 0 0 0 3px rgba(34, 211, 238, .16); }
+html[data-theme="dark"] .sx-err { color: #ffb3b6; background: rgba(255, 90, 95, .16); }
+html[data-theme="dark"] .sx-foot { background: #0a1730; border-top-color: var(--d-line); }
+html[data-theme="dark"] .sx-cancel { background: rgba(10, 24, 60, .7); border-color: var(--d-line); color: var(--d-tx); }
+html[data-theme="dark"] .sx-save { background: linear-gradient(135deg, #22d3ee, #3b82f6); border-color: transparent; color: #04162a; }
+
+/* паспорт предприятия */
+html[data-theme="dark"] .pp-head { background: #0a1730; border-bottom-color: var(--d-line); }
+html[data-theme="dark"] .pp-kicker { color: var(--d-cyan); }
+html[data-theme="dark"] .pp-title { color: #fff; }
+html[data-theme="dark"] .pp-bin { color: var(--d-dim); }
+html[data-theme="dark"] .pp-close { background: rgba(10, 24, 60, .7); border-color: var(--d-line); color: var(--d-dim); }
+html[data-theme="dark"] .pp-close:hover { background: var(--d-hover); color: #fff; }
+html[data-theme="dark"] .pp-empty { color: var(--d-dim); }
+html[data-theme="dark"] .pp-section { border-color: var(--d-line); background: rgba(12, 26, 66, .45); }
+html[data-theme="dark"] .pp-section h4 { color: #fff; }
+html[data-theme="dark"] .pp-row { border-top-color: var(--d-row); }
+html[data-theme="dark"] .pp-row dt { color: var(--d-dim); }
+html[data-theme="dark"] .pp-row dd { color: var(--d-tx); }
+html[data-theme="dark"] .pp-row.sub dt,
+html[data-theme="dark"] .pp-row.sub dd { color: #6f86b4; }
+html[data-theme="dark"] .pp-table th { color: var(--d-dim); border-bottom-color: var(--d-line); }
+html[data-theme="dark"] .pp-table td { color: var(--d-tx); border-bottom-color: var(--d-row); }
+
+/* колокольчик и будильник: выпадающие списки */
+html[data-theme="dark"] .notif-pop {
+  background: var(--d-pop); border-color: var(--d-line-hi);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .65), 0 0 24px rgba(34, 211, 238, .12);
+  color-scheme: dark;
+}
+html[data-theme="dark"] .notif-head { background: var(--d-pop-head); border-bottom-color: var(--d-line); }
+html[data-theme="dark"] .notif-item { background: transparent; border-bottom-color: var(--d-row); }
+html[data-theme="dark"] .notif-item:hover { background: var(--d-hover); }
+html[data-theme="dark"] .notif-item.unread { background: rgba(34, 211, 238, .08); }
+html[data-theme="dark"] .notif-item.unread .notif-dot { background: var(--d-cyan); box-shadow: 0 0 8px rgba(34, 211, 238, .7); }
+html[data-theme="dark"] .notif-item.unread .notif-dot.to_gak { background: #ffb347; box-shadow: 0 0 8px rgba(255, 179, 71, .7); }
+html[data-theme="dark"] .notif-item.unread .notif-dot.alarm { background: #ff6b70; box-shadow: 0 0 8px rgba(255, 107, 112, .7); }
+html[data-theme="dark"] .notif-empty { color: var(--d-dim); }
+html[data-theme="dark"] .user-info .notif-wrap .notif-head span { color: #fff !important; }
+html[data-theme="dark"] .user-info .notif-wrap .notif-msg { color: var(--d-tx) !important; }
+html[data-theme="dark"] .user-info .notif-wrap .notif-meta { color: var(--d-dim) !important; }
+html[data-theme="dark"] .user-info .notif-wrap .notif-meta.alarm-line { color: #ffb347 !important; }
+/* будильник с просрочками в HUD-шапке */
+html[data-theme="dark"] .alarm-btn.has,
+.hud-active .alarm-btn.has {
+  color: #ffb347; background: rgba(255, 179, 71, .12); border-color: rgba(255, 179, 71, .5);
+}
+html[data-theme="dark"] .alarm-btn.has:hover,
+html[data-theme="dark"] .alarm-btn.has.on,
+.hud-active .alarm-btn.has:hover,
+.hud-active .alarm-btn.has.on { color: #fff; background: rgba(255, 179, 71, .24); border-color: #ffb347; }
+
+/* ── Модалки: админ-панель, файлы ── */
+html[data-theme="dark"] .logs-modal-header,
+html[data-theme="dark"] .logs-toolbar,
+html[data-theme="dark"] .admin-tabs,
+html[data-theme="dark"] .logs-pagination { border-color: var(--d-line); }
+html[data-theme="dark"] .logs-modal-header h3 { color: #fff; }
+html[data-theme="dark"] .logs-modal-header h3 svg { color: var(--d-cyan); }
+html[data-theme="dark"] .logs-close-btn { color: var(--d-dim); }
+html[data-theme="dark"] .logs-close-btn:hover { background: var(--d-hover); color: #fff; }
+html[data-theme="dark"] .logs-subbar { background: #0a1730; border-color: var(--d-line); color: var(--d-dim); }
+html[data-theme="dark"] .logs-pagination { color: var(--d-dim); }
+html[data-theme="dark"] .admin-tabs button { color: var(--d-dim); }
+html[data-theme="dark"] .admin-tabs button:hover { color: #fff; }
+html[data-theme="dark"] .admin-tabs button.active { color: var(--d-cyan); border-bottom-color: var(--d-cyan); }
+html[data-theme="dark"] .logs-modal p { color: var(--d-tx); }
+/* подписи с инлайн-цветом светлой темы («Загрузка…», «—») */
+html[data-theme="dark"] .logs-modal [style*="color"] { color: var(--d-dim) !important; }
+html[data-theme="dark"] .logs-modal input[type="checkbox"] { accent-color: #22d3ee; }
+html[data-theme="dark"] .users-table th,
+html[data-theme="dark"] .users-table td { border-bottom-color: var(--d-row); color: var(--d-tx); }
+html[data-theme="dark"] .users-table th { background: #0f2253; color: #d6e6ff; }
+html[data-theme="dark"] .users-table tr:hover td { background: rgba(34, 211, 238, .07); }
+html[data-theme="dark"] .user-create-form .eds-toggle {
+  background: var(--d-field); border-color: rgba(56, 189, 248, .32); color: var(--d-tx);
+}
+html[data-theme="dark"] .user-create-form .user-mgmt-msg.ok { color: #5eeaa0; }
+html[data-theme="dark"] .user-create-form .user-mgmt-msg.err { color: #ff8a8e; }
+html[data-theme="dark"] .dropzone {
+  background: rgba(8, 20, 52, .6); border-color: rgba(56, 189, 248, .4); color: var(--d-cyan);
+}
+html[data-theme="dark"] .dropzone:hover { background: rgba(34, 211, 238, .08); border-color: var(--d-line-hi); }
+html[data-theme="dark"] .dropzone.dragover { background: rgba(34, 211, 238, .16); border-color: var(--d-cyan); }
+html[data-theme="dark"] .dropzone.dropzone--uploading { background: rgba(8, 20, 52, .6); }
+html[data-theme="dark"] .dropzone-label { color: #fff; }
+html[data-theme="dark"] .dropzone-hint { color: var(--d-dim); }
+html[data-theme="dark"] .upload-progress { background: rgba(56, 189, 248, .16); }
+html[data-theme="dark"] .upload-progress-bar { background: var(--d-cyan); box-shadow: 0 0 10px rgba(34, 211, 238, .7); }
+
+/* кнопка смены темы в шапке — такая же капсула, как колокольчик */
+.theme-btn svg { transition: transform .35s cubic-bezier(.22, 1, .36, 1); }
+.theme-btn:hover svg { transform: rotate(25deg); }
+
+/* Шапка — отдельный слой (у неё backdrop-filter): без z-index выпадающие списки
+   колокольчика и будильника оказывались ПОД карточками страницы. Ниже боковой
+   навигации дашборда (950) и модалок (1000+). */
+.hud-active .dashboard-header { z-index: 900; }

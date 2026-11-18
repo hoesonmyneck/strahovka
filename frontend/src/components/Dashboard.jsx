@@ -24,7 +24,10 @@ import {
   Check,
   Pencil,
   History,
-  Bell
+  Bell,
+  AlarmClock,
+  Sun,
+  Moon
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
@@ -397,6 +400,126 @@ const NotificationBell = ({ onOpenBin }) => {
   )
 }
 
+// ─── Будильник: просроченные задачи ─────────────────────────────────────────
+// Встречи, дата которых прошла, а итог не обновлён (то же правило, что календарь
+// на дашборде и красный цвет в таблице). Список живой: задача исчезает сама, как
+// только итог обновили. Иконка покачивается, пока есть непросмотренные; открыл
+// список — просмотрел. Счётчик показывает, сколько задач просрочено всего.
+const daysRu = (n) => {
+  const a = Math.abs(n) % 100, b = a % 10
+  if (a > 10 && a < 20) return `${n} дней`
+  if (b === 1) return `${n} день`
+  if (b >= 2 && b <= 4) return `${n} дня`
+  return `${n} дней`
+}
+const OverdueAlarm = ({ onOpenBin }) => {
+  const [counts, setCounts] = useState({ total: 0, unread: 0 })
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState(null)   // null = загрузка
+  const wrapRef = useRef(null)
+
+  const loadCount = useCallback(async () => {
+    try {
+      const r = await api.get('/api/overdue-alerts/count')
+      setCounts({ total: r.data.total || 0, unread: r.data.unread || 0 })
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    loadCount()
+    const t = setInterval(loadCount, 60000)
+    const onVisible = () => { if (document.visibilityState === 'visible') loadCount() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', loadCount)
+    window.addEventListener('notif-refresh', loadCount)   // статус сменили — задача могла закрыться
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', loadCount)
+      window.removeEventListener('notif-refresh', loadCount)
+    }
+  }, [loadCount])
+
+  const loadList = async () => {
+    setItems(null)
+    try {
+      const r = await api.get('/api/overdue-alerts', { params: { limit: 200 } })
+      setItems(r.data.items || [])
+      setCounts((c) => ({ total: r.data.total || 0, unread: 0 }))
+      if (r.data.unread > 0) api.post('/api/overdue-alerts/seen').catch(() => {})
+    } catch {
+      setItems([])
+    }
+  }
+
+  const toggle = () => {
+    if (!open) loadList()
+    setOpen((o) => !o)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const openItem = (it) => {
+    setOpen(false)
+    if (onOpenBin && it.bin != null) onOpenBin(it.bin)
+  }
+
+  const ringing = counts.unread > 0
+  const title = counts.total
+    ? `Просроченных задач: ${counts.total}` + (ringing ? ` (новых: ${counts.unread})` : '')
+    : 'Просроченных задач нет'
+
+  return (
+    <div className="notif-wrap alarm-wrap" ref={wrapRef}>
+      <button type="button" title={title} onClick={toggle}
+        className={'notif-btn alarm-btn' + (open ? ' on' : '') + (ringing ? ' ringing' : '') + (counts.total ? ' has' : '')}>
+        <AlarmClock size={18} />
+        {counts.total > 0 && <span className="notif-badge">{counts.total > 99 ? '99+' : counts.total}</span>}
+      </button>
+      {open && (
+        <div className="notif-pop alarm-pop">
+          <div className="notif-head">
+            <span>Просроченные задачи</span>
+            {counts.total > 0 && <span className="alarm-total">{counts.total}</span>}
+          </div>
+          <div className="notif-body">
+            {items === null ? (
+              <div className="notif-empty">Загрузка…</div>
+            ) : items.length === 0 ? (
+              <div className="notif-empty">Просроченных задач нет</div>
+            ) : items.map((it) => (
+              <button type="button" key={it.bin + it.kgit_date} className={'notif-item' + (it.seen ? '' : ' unread')}
+                onClick={() => openItem(it)}>
+                <span className="notif-dot alarm" />
+                <span className="notif-text">
+                  <span className="notif-msg">{it.bin_name || `БИН ${it.bin}`}</span>
+                  <span className="notif-meta alarm-line">
+                    Встреча {isoToRu(it.kgit_date)}{it.kgit_time ? ` ${it.kgit_time}` : ''} · просрочено {daysRu(it.days_overdue)}
+                  </span>
+                  <span className="notif-meta">
+                    {it.meeting_status ? `Итог не обновлён: ${it.meeting_status}` : 'Итог встречи не проставлен'}
+                    {it.region ? ` · ${it.region}` : ''}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Ячейка статуса: кастомный справочник. Работает для трёх столбцов —
 // «Статус» (status), «Статус КГИТ» (kgit_status), «Статус встречи»
 // (meeting_status) — через cellRendererParams.statusKey. Доступ к простановке
@@ -406,8 +529,16 @@ const NotificationBell = ({ onOpenBin }) => {
 // («Место» убрано — все встречи онлайн; старые значения в базе не показываем)
 const STATUS_EXTRA_COLS = {
   status:         { date: 'status_date' },
-  kgit_status:    { date: 'kgit_date', time: 'kgit_time', reason: 'kgit_reason' },
-  meeting_status: { date: 'meeting_date', reason: 'meeting_reason' },
+  kgit_status:    { date: 'kgit_date', time: 'kgit_time', reason: 'kgit_reason',
+                    rep_name: 'kgit_rep_name', rep_position: 'kgit_rep_position' },
+  meeting_status: { date: 'meeting_date', reason: 'meeting_reason',
+                    rep_name: 'meeting_rep_name', rep_position: 'meeting_rep_position' },
+}
+// Представитель предприятия одной строкой: «Иванов И.И., директор»
+const repLine = (key, data) => {
+  const c = STATUS_EXTRA_COLS[key] || {}
+  return [c.rep_name && data?.[c.rep_name], c.rep_position && data?.[c.rep_position]]
+    .filter(Boolean).join(', ')
 }
 // «Итог» ГАК может ставить, когда в КГИТ одно из этих значений
 const MEETING_ALLOWED_KGIT = ['Встреча назначена', 'Встреча перенесена']
@@ -417,7 +548,7 @@ const todayIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 // «12.11.2026 14:00 · Офис ГАК · причина» — для подписи под значением
-const statusDetails = (key, data) => {
+const statusDetails = (key, data, full = false) => {
   const c = STATUS_EXTRA_COLS[key] || {}
   const parts = []
   const d = c.date && data?.[c.date]
@@ -426,17 +557,22 @@ const statusDetails = (key, data) => {
   else if (t) parts.push(t)
   if (c.place && data?.[c.place]) parts.push(data[c.place])
   if (c.reason && data?.[c.reason]) parts.push(data[c.reason])
+  const rp = repLine(key, data)
+  if (rp) parts.push(full ? `представитель: ${rp}` : rp)
   return parts.join(' · ')
 }
 
 // ─── Форма доп. данных при выборе статуса (дата/время/место/причина) ─────────
-const EXTRA_FIELD_LABELS = { date: 'Дата', time: 'Время', place: 'Место', reason: 'Причина' }
+const EXTRA_FIELD_LABELS = {
+  date: 'Дата', time: 'Время', place: 'Место', reason: 'Причина',
+  rep_name: 'Ф.И.О. представителя предприятия', rep_position: 'Должность представителя',
+}
 const StatusExtrasModal = ({ title, status, rule, initial, onSave, onClose }) => {
   const [vals, setVals] = useState(initial)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const fields = [...rule.required, ...rule.optional]
-  const order = ['date', 'time', 'place', 'reason']
+  const order = ['date', 'time', 'place', 'reason', 'rep_name', 'rep_position']
   const shown = order.filter((f) => fields.includes(f))
 
   useEffect(() => {
@@ -484,6 +620,8 @@ const StatusExtrasModal = ({ title, status, rule, initial, onSave, onClose }) =>
                 {f === 'date' && <input type="date" min={minDate} {...common} autoFocus />}
                 {f === 'time' && <input type="time" {...common} />}
                 {f === 'reason' && <textarea rows={3} maxLength={500} placeholder="Укажите причину" {...common} />}
+                {f === 'rep_name' && <input type="text" maxLength={200} placeholder="Фамилия Имя Отчество" {...common} />}
+                {f === 'rep_position' && <input type="text" maxLength={200} placeholder="Например: директор" {...common} />}
               </label>
             )
           })}
@@ -498,6 +636,14 @@ const StatusExtrasModal = ({ title, status, rule, initial, onSave, onClose }) =>
     document.body,
   )
 }
+
+// «Светофор» ячейки (цвет считает сервер: green / yellow / red)
+const lightRules = (f) => ({
+  'tl-green': (p) => p.data?.[f] === 'green',
+  'tl-yellow': (p) => p.data?.[f] === 'yellow',
+  'tl-red': (p) => p.data?.[f] === 'red',
+})
+const LIGHT_TITLES = { green: 'Выполнено', yellow: 'Ожидание', red: 'Просрочено' }
 
 const StatusCellRenderer = (params) => {
   const ctx = params.context || {}
@@ -517,8 +663,11 @@ const StatusCellRenderer = (params) => {
   const details = value ? statusDetails(key, params.data) : ''
   const meta = params.data?.status_meta?.[key]
   const tipParts = []
-  if (details) tipParts.push(`${value}: ${details}`)
+  if (details) tipParts.push(`${value}: ${statusDetails(key, params.data, true)}`)
   if (meta) tipParts.push(`Изменил: ${meta.by || '—'} · ${fmtDateTime(meta.at)}`)
+  const light = key === 'kgit_status' ? params.data?.kgit_light
+    : key === 'meeting_status' ? params.data?.meeting_light : null
+  if (light) tipParts.push(`Индикатор: ${LIGHT_TITLES[light]}`)
   const tip = tipParts.length ? tipParts.join('\n') : undefined
   const [extrasFor, setExtrasFor] = useState(null)   // статус, для которого открыта форма
   const [open, setOpen] = useState(false)
@@ -592,10 +741,17 @@ const StatusCellRenderer = (params) => {
     const today = todayIso()
     const cur = (same && c.date && d[c.date]) ? String(d[c.date]).slice(0, 10) : ''
     const init = { date: cur && cur >= today ? cur : today }
-    ;['time', 'reason'].forEach((f) => {
+    ;['time', 'reason', 'rep_name', 'rep_position'].forEach((f) => {
       if (!c[f] || !allowed.has(f)) return
       if (same || f !== 'reason') init[f] = d[c[f]] || ''
     })
+    // Итог встречи: представитель обычно тот же, с кем ДКГИТ назначал встречу —
+    // подставляем его, если у итога свой ещё не указан (можно исправить).
+    if (key === 'meeting_status') {
+      ;[['rep_name', 'kgit_rep_name'], ['rep_position', 'kgit_rep_position']].forEach(([f, src]) => {
+        if (allowed.has(f) && !init[f] && d[src]) init[f] = d[src]
+      })
+    }
     return init
   }
 
@@ -725,6 +881,19 @@ const Dashboard = () => {
   const [section, setSection] = useState(() => localStorage.getItem('section') || 'insurance')
 
   useEffect(() => { localStorage.setItem('section', section) }, [section])
+
+  // Тема разделов «Страхование» и «Анализ ОППВ»: тёмная (HUD, как дашборд) —
+  // по умолчанию у всех; светлую можно включить кнопкой в шапке. Выбор хранится
+  // в браузере. Атрибут вешаем на <html>, чтобы тема доходила и до окон,
+  // которые рендерятся порталом в body (меню статусов, паспорт, формы).
+  const [theme, setTheme] = useState(() => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'))
+  const isDark = theme === 'dark'
+  // layout-эффект: атрибут ставится до первой отрисовки — без «белой вспышки»
+  React.useLayoutEffect(() => {
+    localStorage.setItem('theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+    return () => document.documentElement.removeAttribute('data-theme')   // экран входа — без темы
+  }, [theme])
 
   // Переход в/из «Дашборда» сопровождаем анимацией-перелистыванием
   const [hudTransition, setHudTransition] = useState(false)
@@ -943,8 +1112,9 @@ const Dashboard = () => {
       headerClass: 'kgit-header',
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'kgit_status' },
-      cellClass: 'status-col-cell',
-      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center', background: '#eceef2' },
+      cellClass: 'status-col-cell kgit-col-cell',
+      cellClassRules: lightRules('kgit_light'),
+      cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
     {
       field: 'meeting_status',
@@ -956,6 +1126,7 @@ const Dashboard = () => {
       cellRenderer: StatusCellRenderer,
       cellRendererParams: { statusKey: 'meeting_status' },
       cellClass: 'status-col-cell',
+      cellClassRules: lightRules('meeting_light'),
       cellStyle: { overflow: 'visible', display: 'flex', alignItems: 'center' },
     },
   ], [])  // useMemo — колонки не пересоздаются при ре-рендере
@@ -1543,7 +1714,7 @@ const Dashboard = () => {
     const bin = row?.bin
     if (bin == null) return false
     const body = { bin, field, status }
-    ;['date', 'time', 'place', 'reason'].forEach((k) => {
+    ;['date', 'time', 'place', 'reason', 'rep_name', 'rep_position'].forEach((k) => {
       const v = extras[k]
       if (v != null && String(v).trim() !== '') body[k] = String(v).trim()
     })
@@ -1613,7 +1784,8 @@ const Dashboard = () => {
   }, [tintKgitFilter])
 
   return (
-    <div className={'dashboard' + (section === 'dashboard' ? ' hud-active' : '')}>
+    <div className={'dashboard' + (section === 'dashboard' || isDark ? ' hud-active' : '')
+      + (isDark && section !== 'dashboard' ? ' theme-dark' : '')}>
       <header className="dashboard-header">
         <div>
           <h1>Государственная компания по страхованию жизни</h1>
@@ -1667,6 +1839,12 @@ const Dashboard = () => {
             )}
           </div>
           <NotificationBell onOpenBin={openBinFromNotification} />
+          <OverdueAlarm onOpenBin={openBinFromNotification} />
+          <button type="button" className="notif-btn theme-btn"
+            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            title={isDark ? 'Включить светлую тему' : 'Включить тёмную тему'}>
+            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <span>{user?.username}</span>
           {!isAdmin() && !isManager() && !isDkgit() && (
             <button onClick={openFiles} className="files-btn">
@@ -2485,6 +2663,11 @@ const Dashboard = () => {
         )}
         <div className="table-header">
           <span>Всего: {totalRecords.toLocaleString()} организаций</span>
+          <div className="tl-legend" title="Цвет ячеек «Статус КГИТ» и «Статус встречи» у предприятий в работе ДКГИТ">
+            <span><i className="tl-dot green" /> выполнено</span>
+            <span><i className="tl-dot yellow" /> ожидание</span>
+            <span><i className="tl-dot red" /> просрочено</span>
+          </div>
           <div className="pagination">
             <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}>← Назад</button>
             <span>Страница {currentPage} из {totalPages}</span>

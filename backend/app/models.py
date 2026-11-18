@@ -211,6 +211,11 @@ class BinStatus(Base):
     kgit_reason = Column(String(500))
     meeting_date = Column(Date)
     meeting_reason = Column(String(500))
+    # Представитель предприятия, с которым планируется / проведена встреча
+    kgit_rep_name = Column(String(200))
+    kgit_rep_position = Column(String(200))
+    meeting_rep_name = Column(String(200))
+    meeting_rep_position = Column(String(200))
     updated_by = Column(String(50), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -230,6 +235,18 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
 
 
+class OverdueSeen(Base):
+    """Будильник «просроченные задачи»: какие просрочки пользователь уже видел.
+    Ключ включает дату встречи — после переноса встречи новая просрочка по тому
+    же БИН снова непрочитанная."""
+    __tablename__ = "overdue_seen"
+
+    user_id = Column(Integer, primary_key=True)
+    bin = Column(BigInteger, primary_key=True)
+    kgit_date = Column(Date, primary_key=True)
+    seen_at = Column(DateTime, default=datetime.utcnow)
+
+
 class BinStatusHistory(Base):
     """Журнал изменений статусов: каждое изменение любого из трёх столбцов —
     отдельная запись (было → стало, кто, когда). Нужен, чтобы разбирать
@@ -239,7 +256,7 @@ class BinStatusHistory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     bin = Column(BigInteger, index=True)
     field = Column(String(30))            # status | kgit_status | meeting_status
-    old_value = Column(String(200), nullable=True)
-    new_value = Column(String(200), nullable=True)
+    old_value = Column(String(1000), nullable=True)
+    new_value = Column(String(1000), nullable=True)
     changed_by = Column(String(50), nullable=True)
     changed_at = Column(DateTime, default=datetime.utcnow, index=True)

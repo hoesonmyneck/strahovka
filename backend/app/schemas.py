@@ -51,6 +51,14 @@ class InsuranceRecordResponse(InsuranceRecordBase):
     kgit_reason: Optional[str] = None
     meeting_date: Optional[date] = None
     meeting_reason: Optional[str] = None
+    # Представитель предприятия (Ф.И.О., должность) у статуса КГИТ и у итога
+    kgit_rep_name: Optional[str] = None
+    kgit_rep_position: Optional[str] = None
+    meeting_rep_name: Optional[str] = None
+    meeting_rep_position: Optional[str] = None
+    # «Светофор» ячеек: green / yellow / red / None (считает сервер)
+    kgit_light: Optional[str] = None
+    meeting_light: Optional[str] = None
     # Кто/когда последний раз менял каждый столбец: {field: {by, at}}
     status_meta: Optional[dict] = None
 
@@ -67,6 +75,8 @@ class BinStatusUpdate(BaseModel):
     time: Optional[str] = None
     place: Optional[str] = None
     reason: Optional[str] = None
+    rep_name: Optional[str] = None        # Ф.И.О. представителя предприятия
+    rep_position: Optional[str] = None    # его должность
 
 class InsuranceRecordList(BaseModel):
     items: List[InsuranceRecordResponse]

@@ -203,6 +203,26 @@ with engine.connect() as _conn:
                read_at    TIMESTAMP
            )""",
         "CREATE INDEX IF NOT EXISTS idx_notif_user_read ON notifications (user_id, read_at, created_at DESC)",
+        # Представитель предприятия (Ф.И.О. и должность) к статусу КГИТ и к итогу
+        # встречи — только ADD COLUMN, существующие данные не трогаем.
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_rep_name VARCHAR(200)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS kgit_rep_position VARCHAR(200)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS meeting_rep_name VARCHAR(200)",
+        "ALTER TABLE bin_status ADD COLUMN IF NOT EXISTS meeting_rep_position VARCHAR(200)",
+        # В журнал теперь пишутся и данные представителя — значение длиннее
+        # (расширение VARCHAR: данные не меняются, таблица не переписывается)
+        "ALTER TABLE bin_status_history ALTER COLUMN old_value TYPE VARCHAR(1000)",
+        "ALTER TABLE bin_status_history ALTER COLUMN new_value TYPE VARCHAR(1000)",
+        # Будильник «просроченные задачи»: что пользователь уже видел. Ключ —
+        # (пользователь, БИН, дата встречи): новая просрочка по тому же БИН
+        # (после переноса встречи) снова считается непрочитанной.
+        """CREATE TABLE IF NOT EXISTS overdue_seen (
+               user_id   INTEGER NOT NULL,
+               bin       BIGINT  NOT NULL,
+               kgit_date DATE    NOT NULL,
+               seen_at   TIMESTAMP DEFAULT NOW(),
+               PRIMARY KEY (user_id, bin, kgit_date)
+           )""",
         "ALTER TABLE insurance_records ADD COLUMN IF NOT EXISTS is_passport INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_insurance_is_passport ON insurance_records (is_passport)",
         # Размер предприятия (ORG_SIZE): Малое/Среднее/Крупное
@@ -1209,25 +1229,7 @@ def expiry_list(
         item.is_insured = company_status(obl, act, ins_old)
         items.append(item)
 
-    bins = [it.bin for it in items if it.bin is not None]
-    if bins:
-        B = models.BinStatus
-        st = {r.bin: r for r in db.query(B).filter(B.bin.in_(bins)).all()}
-        meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
-        for it in items:
-            r = st.get(it.bin)
-            if r:
-                it.manual_status = r.status
-                it.kgit_status = r.kgit_status
-                it.meeting_status = r.meeting_status
-                it.status_date = r.status_date
-                it.kgit_date = r.kgit_date
-                it.kgit_time = r.kgit_time
-                it.kgit_place = r.kgit_place
-                it.kgit_reason = r.kgit_reason
-                it.meeting_date = r.meeting_date
-                it.meeting_reason = r.meeting_reason
-            it.status_meta = meta.get(it.bin)
+    _attach_statuses(db, items)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
@@ -1634,6 +1636,80 @@ def overdue_meetings_list(
     return {"items": items, "total": len(items)}
 
 
+# ── Будильник «просроченные задачи» (иконка рядом с колокольчиком) ───────────
+# Список считается «вживую» тем же правилом, что календарь дашборда и красный
+# цвет «светофора»: задача пропадает сама, как только итог обновили. В базе
+# хранится только отметка «пользователь это уже видел» (overdue_seen).
+def _overdue_alerts_query(db, user):
+    """Просроченные встречи в зоне видимости пользователя (+ отметка «видел»):
+    регион — как везде; ДКГИТ — только свои строки («Для работы ДКГИТ»)."""
+    B, OS = models.BinStatus, models.OverdueSeen
+    q = _overdue_meetings_query(db, user.region)
+    if user.role == "dkgit":
+        q = q.filter(B.status.in_(DKGIT_VIEW_STATUSES))
+    return q.outerjoin(OS, and_(OS.user_id == user.id, OS.bin == B.bin,
+                                OS.kgit_date == B.kgit_date))
+
+
+@app.get("/api/overdue-alerts/count")
+def overdue_alerts_count(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    """Счётчики будильника: всего просрочено / из них ещё не просмотрено."""
+    B = models.BinStatus
+    OS = models.OverdueSeen
+    total, unread = (_overdue_alerts_query(db, current_user)
+                     .with_entities(func.count(B.bin),
+                                    func.coalesce(func.sum(case((OS.user_id.is_(None), 1), else_=0)), 0))
+                     .one())
+    return {"total": int(total or 0), "unread": int(unread or 0)}
+
+
+@app.get("/api/overdue-alerts")
+def overdue_alerts(
+    limit: int = Query(200, ge=1, le=500),
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    """Список просроченных задач: непросмотренные сверху, затем свежие встречи."""
+    B, OS = models.BinStatus, models.OverdueSeen
+    q = _overdue_alerts_query(db, current_user).add_columns(OS.user_id.label("seen_uid"))
+    total = q.count()
+    today = kz_today()
+    items = []
+    for b, name, reg, seen_uid in (q.order_by(OS.user_id.isnot(None), B.kgit_date.desc(), B.bin.asc())
+                                   .limit(limit).all()):
+        items.append({
+            "bin": _bin12(b.bin), "bin_name": name, "region": reg,
+            "kgit_status": b.kgit_status, "kgit_date": _fd_iso(b.kgit_date), "kgit_time": b.kgit_time,
+            "meeting_status": b.meeting_status, "meeting_date": _fd_iso(b.meeting_date),
+            "days_overdue": (today - b.kgit_date).days,
+            "seen": seen_uid is not None,
+        })
+    return {"items": items, "total": total,
+            "unread": sum(1 for i in items if not i["seen"])}
+
+
+@app.post("/api/overdue-alerts/seen")
+def overdue_alerts_seen(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: Session = Depends(database.get_db),
+):
+    """Пользователь открыл будильник — все текущие просрочки считаем просмотренными."""
+    B, OS = models.BinStatus, models.OverdueSeen
+    pairs = (_overdue_alerts_query(db, current_user)
+             .filter(OS.user_id.is_(None))
+             .with_entities(B.bin, B.kgit_date).all())
+    if pairs:
+        now = datetime.now()
+        stmt = pg_insert(OS.__table__).values(
+            [{"user_id": current_user.id, "bin": b, "kgit_date": d, "seen_at": now} for b, d in pairs])
+        db.execute(stmt.on_conflict_do_nothing())
+        db.commit()
+    return {"unread": 0}
+
+
 # ============ RECORDS ============
 
 # Три независимых столбца статусов по БИН:
@@ -1701,29 +1777,34 @@ STATUS_FIELDS = {
 # показываем, но уже сохранённые значения в базе не трогаем.
 STATUS_EXTRA_COLS = {
     "status":         {"date": "status_date"},
-    "kgit_status":    {"date": "kgit_date", "time": "kgit_time", "reason": "kgit_reason"},
-    "meeting_status": {"date": "meeting_date", "reason": "meeting_reason"},
+    "kgit_status":    {"date": "kgit_date", "time": "kgit_time", "reason": "kgit_reason",
+                       "rep_name": "kgit_rep_name", "rep_position": "kgit_rep_position"},
+    "meeting_status": {"date": "meeting_date", "reason": "meeting_reason",
+                       "rep_name": "meeting_rep_name", "rep_position": "meeting_rep_position"},
 }
+# Представитель предприятия (Ф.И.О., должность) — необязательные поля
+REP = ["rep_name", "rep_position"]
 STATUS_EXTRAS = {
     # «Статус» (ГАК): дату НЕ спрашиваем — сервер ставит сегодняшнюю сам
     # (STATUS_AUTO_DATE); «В работе» — без даты
     "status": {s: {"required": [], "optional": []} for s in INSURANCE_STATUSES},
     "kgit_status": {
         "В работе":              {"required": [], "optional": []},
-        "Встреча назначена":     {"required": ["date", "time"], "optional": []},
-        "Встреча перенесена":    {"required": ["date"], "optional": ["time"]},
-        "Отказано во встрече":   {"required": ["date", "reason"], "optional": []},
+        "Встреча назначена":     {"required": ["date", "time"], "optional": REP},
+        "Встреча перенесена":    {"required": ["date"], "optional": ["time"] + REP},
+        "Отказано во встрече":   {"required": ["date", "reason"], "optional": REP},
     },
     "meeting_status": {
-        "Планирует заключить с ГАК":     {"required": ["date"], "optional": []},
-        "Клиент принимает решение":      {"required": ["date"], "optional": []},
-        "Договор заключен с ГАК":        {"required": ["date"], "optional": []},
-        "Договор заключен с другим КСЖ": {"required": ["date"], "optional": []},
-        "Отказ в заключении с ГАК":      {"required": ["date", "reason"], "optional": []},
-        "Повторная встреча":             {"required": ["date"], "optional": []},
+        "Планирует заключить с ГАК":     {"required": ["date"], "optional": REP},
+        "Клиент принимает решение":      {"required": ["date"], "optional": REP},
+        "Договор заключен с ГАК":        {"required": ["date"], "optional": REP},
+        "Договор заключен с другим КСЖ": {"required": ["date"], "optional": REP},
+        "Отказ в заключении с ГАК":      {"required": ["date", "reason"], "optional": REP},
+        "Повторная встреча":             {"required": ["date"], "optional": REP},
     },
 }
-EXTRA_LABELS = {"date": "дата", "time": "время", "place": "место", "reason": "причина"}
+EXTRA_LABELS = {"date": "дата", "time": "время", "place": "место", "reason": "причина",
+                "rep_name": "Ф.И.О. представителя", "rep_position": "должность представителя"}
 # «Статус» (ГАК): дата ставится автоматически (сегодня), кроме этих значений
 STATUS_NO_DATE = {"В работе"}
 
@@ -1754,6 +1835,11 @@ def get_insurance_statuses(current_user: models.User = Depends(auth.get_current_
             "meeting_status": MEETING_STATUSES, "extras": STATUS_EXTRAS}
 
 
+def _fmt_rep(name, position):
+    """«Иванов И.И., директор» — представитель предприятия одной строкой."""
+    return ", ".join(x for x in ((name or "").strip(), (position or "").strip()) if x) or None
+
+
 def _fmt_status_details(field, status_val, ex: dict) -> str:
     """Текст для журнала: «Встреча назначена (12.11.2026 14:00, Офис)»."""
     if not status_val:
@@ -1767,7 +1853,10 @@ def _fmt_status_details(field, status_val, ex: dict) -> str:
         parts.append(ex["place"])
     if ex.get("reason"):
         parts.append(ex["reason"])
-    return f"{status_val} ({', '.join(parts)})" if parts else status_val
+    rep_ = _fmt_rep(ex.get("rep_name"), ex.get("rep_position"))
+    if rep_:
+        parts.append("представитель: " + rep_)
+    return f"{status_val} ({', '.join(parts)})"[:1000] if parts else status_val
 
 
 def _notify(db, *, bin_, target, message, actor, now):
@@ -1835,7 +1924,9 @@ def set_bin_status(
         allowed = set(rule["required"]) | set(rule["optional"])
         raw = {"date": data.date, "time": (data.time or "").strip() or None,
                "place": (data.place or "").strip() or None,
-               "reason": (data.reason or "").strip() or None}
+               "reason": (data.reason or "").strip() or None,
+               "rep_name": (data.rep_name or "").strip()[:200] or None,
+               "rep_position": (data.rep_position or "").strip()[:200] or None}
         ex = {k: v for k, v in raw.items() if k in allowed and v}
         missing = [EXTRA_LABELS[k] for k in rule["required"] if not ex.get(k)]
         if missing:
@@ -1906,8 +1997,11 @@ def set_bin_status(
 
     db.commit()
     row = db.query(B).filter(B.bin == data.bin).first()
-    return {"bin": data.bin, "field": field, "status": status_val,
-            "row": _bin_status_row_dict(row)}
+    out = _bin_status_row_dict(row)
+    if row:   # «светофор» пересчитываем сразу — ячейки перекрашиваются без перезагрузки
+        ts = _status_change_times(db, [data.bin]).get(data.bin, {})
+        out["kgit_light"], out["meeting_light"] = _status_lights(row, ts, kz_today())
+    return {"bin": data.bin, "field": field, "status": status_val, "row": out}
 
 
 def _bin_status_row_dict(r):
@@ -1916,13 +2010,19 @@ def _bin_status_row_dict(r):
         return {"manual_status": None, "kgit_status": None, "meeting_status": None,
                 "status_date": None, "kgit_date": None, "kgit_time": None,
                 "kgit_place": None, "kgit_reason": None,
-                "meeting_date": None, "meeting_reason": None}
+                "meeting_date": None, "meeting_reason": None,
+                "kgit_rep_name": None, "kgit_rep_position": None,
+                "meeting_rep_name": None, "meeting_rep_position": None,
+                "kgit_light": None, "meeting_light": None}
     iso = lambda d: d.isoformat() if d else None
     return {"manual_status": r.status, "kgit_status": r.kgit_status,
             "meeting_status": r.meeting_status,
             "status_date": iso(r.status_date), "kgit_date": iso(r.kgit_date),
             "kgit_time": r.kgit_time, "kgit_place": r.kgit_place, "kgit_reason": r.kgit_reason,
-            "meeting_date": iso(r.meeting_date), "meeting_reason": r.meeting_reason}
+            "meeting_date": iso(r.meeting_date), "meeting_reason": r.meeting_reason,
+            "kgit_rep_name": r.kgit_rep_name, "kgit_rep_position": r.kgit_rep_position,
+            "meeting_rep_name": r.meeting_rep_name, "meeting_rep_position": r.meeting_rep_position,
+            "kgit_light": None, "meeting_light": None}
 
 
 # Последнее изменение по каждому (БИН, столбец) — для подсказки «кто/когда» в ячейке.
@@ -1940,6 +2040,104 @@ def _status_meta_for_bins(db, bins):
     for b, f, by, at in rows:
         meta.setdefault(b, {})[f] = {"by": by, "at": at.isoformat() if at else None}
     return meta
+
+
+def _status_change_times(db, bins):
+    """{bin: {field: datetime}} — когда последний раз меняли КГИТ и итог
+    (без служебных миграций). Нужно «светофору» и правилу просрочки."""
+    if not bins:
+        return {}
+    H = models.BinStatusHistory
+    rows = (db.query(H.bin, H.field, func.max(H.changed_at))
+            .filter(H.bin.in_(bins), H.field.in_(("kgit_status", "meeting_status")),
+                    H.changed_by != "system-migration")
+            .group_by(H.bin, H.field).all())
+    out = {}
+    for b, f, at in rows:
+        out.setdefault(b, {})[f] = at
+    return out
+
+
+def _is_meeting_overdue(r, ts, today) -> bool:
+    """То же правило, что в _overdue_meetings_query (календарь дашборда и
+    будильник), но для одной строки bin_status: дата встречи прошла, а ГАК не
+    обновил итог после того, как ДКГИТ назначил/перенёс встречу."""
+    if r.kgit_status not in MEETING_DATE_KGIT or not r.kgit_date or r.kgit_date >= today:
+        return False
+    if not r.meeting_status:
+        return True
+    if r.meeting_status in MEETING_FINAL_STATUSES:
+        return False
+    k_at, m_at = ts.get("kgit_status"), ts.get("meeting_status")
+    if k_at:
+        return m_at is None or m_at < k_at
+    return r.meeting_date is None or r.meeting_date < r.kgit_date
+
+
+def _status_lights(r, ts, today):
+    """«Светофор» для ячеек «Статус КГИТ» и «Статус встречи» — только у строк в
+    работе ДКГИТ. Возвращает (kgit_light, meeting_light): green / yellow / red / None.
+      КГИТ:   нет статуса или «В работе» → жёлтый (ждёт действий ДКГИТ);
+              ГАК запросил «Повторную встречу», а новой ещё нет → жёлтый;
+              встреча назначена/перенесена, отказано во встрече → зелёный.
+      Итог:   встреча прошла, итог не обновлён → красный (просрочка);
+              договор с ГАК / с другим КСЖ / отказ → зелёный;
+              встреча впереди или итог промежуточный → жёлтый;
+              встречи нет → без цвета."""
+    if r.status not in DKGIT_VIEW_STATUSES:
+        return None, None
+    k, m = r.kgit_status, r.meeting_status
+    k_at, m_at = ts.get("kgit_status"), ts.get("meeting_status")
+    has_meeting = k in MEETING_DATE_KGIT
+
+    if not k or k == "В работе":
+        kgit = "yellow"
+    elif has_meeting and m == "Повторная встреча" and m_at and (k_at is None or m_at > k_at):
+        kgit = "yellow"
+    else:
+        kgit = "green"
+
+    if _is_meeting_overdue(r, ts, today):
+        meeting = "red"
+    elif m:
+        meeting = "green" if m in MEETING_FINAL_STATUSES else "yellow"
+    elif has_meeting:
+        meeting = "yellow"
+    else:
+        meeting = None
+    return kgit, meeting
+
+
+def _attach_statuses(db, items):
+    """Дописать к строкам страницы статусы по БИН, их доп. данные, «кто/когда
+    менял» и цвета «светофора» — тремя запросами на всю страницу."""
+    bins = [it.bin for it in items if it.bin is not None]
+    if not bins:
+        return
+    B = models.BinStatus
+    st = {r.bin: r for r in db.query(B).filter(B.bin.in_(bins)).all()}
+    meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
+    times = _status_change_times(db, list(st.keys()))
+    today = kz_today()
+    for it in items:
+        r = st.get(it.bin)
+        if r:
+            it.manual_status = r.status
+            it.kgit_status = r.kgit_status
+            it.meeting_status = r.meeting_status
+            it.status_date = r.status_date
+            it.kgit_date = r.kgit_date
+            it.kgit_time = r.kgit_time
+            it.kgit_place = r.kgit_place
+            it.kgit_reason = r.kgit_reason
+            it.meeting_date = r.meeting_date
+            it.meeting_reason = r.meeting_reason
+            it.kgit_rep_name = r.kgit_rep_name
+            it.kgit_rep_position = r.kgit_rep_position
+            it.meeting_rep_name = r.meeting_rep_name
+            it.meeting_rep_position = r.meeting_rep_position
+            it.kgit_light, it.meeting_light = _status_lights(r, times.get(r.bin, {}), today)
+        it.status_meta = meta.get(it.bin)
 
 
 @app.get("/api/insurance/status/history")
@@ -2108,6 +2306,8 @@ def company_passport(
             return None
         extra = ", ".join(x for x in ((fd(d) or "") + (f" {t}" if t else ""), r or "") if x.strip())
         return f"{v} ({extra})" if extra else v
+    def rep_of(status_val, name, position):   # представителя показываем только при статусе
+        return _fmt_rep(name, position) if status_val else None
     meta = _status_meta_for_bins(db, [bin_]).get(bin_, {}) if st else {}
     def who(f):
         m_ = meta.get(f)
@@ -2119,8 +2319,10 @@ def company_passport(
         ("Статус", stat(st.status, st.status_date) if st else None),
         ("  изменил", who("status")),
         ("Статус КГИТ", stat(st.kgit_status, st.kgit_date, st.kgit_time, st.kgit_reason) if st else None),
+        ("  представитель", rep_of(st.kgit_status, st.kgit_rep_name, st.kgit_rep_position) if st else None),
         ("  изменил", who("kgit_status")),
         ("Статус встречи", stat(st.meeting_status, st.meeting_date, None, st.meeting_reason) if st else None),
+        ("  представитель", rep_of(st.meeting_status, st.meeting_rep_name, st.meeting_rep_position) if st else None),
         ("  изменил", who("meeting_status")),
     ])})
     # Скрытые в таблице столбцы (есть в данных и в выгрузке)
@@ -2199,8 +2401,10 @@ def export_bin_status(
     header_fmt = wb.add_format({'bold': True})
     headers = ['БИН', 'Статус', 'Дата статуса',
                'Статус КГИТ', 'Дата КГИТ', 'Время', 'Причина (КГИТ)',
-               'Статус встречи', 'Дата итога', 'Причина (итог)']
-    widths = [16, 50, 13, 24, 12, 8, 36, 30, 12, 36]
+               'Представитель (КГИТ)', 'Должность (КГИТ)',
+               'Статус встречи', 'Дата итога', 'Причина (итог)',
+               'Представитель (итог)', 'Должность (итог)']
+    widths = [16, 50, 13, 24, 12, 8, 36, 30, 24, 30, 12, 36, 30, 24]
     for c, (h, w) in enumerate(zip(headers, widths)):
         ws.set_column(c, c, w)
         ws.write_string(0, c, h, header_fmt)
@@ -2208,7 +2412,9 @@ def export_bin_status(
 
     S, B = models.CompanySummary, models.BinStatus
     cols = (B.status, B.status_date, B.kgit_status, B.kgit_date, B.kgit_time,
-            B.kgit_reason, B.meeting_status, B.meeting_date, B.meeting_reason)
+            B.kgit_reason, B.kgit_rep_name, B.kgit_rep_position,
+            B.meeting_status, B.meeting_date, B.meeting_reason,
+            B.meeting_rep_name, B.meeting_rep_position)
     if only_set:
         q = db.query(B.bin, *cols).order_by(B.bin)
     else:
@@ -2314,25 +2520,7 @@ def get_records(
         items.append(item)
 
     # Подтягиваем ручные статусы по БИН одним запросом для текущей страницы
-    bins = [it.bin for it in items if it.bin is not None]
-    if bins:
-        B = models.BinStatus
-        st = {r.bin: r for r in db.query(B).filter(B.bin.in_(bins)).all()}
-        meta = _status_meta_for_bins(db, bins)  # кто/когда менял каждый столбец
-        for it in items:
-            r = st.get(it.bin)
-            if r:
-                it.manual_status = r.status
-                it.kgit_status = r.kgit_status
-                it.meeting_status = r.meeting_status
-                it.status_date = r.status_date
-                it.kgit_date = r.kgit_date
-                it.kgit_time = r.kgit_time
-                it.kgit_place = r.kgit_place
-                it.kgit_reason = r.kgit_reason
-                it.meeting_date = r.meeting_date
-                it.meeting_reason = r.meeting_reason
-            it.status_meta = meta.get(it.bin)
+    _attach_statuses(db, items)
 
     return schemas.InsuranceRecordList(items=items, total=total, page=page, page_size=page_size)
 
