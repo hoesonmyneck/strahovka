@@ -142,6 +142,10 @@ class UserResponse(UserBase):
     iin: Optional[str] = None
     eds_disabled: int = 0
     full_name: Optional[str] = None
+    # Демонстрационный аккаунт: role здесь — роль текущего вида (user / dkgit),
+    # is_demo = True, demo_view — «gak» или «dkgit»
+    is_demo: bool = False
+    demo_view: Optional[str] = None
 
     class Config:
         from_attributes = True

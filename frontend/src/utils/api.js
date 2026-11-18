@@ -7,6 +7,16 @@ const api = axios.create({
   },
 })
 
+// Демонстрационный аккаунт: какой «вид» сейчас выбран (ГАК / ДКГИТ). Сервер
+// учитывает заголовок только у демо-аккаунта, остальным он безразличен.
+api.interceptors.request.use((config) => {
+  try {
+    const view = localStorage.getItem('demoView')
+    if (view) config.headers['X-Demo-View'] = view
+  } catch {}
+  return config
+})
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {

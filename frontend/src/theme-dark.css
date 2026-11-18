@@ -560,3 +560,28 @@ html[data-theme="dark"] .Toastify__progress-bar--info { background: #22d3ee; }
 /* названия в две строки: цвет пунктира под ссылкой в тёмной теме */
 html[data-theme="dark"] .ag-theme-alpine .cell-2l .company-link { text-decoration-color: rgba(111, 230, 255, .45); }
 html[data-theme="dark"] .ag-theme-alpine .cell-2l .company-link:hover { text-decoration-color: #fff; }
+
+/* ═══════════════ Полоса демонстрационного режима — HUD ═══════════════
+   Действует и на вкладке «Дашборд» (она всегда в HUD-стиле), поэтому правила
+   привязаны к .hud-active, а не к теме. */
+.hud-active .demo-bar {
+  background: linear-gradient(90deg, rgba(60, 38, 8, .96), rgba(14, 26, 62, .96) 45%, rgba(10, 20, 52, .96));
+  border-bottom: 1px solid rgba(255, 179, 71, .5);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .5), 0 0 22px rgba(255, 179, 71, .12);
+  backdrop-filter: blur(10px);
+}
+.hud-active .demo-tag {
+  background: linear-gradient(135deg, #ffcf70, #ffb347); color: #1a1004;
+  box-shadow: 0 0 16px rgba(255, 179, 71, .45);
+}
+.hud-active .demo-note { color: #c9b48a; }
+.hud-active .demo-switch-label { color: #eaf4ff; }
+.hud-active .demo-sides { background: rgba(8, 20, 52, .85); border: 1px solid rgba(56, 189, 248, .30); }
+.hud-active .demo-side { color: #8fa8d4; }
+.hud-active .demo-side:hover:not(.active) { background: rgba(34, 211, 238, .10); color: #fff; }
+.hud-active .demo-side.active {
+  background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #04162a;
+  box-shadow: 0 0 18px rgba(34, 211, 238, .45), inset 0 1px 0 rgba(255, 255, 255, .3);
+}
+.hud-active .demo-reset { background: rgba(10, 24, 60, .7); color: #eaf4ff; border-color: rgba(56, 189, 248, .30); }
+.hud-active .demo-reset:hover:not(:disabled) { background: rgba(255, 179, 71, .16); border-color: rgba(255, 179, 71, .6); color: #fff; }

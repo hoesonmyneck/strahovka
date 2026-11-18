@@ -939,7 +939,8 @@ function HudNav({ items, open, setOpen }) {
       setActive(cur)
       // Панель держится под шапкой: пока шапка на экране — начинается под ней,
       // когда шапка уехала вверх — поднимается к верху окна. Шапку не перекрывает.
-      const hdr = document.querySelector('.dashboard-header')
+      // (если есть полоса демо-режима — она прилипает к верху окна, держимся под ней)
+      const hdr = document.querySelector('.demo-bar') || document.querySelector('.dashboard-header')
       const top = Math.max(16, (hdr ? hdr.getBoundingClientRect().bottom : 0) + 16)
       if (navRef.current) navRef.current.style.setProperty('--nav-top', `${Math.round(top)}px`)
     }

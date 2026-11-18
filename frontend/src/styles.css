@@ -1712,3 +1712,46 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
   text-underline-offset: 3px; text-decoration-thickness: 1px;
 }
 .ag-theme-alpine .cell-2l .company-link:hover { text-decoration-color: currentColor; }
+
+/* ─── Полоса демонстрационного режима (только у демо-аккаунта) ────────────────
+   Прилипает к верху окна, чтобы переключатель «ГАК / ДКГИТ» был под рукой и
+   при прокрутке таблицы. Янтарный цвет — чтобы режим нельзя было спутать с боевым. */
+.demo-bar {
+  position: sticky; top: 0; z-index: 850;
+  display: flex; align-items: center; gap: 14px 18px; flex-wrap: wrap;
+  padding: 8px 30px; background: #fff7ed; border-bottom: 1px solid #fdba74;
+  box-shadow: 0 2px 8px rgba(194, 65, 12, .08);
+}
+.demo-tag {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  padding: 5px 11px; border-radius: 999px; background: #f59e0b; color: #fff;
+  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+}
+.demo-note { color: #9a3412; font-size: 13px; }
+.demo-switch { display: inline-flex; align-items: center; gap: 10px; }
+.demo-switch-label { color: #7c2d12; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.demo-sides { display: inline-flex; gap: 3px; padding: 3px; border-radius: 10px; background: #fed7aa; }
+.demo-side {
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  min-width: 96px; justify-content: center; padding: 8px 18px; border: none; border-radius: 8px;
+  background: transparent; color: #7c2d12; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.demo-side:hover:not(.active) { background: rgba(255, 255, 255, .55); }
+.demo-side.active { background: #fff; color: #c2410c; box-shadow: 0 1px 4px rgba(124, 45, 18, .25); }
+.demo-side:disabled { cursor: default; }
+.demo-side-badge {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #e5484d; color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+}
+/* уведомление ждёт на ДРУГОЙ стороне — счётчик пульсирует, зовёт переключиться */
+.demo-side-badge.pulse { animation: alarm-pulse 1.6s ease-out infinite; }
+.demo-reset {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; margin-left: auto;
+  padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+  background: #fff; color: #9a3412; border: 1px solid #fdba74;
+}
+.demo-reset:hover:not(:disabled) { background: #ffedd5; border-color: #fb923c; }
+.demo-reset:disabled { opacity: .6; cursor: default; }
+@media (max-width: 1100px) { .demo-note { display: none; } }
+@media (prefers-reduced-motion: reduce) { .demo-side-badge.pulse { animation: none; } }

@@ -27,7 +27,9 @@ import {
   Bell,
   AlarmClock,
   Sun,
-  Moon
+  Moon,
+  Presentation,
+  RotateCcw
 } from 'lucide-react'
 import 'react-datepicker/dist/react-datepicker.css'
 import OppvSection from './OppvSection.jsx'
@@ -535,6 +537,73 @@ const OverdueAlarm = ({ onOpenBin }) => {
   )
 }
 
+// ─── Полоса демонстрационного режима ────────────────────────────────────────
+// Видна только демо-аккаунту. Переключатель «ГАК / ДКГИТ» меняет вид без смены
+// учётной записи; на кнопке стороны — число уведомлений, которые её ждут
+// (сменил статус от лица ГАК → у «ДКГИТ» загорается счётчик). Все изменения
+// идут в копию данных («песочницу») и реальные статусы не затрагивают.
+const DemoBar = ({ view, onSwitch, onReset }) => {
+  const [unread, setUnread] = useState({ gak: 0, dkgit: 0 })
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get('/api/demo/state')
+      setUnread(r.data.unread || { gak: 0, dkgit: 0 })
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    load()
+    const t = setInterval(load, 20000)
+    window.addEventListener('notif-refresh', load)
+    return () => { clearInterval(t); window.removeEventListener('notif-refresh', load) }
+  }, [load])
+
+  const pick = async (v) => {
+    if (v === view || busy) return
+    setBusy(true)
+    try { await onSwitch(v) } finally { setBusy(false) }
+  }
+  const reset = async () => {
+    if (busy) return
+    if (!window.confirm('Сбросить демо-данные? Все изменения, сделанные в демонстрации, пропадут, статусы вернутся к копии реальных.')) return
+    setBusy(true)
+    try { await onReset(); await load() } finally { setBusy(false) }
+  }
+
+  const side = (v, label, hint) => (
+    <button type="button" role="tab" aria-selected={view === v} title={hint}
+      className={'demo-side' + (view === v ? ' active' : '')} onClick={() => pick(v)} disabled={busy}>
+      {label}
+      {unread[v] > 0 && (
+        <span className={'demo-side-badge' + (view === v ? '' : ' pulse')}
+          title={`Ждёт уведомлений: ${unread[v]}`}>{unread[v] > 99 ? '99+' : unread[v]}</span>
+      )}
+    </button>
+  )
+
+  return (
+    <div className="demo-bar">
+      <span className="demo-tag"><Presentation size={15} /> Демонстрационный режим</span>
+      {/* Переключатель — слева: справа сверху появляются всплывающие сообщения,
+          они не должны закрывать кнопку, на которую предлагают нажать */}
+      <div className="demo-switch">
+        <span className="demo-switch-label">Вы работаете как</span>
+        <div className="demo-sides" role="tablist" aria-label="От чьего лица показывать">
+          {side('gak', 'ГАК', 'Вид сотрудника ГАК: «Статус» и «Статус встречи»')}
+          {side('dkgit', 'ДКГИТ', 'Вид сотрудника ДКГИТ: только строки «Для работы ДКГИТ», столбец «Статус КГИТ»')}
+        </div>
+      </div>
+      <span className="demo-note">Изменения сохраняются в копии данных — реальные статусы не меняются</span>
+      <button type="button" className="demo-reset" onClick={reset} disabled={busy}
+        title="Вернуть демо-данные к копии реальных статусов">
+        <RotateCcw size={14} /> Сбросить демо-данные
+      </button>
+    </div>
+  )
+}
+
 // ─── Ячейка статуса: кастомный справочник. Работает для трёх столбцов —
 // «Статус» (status), «Статус КГИТ» (kgit_status), «Статус встречи»
 // (meeting_status) — через cellRendererParams.statusKey. Доступ к простановке
@@ -886,7 +955,7 @@ const FileDropzone = ({ onFile, uploading, disabled, accept, label, className = 
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 const Dashboard = () => {
-  const { user, logout, isAdmin, isManager, isDkgit } = useAuth()
+  const { user, logout, isAdmin, isManager, isDkgit, isDemo, setDemoView } = useAuth()
   // Админ-панель доступна админу и менеджеру (у менеджера — урезанный набор вкладок)
   const canAdminPanel = isAdmin() || isManager()
   const gridRef = useRef()
@@ -1755,9 +1824,15 @@ const Dashboard = () => {
         return {
           ...r,
           ...saved,
-          status_meta: { ...(r.status_meta || {}), [field]: { by: user?.username, at: nowIso } },
+          status_meta: { ...(r.status_meta || {}), [field]: { by: res.data?.actor || user?.username, at: nowIso } },
         }
       }))
+      // Демо: показываем, что уведомление ушло другой стороне
+      if (user?.is_demo && res.data?.notified) {
+        toast.info(res.data.notified === 'to_dkgit'
+          ? 'Уведомление отправлено ДКГИТ — переключите вид на «ДКГИТ»'
+          : 'Уведомление отправлено ГАК — переключите вид на «ГАК»')
+      }
       // Колокольчик обновляем сразу (не ждём 30 с) — удобно на демонстрациях
       window.dispatchEvent(new Event('notif-refresh'))
       return true
@@ -1766,6 +1841,34 @@ const Dashboard = () => {
       return false
     }
   }, [user])
+
+  // Демо: сменили вид (ГАК ↔ ДКГИТ) — перезагружаем таблицу и счётчики под новую
+  // роль. Фильтры не трогаем: та же строка остаётся на экране и «с той стороны».
+  const demoViewRef = useRef(user?.demo_view)
+  useEffect(() => {
+    if (!user?.is_demo || demoViewRef.current === user.demo_view) return
+    demoViewRef.current = user.demo_view
+    reloadAfterDemoChange()
+  }, [user?.demo_view])
+
+  // Перезагрузка таблицы и счётчиков + принудительная перерисовка ячеек статусов:
+  // доступность ячейки зависит от роли и от соседних столбцов, а таблица сама
+  // перерисовывает только ячейки с изменившимся значением.
+  const reloadAfterDemoChange = async () => {
+    await fetchAll(1)
+    window.dispatchEvent(new Event('notif-refresh'))
+    setTimeout(() => gridRef.current?.api?.refreshCells({ force: true }), 60)
+  }
+
+  const resetDemoData = async () => {
+    try {
+      await api.post('/api/demo/reset')
+      toast.success('Демо-данные сброшены')
+      await reloadAfterDemoChange()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Не удалось сбросить демо-данные')
+    }
+  }
 
   // Контекст для AG Grid: справочники трёх столбцов + роль + обработчик
   const gridContext = useMemo(
@@ -1894,6 +1997,10 @@ const Dashboard = () => {
         </div>
       </header>
 
+      {isDemo() && (
+        <DemoBar view={user.demo_view} onSwitch={setDemoView} onReset={resetDemoData} />
+      )}
+
       {/* Модалка с общими файлами */}
       {showFiles && (
         <div className="logs-overlay" onClick={() => setShowFiles(false)}>
@@ -2007,6 +2114,7 @@ const Dashboard = () => {
                       <option value="user">Пользователь</option>
                       <option value="manager">Менеджер</option>
                       <option value="dkgit">ДКГИТ</option>
+                      <option value="demo">Демонстрационный</option>
                     </select>
                   )}
                   <input

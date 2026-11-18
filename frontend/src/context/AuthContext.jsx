@@ -77,8 +77,17 @@ export const AuthProvider = ({ children }) => {
     return user?.role === 'dkgit'
   }
 
+  // Демонстрационный аккаунт: один логин, два «вида» — от лица ГАК и от лица
+  // ДКГИТ. Сервер отдаёт роль выбранного вида (user / dkgit), поэтому весь
+  // интерфейс перестраивается сам; здесь только переключение.
+  const isDemo = () => !!user?.is_demo
+  const setDemoView = async (view) => {
+    localStorage.setItem('demoView', view === 'dkgit' ? 'dkgit' : 'gak')
+    await fetchUser()
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, loginWith2fa, logout, isAdmin, isManager, isDkgit, loading }}>
+    <AuthContext.Provider value={{ user, login, loginWith2fa, logout, isAdmin, isManager, isDkgit, isDemo, setDemoView, loading }}>
       {children}
     </AuthContext.Provider>
   )

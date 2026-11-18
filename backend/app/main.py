@@ -298,6 +298,46 @@ with engine.connect() as _conn:
         except Exception:
             _conn.rollback()
 
+
+# ── Демонстрационный режим: «песочница» в схеме demo ─────────────────────────
+# Копии таблиц статусов/журнала/уведомлений для аккаунта с ролью demo (как это
+# подключается — см. database.py). Реальные (public) таблицы здесь только ЧИТАЮТСЯ.
+def _demo_copy_from_real(conn):
+    """Заново наполнить песочницу копией реальных статусов и их журнала.
+    Уведомления и отметки будильника в песочнице начинаются с чистого листа."""
+    T = __import__('sqlalchemy').text
+    conn.execute(T("TRUNCATE demo.bin_status, demo.bin_status_history, demo.notifications, demo.overdue_seen"))
+    conn.execute(T("INSERT INTO demo.bin_status SELECT * FROM public.bin_status"))
+    conn.execute(T("INSERT INTO demo.bin_status_history SELECT * FROM public.bin_status_history"))
+
+
+def _ensure_demo_schema():
+    """Создать схему demo и её таблицы по образцу реальных. Если структура
+    реальной таблицы изменилась (новая миграция) — демо-таблица пересоздаётся
+    и песочница наполняется заново."""
+    T = __import__('sqlalchemy').text
+    cols_sql = T("""SELECT column_name, data_type, coalesce(character_maximum_length, 0)
+                    FROM information_schema.columns
+                    WHERE table_schema = :s AND table_name = :t ORDER BY ordinal_position""")
+    with engine.begin() as conn:
+        conn.execute(T("CREATE SCHEMA IF NOT EXISTS demo"))
+        changed = False
+        for t in database.DEMO_TABLES:
+            real = [tuple(r) for r in conn.execute(cols_sql, {"s": "public", "t": t})]
+            demo = [tuple(r) for r in conn.execute(cols_sql, {"s": "demo", "t": t})]
+            if real and real != demo:
+                conn.execute(T(f"DROP TABLE IF EXISTS demo.{t}"))
+                conn.execute(T(f"CREATE TABLE demo.{t} (LIKE public.{t} INCLUDING ALL)"))
+                changed = True
+        if changed:
+            _demo_copy_from_real(conn)
+
+
+try:
+    _ensure_demo_schema()
+except Exception as _e:   # демо-режим не должен мешать запуску основного приложения
+    print(f"demo schema setup failed: {_e}", flush=True)
+
 app = FastAPI(title="Strahovka Insurance API")
 
 app.add_middleware(
@@ -865,6 +905,49 @@ def login_2fa(request: Request, data: schemas.Login2faRequest, db: Session = Dep
 @app.get("/api/auth/me", response_model=schemas.UserResponse)
 def get_me(current_user: models.User = Depends(auth.get_current_active_user)):
     return current_user
+
+
+# ============ ДЕМОНСТРАЦИОННЫЙ РЕЖИМ ============
+
+def _is_demo(user) -> bool:
+    return bool(getattr(user, "is_demo", False))
+
+
+def _demo_side(user) -> str:
+    """Подпись «кто действует» в демо: в журнале и уведомлениях видно сторону."""
+    return "ДКГИТ (демо)" if getattr(user, "demo_view", None) == "dkgit" else "ГАК (демо)"
+
+
+def require_demo(current_user: models.User = Depends(auth.get_current_active_user)):
+    if not _is_demo(current_user):
+        raise HTTPException(403, "Только для демонстрационного аккаунта")
+    return current_user
+
+
+@app.get("/api/demo/state")
+def demo_state(
+    current_user: models.User = Depends(require_demo),
+    db: Session = Depends(database.get_db),
+):
+    """Для переключателя вида: сколько непрочитанных уведомлений ждёт на каждой
+    стороне (ГАК / ДКГИТ) и сколько статусов сейчас в песочнице."""
+    N = models.Notification
+    rows = dict(db.query(N.kind, func.count(N.id))
+                .filter(N.user_id == current_user.id, N.read_at.is_(None))
+                .group_by(N.kind).all())
+    return {"view": current_user.demo_view,
+            "unread": {"gak": int(rows.get("to_gak", 0)), "dkgit": int(rows.get("to_dkgit", 0))},
+            "statuses": db.query(func.count(models.BinStatus.bin)).scalar() or 0}
+
+
+@app.post("/api/demo/reset")
+def demo_reset(current_user: models.User = Depends(require_demo)):
+    """Сбросить песочницу: снова скопировать реальные статусы и их журнал,
+    очистить демо-уведомления. Реальные данные только читаются."""
+    with engine.begin() as conn:
+        _demo_copy_from_real(conn)
+        n = conn.execute(text("SELECT count(*) FROM demo.bin_status")).scalar() or 0
+    return {"ok": True, "statuses": int(n)}
 
 
 # ============ METRICS ============
@@ -1956,12 +2039,19 @@ def _fmt_status_details(field, status_val, ex: dict) -> str:
     return f"{status_val} ({', '.join(parts)})"[:1000] if parts else status_val
 
 
-def _notify(db, *, bin_, target, message, actor, now):
-    """Создать уведомления получателям по региону БИН (кроме автора)."""
+def _notify(db, *, bin_, target, message, actor, now, demo_uid=None):
+    """Создать уведомления получателям по региону БИН (кроме автора).
+    В демо-режиме (demo_uid) уведомление получает только сам демо-аккаунт: он
+    увидит его, переключившись на вид адресата (to_dkgit → ДКГИТ, to_gak → ГАК)."""
     S, U = models.CompanySummary, models.User
     info = db.query(S.obl_name, S.bin_name).filter(S.bin == bin_).first()
     region = info.obl_name if info else None
     name = (info.bin_name if info else None) or str(bin_).zfill(12)
+    if demo_uid is not None:
+        db.add(models.Notification(user_id=demo_uid, bin=bin_, kind=target,
+                                   message=f"{message}: {name}"[:500],
+                                   created_by=actor, created_at=now))
+        return
     roles = ["dkgit"] if target == "to_dkgit" else ["user", "manager"]
     q = db.query(U.id).filter(U.role.in_(roles), U.is_active == 1, U.username != actor)
     if region:
@@ -2042,6 +2132,9 @@ def set_bin_status(
 
     B = models.BinStatus
     now = datetime.now()
+    # В демо автором значится сторона («ГАК (демо)» / «ДКГИТ (демо)»), а не логин
+    demo = _is_demo(current_user)
+    actor = _demo_side(current_user) if demo else current_user.username
 
     # Текущее состояние строки: старое значение (для журнала) и kgit (для проверки)
     cur = db.query(B).filter(B.bin == data.bin).first()
@@ -2059,7 +2152,7 @@ def set_bin_status(
 
     if not status_val:  # снять значение в этом столбце (вместе с его доп. данными)
         db.query(B).filter(B.bin == data.bin).update(
-            {field: None, **extra_vals, "updated_by": current_user.username, "updated_at": now},
+            {field: None, **extra_vals, "updated_by": actor, "updated_at": now},
             synchronize_session=False)
         # если все три столбца пусты — удаляем строку
         db.query(B).filter(B.bin == data.bin, B.status.is_(None),
@@ -2069,7 +2162,7 @@ def set_bin_status(
         # Атомарный upsert ПО ПОЛЯМ ЭТОГО СТОЛБЦА: не перетирает другие столбцы
         # и не падает на гонке (дубликат PK при одновременном первом вводе).
         vals = {field: status_val, **extra_vals,
-                "updated_by": current_user.username, "updated_at": now}
+                "updated_by": actor, "updated_at": now}
         stmt = pg_insert(B.__table__).values(bin=data.bin, **vals)
         stmt = stmt.on_conflict_do_update(index_elements=["bin"], set_=vals)
         db.execute(stmt)
@@ -2078,19 +2171,22 @@ def set_bin_status(
     if (old_detail or None) != (new_detail or None):
         db.add(models.BinStatusHistory(
             bin=data.bin, field=field, old_value=old_detail, new_value=new_detail,
-            changed_by=current_user.username, changed_at=now))
+            changed_by=actor, changed_at=now))
 
     # Уведомления — только при смене самого значения на «сигнальное»
+    notified = None
     if status_val and status_val != old_val:
         rule = NOTIFY_RULES.get((field, status_val))
         if rule:
             _notify(db, bin_=data.bin, target=rule[0], message=rule[1],
-                    actor=current_user.username, now=now)
+                    actor=actor, now=now, demo_uid=current_user.id if demo else None)
+            notified = rule[0]
     # Админам — о ЛЮБОЙ смене значения любого столбца, включая свою
-    # (для демонстраций: поменял статус — сразу видно уведомление)
-    if (status_val or None) != (old_val or None):
+    # (для демонстраций: поменял статус — сразу видно уведомление).
+    # В демо-песочнице админские уведомления не нужны.
+    if not demo and (status_val or None) != (old_val or None):
         _notify_admins(db, bin_=data.bin, field=field, old_val=old_val,
-                       new_val=status_val or None, actor=current_user.username, now=now)
+                       new_val=status_val or None, actor=actor, now=now)
 
     db.commit()
     row = db.query(B).filter(B.bin == data.bin).first()
@@ -2098,7 +2194,9 @@ def set_bin_status(
     if row:   # «светофор» пересчитываем сразу — ячейки перекрашиваются без перезагрузки
         ts = _status_change_times(db, [data.bin]).get(data.bin, {})
         out["status_light"], out["kgit_light"], out["meeting_light"] = _status_lights(row, ts, kz_today())
-    return {"bin": data.bin, "field": field, "status": status_val, "row": out}
+    # actor — кто значится автором; notified — кому ушло уведомление (to_dkgit / to_gak)
+    return {"bin": data.bin, "field": field, "status": status_val, "row": out,
+            "actor": actor, "notified": notified}
 
 
 def _bin_status_row_dict(r):
@@ -2307,9 +2405,19 @@ def get_bin_status_history(
 
 # ============ УВЕДОМЛЕНИЯ (колокольчик) ============
 
-def _unread_count(db, user_id) -> int:
+def _notif_filter(user):
+    """Условия «уведомления этого пользователя». Демо-аккаунт видит только то,
+    что адресовано стороне, от лица которой он сейчас смотрит."""
     N = models.Notification
-    return db.query(func.count(N.id)).filter(N.user_id == user_id, N.read_at.is_(None)).scalar() or 0
+    conds = [N.user_id == user.id]
+    if _is_demo(user):
+        conds.append(N.kind == ("to_dkgit" if user.demo_view == "dkgit" else "to_gak"))
+    return conds
+
+
+def _unread_count(db, user) -> int:
+    N = models.Notification
+    return db.query(func.count(N.id)).filter(*_notif_filter(user), N.read_at.is_(None)).scalar() or 0
 
 
 @app.get("/api/notifications/unread-count")
@@ -2318,7 +2426,7 @@ def notifications_unread_count(
     db: Session = Depends(database.get_db),
 ):
     """Число непрочитанных — для красного счётчика (лёгкий запрос для опроса)."""
-    return {"unread": _unread_count(db, current_user.id)}
+    return {"unread": _unread_count(db, current_user)}
 
 
 @app.get("/api/notifications")
@@ -2329,11 +2437,11 @@ def list_notifications(
 ):
     """Последние уведомления пользователя (непрочитанные сверху, затем по дате)."""
     N = models.Notification
-    rows = (db.query(N).filter(N.user_id == current_user.id)
+    rows = (db.query(N).filter(*_notif_filter(current_user))
             .order_by(N.read_at.isnot(None), N.created_at.desc(), N.id.desc())
             .limit(limit).all())
     return {
-        "unread": _unread_count(db, current_user.id),
+        "unread": _unread_count(db, current_user),
         "items": [{
             "id": r.id, "bin": r.bin, "kind": r.kind, "message": r.message,
             "created_by": r.created_by,
@@ -2350,10 +2458,10 @@ def mark_notification_read(
     db: Session = Depends(database.get_db),
 ):
     N = models.Notification
-    db.query(N).filter(N.id == notif_id, N.user_id == current_user.id, N.read_at.is_(None)) \
+    db.query(N).filter(N.id == notif_id, *_notif_filter(current_user), N.read_at.is_(None)) \
         .update({"read_at": datetime.now()}, synchronize_session=False)
     db.commit()
-    return {"unread": _unread_count(db, current_user.id)}
+    return {"unread": _unread_count(db, current_user)}
 
 
 @app.get("/api/company/{bin_}/passport")
@@ -2516,7 +2624,7 @@ def mark_all_notifications_read(
     db: Session = Depends(database.get_db),
 ):
     N = models.Notification
-    db.query(N).filter(N.user_id == current_user.id, N.read_at.is_(None)) \
+    db.query(N).filter(*_notif_filter(current_user), N.read_at.is_(None)) \
         .update({"read_at": datetime.now()}, synchronize_session=False)
     db.commit()
     return {"unread": 0}
@@ -3628,7 +3736,7 @@ def _check_iin_unique(db, iin, exclude_user_id=None):
         raise HTTPException(400, "Этот ИИН уже привязан к другому аккаунту")
 
 
-ALLOWED_ROLES = ("user", "manager", "admin", "dkgit")
+ALLOWED_ROLES = ("user", "manager", "admin", "dkgit", "demo")
 
 
 @app.post("/api/users", response_model=schemas.UserResponse)
@@ -3812,6 +3920,7 @@ def login_heatmap(
                   func.count().label('c'),
                   func.count(func.distinct(L.username)).label('u'))
          .filter(L.username.notin_(SYSTEM_ACCOUNTS),
+                 or_(L.role.is_(None), L.role != "demo"),   # демо-аккаунт не учитываем
                  L.logged_at >= start,
                  L.logged_at < end + timedelta(days=1)))
     if current_user.region:
@@ -3822,6 +3931,7 @@ def login_heatmap(
                    func.count().label('c'),
                    func.count(func.distinct(L.username)).label('u'))
           .filter(L.username.notin_(SYSTEM_ACCOUNTS),
+                  or_(L.role.is_(None), L.role != "demo"),
                   L.logged_at >= start,
                   L.logged_at < end + timedelta(days=1)))
     if current_user.region:

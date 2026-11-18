@@ -3,7 +3,7 @@ from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from . import models, schemas, database
 
@@ -41,7 +41,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+async def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -59,7 +59,28 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     user = get_user(db, username=token_data.username)
     if user is None:
         raise credentials_exception
+
+    # Демо-аккаунт обязан работать через демо-сессию (песочницу), а обычный —
+    # через обычную. Сессию выбирает database.get_db по роли в токене; если роль
+    # аккаунта с тех пор поменяли — токен устарел, нужен повторный вход.
+    if (user.role == "demo") != bool(db.info.get("demo")):
+        raise credentials_exception
+    if user.role == "demo":
+        _apply_demo_view(request, db, user)
     return user
+
+
+def _apply_demo_view(request: Request, db: Session, user):
+    """Демо-аккаунт «смотрит от лица» ГАК или ДКГИТ (переключатель в интерфейсе
+    шлёт заголовок X-Demo-View). На время запроса подменяем роль в памяти:
+    вид «ГАК» = обычный пользователь, вид «ДКГИТ» = роль dkgit — так работают все
+    существующие проверки прав. Объект отсоединяем от сессии, чтобы подменённая
+    роль никогда не записалась в таблицу users."""
+    view = "dkgit" if (request.headers.get("x-demo-view") or "").strip().lower() == "dkgit" else "gak"
+    db.expunge(user)
+    user.is_demo = True
+    user.demo_view = view
+    user.role = "dkgit" if view == "dkgit" else "user"
 
 async def get_current_active_user(current_user: models.User = Depends(get_current_user)):
     if not current_user.is_active:
