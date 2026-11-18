@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../utils/api.js'
-import { Shield, Coins, Activity, Download } from 'lucide-react'
+import { Shield, Coins, Activity, Download, ListTree, ChevronLeft, ChevronRight } from 'lucide-react'
 import { ThinkingOrb } from 'thinking-orbs'
 import { KpiSpark, CountUp } from './KpiSpark.jsx'
 
@@ -919,11 +919,9 @@ function HudStatusActivity() {
 // Закреплённая справа навигация по разделам дашборда (скролл к секции).
 // Рендерится порталом в body: иначе трансформированный предок (анимация
 // перехода в дашборд) делает position:fixed относительным и меню уезжает.
-function HudNav({ items }) {
+function HudNav({ items, open, setOpen }) {
   const [active, setActive] = useState(items[0]?.id)
-  const [open, setOpen] = useState(() => {
-    try { return window.innerWidth > 1280 } catch { return true }
-  })
+  const navRef = React.useRef(null)
 
   useEffect(() => {
     const ids = items.map((i) => i.id)
@@ -934,42 +932,64 @@ function HudNav({ items }) {
         if (el && el.getBoundingClientRect().top <= 160) cur = id
       }
       setActive(cur)
+      // Панель держится под шапкой: пока шапка на экране — начинается под ней,
+      // когда шапка уехала вверх — поднимается к верху окна. Шапку не перекрывает.
+      const hdr = document.querySelector('.dashboard-header')
+      const top = Math.max(16, (hdr ? hdr.getBoundingClientRect().bottom : 0) + 16)
+      if (navRef.current) navRef.current.style.setProperty('--nav-top', `${Math.round(top)}px`)
     }
     // Скроллиться может как окно, так и внутренний контейнер контента
     const sc = document.querySelector('.content') || document.querySelector('.main-content')
     if (sc) sc.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
     onScroll()
-    return () => { if (sc) sc.removeEventListener('scroll', onScroll); window.removeEventListener('scroll', onScroll) }
+    return () => {
+      if (sc) sc.removeEventListener('scroll', onScroll)
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
   }, [items])
+
+  // Активный пункт держим в видимой части списка
+  useEffect(() => {
+    const el = navRef.current?.querySelector('.hud-nav-link.active')
+    if (el) el.scrollIntoView({ block: 'nearest' })
+  }, [active, open])
 
   const go = (id) => {
     const el = document.getElementById(id)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  const activeIdx = Math.max(0, items.findIndex((i) => i.id === active))
+
   return createPortal(
-    <nav className={'hud-nav' + (open ? ' open' : ' collapsed')}>
-      {/* Полоса-переключатель слева на всю высоту */}
-      <button className="hud-nav-bar" onClick={() => setOpen((v) => !v)}
-        aria-label={open ? 'Свернуть разделы' : 'Развернуть разделы'}
-        title={open ? 'Свернуть' : 'Разделы'}>
-        <span className="hud-nav-bar-chevron">{open ? '›' : '‹'}</span>
-        <span className="hud-nav-bar-label">Разделы</span>
-      </button>
-      {open && (
-        <div className="hud-nav-body">
-          <ul className="hud-nav-list">
-            {items.map((it) => (
-              <li key={it.id}>
-                <button className={'hud-nav-link' + (active === it.id ? ' active' : '')} onClick={() => go(it.id)}>
-                  {it.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    <nav ref={navRef} className={'hud-nav' + (open ? ' open' : ' collapsed')} aria-label="Разделы дашборда">
+      <div className="hud-nav-head">
+        {open && (
+          <span className="hud-nav-title">
+            <ListTree size={15} /> Разделы
+            <i>{activeIdx + 1} / {items.length}</i>
+          </span>
+        )}
+        <button type="button" className="hud-nav-toggle" onClick={() => setOpen((v) => !v)}
+          aria-label={open ? 'Свернуть меню разделов' : 'Развернуть меню разделов'}
+          title={open ? 'Свернуть' : 'Разделы'}>
+          {open ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
+      </div>
+      <ul className="hud-nav-list">
+        {items.map((it, i) => (
+          <li key={it.id}>
+            <button type="button" onClick={() => go(it.id)} title={open ? undefined : it.label}
+              className={'hud-nav-link' + (active === it.id ? ' active' : '') + (i < activeIdx ? ' passed' : '')}>
+              <span className="hud-nav-num">{i + 1}</span>
+              {open && <span className="hud-nav-text">{it.label}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
     </nav>,
     document.body,
   )
@@ -993,6 +1013,17 @@ const DashboardHud = () => {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Боковое меню разделов: развёрнуто / свёрнуто (помним выбор; на узком экране
+  // по умолчанию свёрнуто). Под меню у страницы резервируется место справа.
+  const [navOpen, setNavOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem('hudNavOpen')
+      if (saved != null) return saved === '1'
+      return window.innerWidth > 1280
+    } catch { return true }
+  })
+  useEffect(() => { try { localStorage.setItem('hudNavOpen', navOpen ? '1' : '0') } catch {} }, [navOpen])
 
   if (loading && !data) {
     return (
@@ -1064,8 +1095,8 @@ const DashboardHud = () => {
   ]
 
   return (
-    <div className="hud-view">
-      <HudNav items={navItems} />
+    <div className={'hud-view has-nav ' + (navOpen ? 'nav-open' : 'nav-collapsed')}>
+      <HudNav items={navItems} open={navOpen} setOpen={setNavOpen} />
       <div className="hud-topline">
         <div className="hud-topline-title">Аналитический дашборд</div>
       </div>

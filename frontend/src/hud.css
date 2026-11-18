@@ -354,43 +354,91 @@
 .hud-fill-val b { color: var(--h-cyan); font-variant-numeric: tabular-nums; }
 .hud-fill-val .dim { color: var(--h-dim); font-size: 12px; margin-left: 4px; }
 
-/* закреплённая справа навигация по разделам дашборда (рендерится в body —
-   задаём цвета явно, переменные .hud-view сюда не доходят). position:fixed —
-   следует за прокруткой независимо от внутреннего скролл-контейнера. */
+/* ── Боковое меню разделов дашборда ──────────────────────────────────────────
+   Рендерится порталом в body (цвета заданы явно — переменные .hud-view сюда не
+   доходят). Закреплено справа, начинается ПОД шапкой (--nav-top считает JS) и
+   не перекрывает её. Два состояния: развёрнуто (номер + название) и свёрнуто
+   (узкая рейка с номерами). Под меню у .hud-view резервируется место справа,
+   поэтому карточки больше не уходят под него. */
 .hud-nav {
-  position: fixed; top: 50%; right: 16px; transform: translateY(-50%); z-index: 950;
-  height: calc(100vh - 32px); display: flex; flex-direction: row; align-items: stretch;
-  background: rgba(7, 18, 38, .9); backdrop-filter: blur(8px);
-  border: 1px solid rgba(56, 189, 248, .24); border-radius: 12px; overflow: hidden;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
+  --nav-top: 104px;
+  position: fixed; top: var(--nav-top); right: 16px; bottom: 16px; z-index: 950;
+  width: 268px; display: flex; flex-direction: column; min-height: 0;
+  border-radius: 16px; overflow: hidden;
+  background:
+    linear-gradient(90deg, transparent, #22d3ee, rgba(59, 130, 246, .85), transparent) no-repeat top left 16px / calc(100% - 32px) 1px,
+    linear-gradient(160deg, #10224f 0%, #0a1838 52%, #081230 100%);
+  border: 1px solid rgba(56, 189, 248, .32);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, .06), 0 16px 46px rgba(0, 0, 0, .55), 0 0 30px rgba(34, 211, 238, .10);
+  transition: width .28s cubic-bezier(.22, 1, .36, 1), top .18s ease-out;
 }
-/* Полоса-переключатель слева на всю высоту панели */
-.hud-nav-bar {
-  flex: 0 0 26px; width: 26px; height: 100%;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-  background: rgba(34, 211, 238, .12); border: none; border-right: 1px solid rgba(56, 189, 248, .22);
-  color: #bdf3ff; cursor: pointer; transition: background .15s;
+.hud-nav.collapsed { width: 56px; }
+
+.hud-nav-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 14px 12px 12px 16px; border-bottom: 1px solid rgba(56, 189, 248, .18);
 }
-.hud-nav-bar:hover { background: rgba(34, 211, 238, .22); }
-.hud-nav-bar-chevron { font-size: 16px; line-height: 1; }
-.hud-nav-bar-label {
-  writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg);
-  font-size: 11px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: #8fa8d4;
+.hud-nav.collapsed .hud-nav-head { justify-content: center; padding: 14px 0 12px; }
+.hud-nav-title {
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
 }
-.hud-nav.collapsed { }
-.hud-nav-body {
-  display: flex; flex-direction: column; min-height: 0; padding: 12px 10px;
-  width: 240px; overflow: hidden;
+.hud-nav-title svg { color: #22d3ee; filter: drop-shadow(0 0 6px rgba(34, 211, 238, .6)); }
+.hud-nav-title i {
+  font-style: normal; font-weight: 600; letter-spacing: 0; text-transform: none;
+  color: #8fa8d4; font-size: 11.5px; font-variant-numeric: tabular-nums; margin-left: 2px;
 }
-.hud-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px;
-  overflow-y: auto; min-height: 0; }
+.hud-nav-toggle {
+  flex: 0 0 30px; width: 30px; height: 30px; padding: 0; border-radius: 9px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(34, 211, 238, .10); border: 1px solid rgba(56, 189, 248, .30); color: #bdf3ff;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+.hud-nav-toggle:hover { background: rgba(34, 211, 238, .22); border-color: rgba(56, 189, 248, .6); box-shadow: 0 0 14px rgba(34, 211, 238, .35); }
+
+.hud-nav-list {
+  list-style: none; margin: 0; padding: 10px 8px 12px; flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: #27468a transparent;
+}
+.hud-nav.collapsed .hud-nav-list { padding: 10px 0 12px; align-items: center; scrollbar-width: none; }
+.hud-nav.collapsed .hud-nav-list::-webkit-scrollbar { display: none; }
 .hud-nav-link {
-  width: 100%; text-align: left; background: transparent; border: none; cursor: pointer;
-  color: #eaf4ff; font-size: 13px; padding: 7px 9px; border-radius: 8px;
-  border-left: 2px solid transparent; transition: background .15s, border-color .15s;
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 7px 10px 7px 8px; border-radius: 10px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; color: #c9dcff;
+  font: inherit; font-size: 13px; line-height: 1.25;
+  transition: background .15s, border-color .15s, color .15s;
 }
-.hud-nav-link:hover { background: rgba(56, 189, 248, .10); }
-.hud-nav-link.active { background: rgba(34, 211, 238, .14); border-left-color: #22d3ee; color: #bdf3ff; font-weight: 600; }
+.hud-nav.collapsed .hud-nav-link { width: 40px; padding: 6px 0; justify-content: center; }
+.hud-nav-num {
+  flex: 0 0 26px; width: 26px; height: 26px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: #8fa8d4;
+  background: rgba(8, 20, 52, .8); border: 1px solid rgba(56, 189, 248, .22);
+  transition: background .15s, color .15s, border-color .15s, box-shadow .15s;
+}
+.hud-nav-text { min-width: 0; }
+.hud-nav-link:hover { background: rgba(56, 189, 248, .10); color: #fff; }
+.hud-nav-link:hover .hud-nav-num { border-color: rgba(56, 189, 248, .55); color: #eaf4ff; }
+/* пройденные разделы — номер подсвечен приглушённо (видно, где ты на странице) */
+.hud-nav-link.passed .hud-nav-num { color: #6fe6ff; border-color: rgba(34, 211, 238, .40); background: rgba(34, 211, 238, .10); }
+.hud-nav-link.active {
+  background: linear-gradient(90deg, rgba(34, 211, 238, .20), rgba(59, 130, 246, .08));
+  border-color: rgba(56, 189, 248, .40); color: #fff; font-weight: 600;
+}
+.hud-nav.collapsed .hud-nav-link.active { background: transparent; border-color: transparent; }
+.hud-nav-link.active .hud-nav-num {
+  color: #04162a; border-color: transparent;
+  background: linear-gradient(135deg, #22d3ee, #3b82f6);
+  box-shadow: 0 0 14px rgba(34, 211, 238, .6);
+}
+.hud-nav-toggle:focus-visible, .hud-nav-link:focus-visible { outline: 2px solid #22d3ee; outline-offset: 1px; }
+
+/* место под меню: карточки дашборда не заходят под панель */
+.hud-view.has-nav { padding-right: 86px; transition: padding-right .28s cubic-bezier(.22, 1, .36, 1); }
+@media (min-width: 1281px) { .hud-view.has-nav.nav-open { padding-right: 300px; } }
+@media (prefers-reduced-motion: reduce) { .hud-nav, .hud-view.has-nav { transition: none; } }
 
 /* активность статусов: длинные названия статусов по оси Y → шире колонка,
    название переносится на вторую строку целиком (без обрезки троеточием) */
@@ -750,3 +798,69 @@
   .hud-bubble { animation: none; transform: scale(1); }
   .hud-transition { display: none; }
 }
+
+
+/* ═══════════════ Дашборд в одном стиле с разделом «Страхование» ═══════════════
+   Только оформление (содержимое таблиц и графиков не меняется): те же заголовки
+   карточек, отступы, поля ввода, кнопки и вид таблиц, что на вкладке
+   «Страхование» в тёмной теме. */
+.hud-view { padding-left: 30px; }
+.hud-charts { margin-top: 20px; gap: 20px; }
+.hud-chart-card { padding: 22px 24px 24px; }
+/* заголовок карточки — как «Фильтры»: крупный, с циановым акцентом */
+.hud-chart-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 17px; font-weight: 700; letter-spacing: .2px; margin-bottom: 18px;
+  text-shadow: 0 0 18px rgba(34, 211, 238, .3);
+}
+.hud-chart-title::before {
+  content: ""; flex: 0 0 3px; width: 3px; height: 17px; border-radius: 2px;
+  background: linear-gradient(#22d3ee, #3b82f6); box-shadow: 0 0 10px rgba(34, 211, 238, .7);
+}
+.hud-topline-title { font-size: 22px; }
+.hud-h2 { margin: 30px 0 16px; }
+
+/* поля ввода — как в фильтрах «Страхования» */
+.hud-month {
+  background: rgba(8, 20, 52, .78); border: 1px solid rgba(56, 189, 248, .32); color: #eaf4ff;
+  border-radius: 6px; padding: 9px 12px; font: inherit; font-size: 14px; color-scheme: dark;
+  transition: border-color .2s, box-shadow .2s;
+}
+.hud-month:focus { outline: none; border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34, 211, 238, .16); }
+.hud-month option { background: #0b1a40; color: #eaf4ff; }
+/* кнопка выгрузки — как «Скачать статусы» */
+.hud-export-btn {
+  padding: 9px 18px; font-size: 14px; font-weight: 500; border-radius: 6px; gap: 8px;
+  background: rgba(46, 230, 197, .13); color: #8ff5e2; border: 1px solid rgba(46, 230, 197, .45);
+}
+.hud-export-btn:hover:not(:disabled) { background: rgba(46, 230, 197, .24); border-color: rgba(46, 230, 197, .8); color: #fff; }
+.hud-export-btn b { color: #fff; }
+.hud-tabs { border-radius: 8px; }
+.hud-tab-btn { font-size: 13px; padding: 7px 14px; border-radius: 6px; }
+.hud-tab-btn.active { background: linear-gradient(135deg, #22d3ee, #3b82f6); font-weight: 600; }
+
+/* таблицы — как грид «Страхования»: рамка, шапка-полоса, «зебра», высота строк */
+.hud-rtable-wrap {
+  border: 1px solid rgba(56, 189, 248, .28); border-radius: 10px; background: #0a1736;
+}
+.hud-rtable { font-size: 13px; }
+.hud-rtable th, .hud-rtable td { padding: 12px 16px; border-bottom: 1px solid rgba(56, 189, 248, .10); }
+.hud-rtable thead th {
+  background: #0f2253; color: #d6e6ff; font-size: 13px; font-weight: 600;
+  border-bottom: 1px solid rgba(56, 189, 248, .28);
+}
+.hud-rtable thead tr:first-child th { border-bottom: 1px solid rgba(56, 189, 248, .16); }
+.hud-rtable tbody tr:nth-child(even) { background: #0c1b40; }
+.hud-rtable tbody tr:hover { background: rgba(34, 211, 238, .10); }
+.hud-rtable tbody tr:last-child td { border-bottom: none; }
+.hud-modal-table th { background: #0f2253; color: #d6e6ff; padding: 12px 14px; border-bottom: 1px solid rgba(56, 189, 248, .28); }
+.hud-modal-table td { padding: 11px 14px; border-bottom: 1px solid rgba(56, 189, 248, .10); }
+.hud-modal-table tbody tr:nth-child(even) { background: #0c1b40; }
+.hud-modal-table tbody tr:hover { background: rgba(34, 211, 238, .10); }
+.hud-modal { border-radius: 16px; }
+.hud-modal-foot button { border-radius: 6px; padding: 7px 14px; }
+
+/* рейтинги и подписи — тот же кегль, что в таблице страхования */
+.hud-rank { gap: 10px; }
+.hud-rank-label, .hud-rank-val { font-size: 13.5px; }
+.hud-fill-note, .hud-activity-hint { font-size: 13px; }
