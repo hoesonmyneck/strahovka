@@ -1672,3 +1672,28 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
 /* Форма доп. данных стала длиннее (Ф.И.О., должность) — влезает в низкий экран */
 .sx-modal { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); }
 .sx-body { overflow-y: auto; min-height: 0; }
+
+/* ─── Шапка: одна строка и одна высота в обеих темах ─────────────────────────
+   В тёмной теме кнопки-капсулы на пару пикселей шире (рамки), и на ширине
+   ноутбука название компании переносилось на вторую строку — шапка «вырастала».
+   Название больше не переносится (в крайнем случае обрезается многоточием),
+   правый блок не сжимается, а на узких экранах шапка становится компактнее. */
+.dashboard-header { gap: 16px; }
+.dashboard-header > div:first-child { min-width: 0; flex: 1 1 auto; }
+.dashboard-header h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-info { gap: 12px; flex: 0 0 auto; }
+.user-info > * { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 1560px) {
+  .dashboard-header { padding-left: 24px; padding-right: 24px; }
+  .dashboard-header h1 { font-size: 19px; }
+  .user-info { gap: 10px; }
+  .section-toggle button { padding: 7px 10px; }
+  .logout-btn, .logs-btn, .files-btn { padding: 8px 12px; }
+}
+@media (max-width: 1400px) {
+  .dashboard-header { padding-left: 18px; padding-right: 18px; }
+  .dashboard-header h1 { font-size: 17px; }
+  .user-info { gap: 8px; }
+  .section-toggle button { padding: 7px 8px; font-size: 12.5px; }
+  .logout-btn, .logs-btn, .files-btn { padding: 8px 10px; font-size: 13px; }
+}
