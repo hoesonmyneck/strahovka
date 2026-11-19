@@ -257,17 +257,23 @@ function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
 function HudFillRanking({ rows }) {
   return (
     <div className="hud-rank">
-      {rows.map((r, i) => (
-        <div className="hud-rank-row hud-fill-row" key={r.region + i}
+      {rows.map((r, i) => {
+        // строка всей области (у регионального) идёт первой и места в рейтинге не занимает
+        const place = i - (rows[0]?.is_total ? 1 : 0)
+        return (
+        <div className={'hud-rank-row hud-fill-row' + (r.is_total ? ' hud-row-total' : '')} key={r.region + i}
           title={`${r.region}: заполнено ${fmtNum(r.filled)} из ${fmtNum(r.total)} (${fmtPct(r.pct)})`}>
-          <span className={'hud-rank-pos' + (i < 3 ? ' top top' + (i + 1) : '')}>{i + 1}</span>
+          {r.is_total
+            ? <span className="hud-rank-pos hud-pos-total">Σ</span>
+            : <span className={'hud-rank-pos' + (place < 3 ? ' top top' + (place + 1) : '')}>{place + 1}</span>}
           <span className="hud-rank-label">{r.region}</span>
           <span className="hud-rank-track">
             <span className="hud-rank-fill" style={{ width: `${Math.min(100, r.pct)}%`, background: 'var(--h-cyan)', '--d': `${i * 45}ms` }} />
           </span>
           <span className="hud-fill-val"><b>{fmtPct(r.pct)}</b> <span className="dim">{fmtNum(r.filled)}/{fmtNum(r.total)}</span></span>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -293,7 +299,7 @@ function HudRegionTable({ rows, district }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.region + i} className={r.is_total ? 'hud-rt-total' : undefined}>
-              <td className="hud-rt-region" title={r.region}>{r.is_total ? `Итого: ${r.region}` : r.region}</td>
+              <td className="hud-rt-region" title={r.region}>{r.region}</td>
               <td className="num strong">{fmtNum(r.total)}</td>
               <td className="num">{fmtNum(r.ul_total)}</td>
               <td className="num">{fmtNum(r.ip_total)}</td>
@@ -740,7 +746,7 @@ function HudExpiry() {
           {data.regions.map((r) => {
             const maxv = Math.max(1, ...r.months)
             return (
-              <div className="hud-hm-row hud-exp-row" key={r.region}>
+              <div className={'hud-hm-row hud-exp-row' + (r.is_total ? ' hud-row-total' : '')} key={r.region}>
                 <span className="hud-hm-region" title={r.region}>{r.region}</span>
                 <div className="hud-hm-days">
                   {r.months.map((c, mi) => (
@@ -751,7 +757,7 @@ function HudExpiry() {
                         className={'hud-hm-cell hud-exp-cell' + (c > 0 ? ' on' : '')}
                         disabled={c === 0}
                         title={`${MONTHS_FULL[mi]} ${data.year}: ${c} ${plural(c, 'предприятие', 'предприятия', 'предприятий')}`}
-                        onClick={() => c > 0 && setSel(data.geo_level === 'district'
+                        onClick={() => c > 0 && setSel(data.geo_level === 'district' && !r.is_total
                           ? { region: data.geo_region, district: r.region, month: mi + 1 }
                           : { region: r.region, month: mi + 1 })}
                         style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>

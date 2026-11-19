@@ -899,3 +899,11 @@
 .hud-seg { display: block; height: 100%; flex: 0 0 auto; }
 .hud-seg.rest { flex: 1 1 auto; }
 .hud-size-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -6px 0 14px; font-size: 12px; color: var(--h-dim); }
+
+/* строка «вся область» над районами (у регионального пользователя) */
+.hud-row-total {
+  padding: 6px 8px; margin: 0 -8px 4px; border-radius: 10px;
+  background: rgba(34, 211, 238, .08); border: 1px solid rgba(56, 189, 248, .28);
+}
+.hud-row-total .hud-hm-region, .hud-row-total .hud-rank-label { color: #fff; font-weight: 700; }
+.hud-pos-total { color: #04162a; background: linear-gradient(135deg, #22d3ee, #3b82f6); border-color: transparent; }

@@ -1268,6 +1268,11 @@ def dashboard_kpis(
             "pct": round(filled * 100.0 / total_need, 1) if total_need else 0.0,
         })
     status_fill.sort(key=lambda x: (x["pct"], x["filled"]), reverse=True)
+    if region:   # у регионального — первой строкой вся область (в рейтинге не участвует)
+        f_tot = sum(x["filled"] for x in status_fill)
+        n_tot = sum(x["total"] for x in status_fill)
+        status_fill.insert(0, {"region": region, "filled": f_tot, "total": n_tot, "is_total": True,
+                               "pct": round(f_tot * 100.0 / n_tot, 1) if n_tot else 0.0})
 
     insurance = {
         "total_bins": total,
@@ -1470,6 +1475,10 @@ def expiry_heatmap(
             'months': [months.get(mo, 0) for mo in range(1, 13)],
             'total': sum(months.values()),
         })
+    if region:   # у регионального — первой строкой вся область (сумма районов)
+        months_tot = [sum(r['months'][i] for r in regions) for i in range(12)]
+        regions.insert(0, {'region': region, 'months': months_tot,
+                           'total': sum(months_tot), 'is_total': True})
     return {'year': year, 'regions': regions,
             'geo_level': 'district' if region else 'region', 'geo_region': region}
 
