@@ -202,16 +202,49 @@ function HudGauges({ items, color = 'var(--h-cyan)', coverage = false }) {
 const shortOrgName = (s) => String(s || '').replace(/акционерное\s+общество/gi, 'АО').replace(/\s{2,}/g, ' ').trim()
 const withShortNames = (items) => items.map((it) => ({ ...it, title: it.label, label: shortOrgName(it.label) }))
 
+// Разбивка по размеру предприятия в строке рейтинга (если сервер её прислал):
+// полоса делится на сегменты, под названием — числа.
+const SIZE_PARTS = [
+  { key: 'Крупное', label: 'крупные', cls: 'big' },
+  { key: 'Среднее', label: 'средние', cls: 'mid' },
+  { key: 'Малое', label: 'малые', cls: 'small' },
+]
+const sizesTitle = (s) => SIZE_PARTS.map((p) => `${p.label} ${fmtNum(s[p.key] || 0)}`).join(', ')
+// сколько предприятий без указанного размера (общее число минус три размера)
+const restOf = (it) => Math.max(0, (it.value || 0) - SIZE_PARTS.reduce((a, p) => a + (it.sizes?.[p.key] || 0), 0))
+
 function HudRanking({ items, format = fmtNum, color = 'var(--h-cyan)' }) {
   const max = Math.max(1, ...items.map((i) => i.value))
   return (
     <div className="hud-rank">
       {items.map((it, i) => (
-        <div className="hud-rank-row" key={it.label + i} title={`${it.title || it.label}: ${format(it.value)}`}>
+        <div className={'hud-rank-row' + (it.sizes ? ' with-sizes' : '')} key={it.label + i}
+          title={`${it.title || it.label}: ${format(it.value)}` + (it.sizes ? ` (${sizesTitle(it.sizes)})` : '')}>
           <span className={'hud-rank-pos' + (i < 3 ? ' top top' + (i + 1) : '')}>{i + 1}</span>
-          <span className="hud-rank-label">{it.label}</span>
+          <span className="hud-rank-label">
+            {it.label}
+            {it.sizes && (
+              <span className="hud-rank-sizes">
+                {SIZE_PARTS.map((p) => (
+                  <span key={p.key} className={'hud-sz ' + p.cls}><i />{p.label} <b>{fmtNum(it.sizes[p.key] || 0)}</b></span>
+                ))}
+                {restOf(it) > 0 && <span className="hud-sz rest"><i />не указан <b>{fmtNum(restOf(it))}</b></span>}
+              </span>
+            )}
+          </span>
           <span className="hud-rank-track">
-            <span className="hud-rank-fill" style={{ width: `${(it.value / max) * 100}%`, background: color, '--d': `${i * 55}ms` }} />
+            {it.sizes ? (
+              // сегменты: доля каждого размера от общего числа; длина полосы — как раньше
+              <span className="hud-rank-fill hud-rank-stack" style={{ width: `${(it.value / max) * 100}%`, '--d': `${i * 55}ms` }}>
+                {SIZE_PARTS.map((p) => (
+                  <span key={p.key} className={'hud-seg ' + p.cls}
+                    style={{ width: `${it.value ? ((it.sizes[p.key] || 0) / it.value) * 100 : 0}%` }} />
+                ))}
+                <span className="hud-seg rest" />
+              </span>
+            ) : (
+              <span className="hud-rank-fill" style={{ width: `${(it.value / max) * 100}%`, background: color, '--d': `${i * 55}ms` }} />
+            )}
           </span>
           <span className="hud-rank-val">{format(it.value)}</span>
         </div>
@@ -240,13 +273,13 @@ function HudFillRanking({ rows }) {
 }
 
 // Таблица по регионам: предприятия (всего/ИП/ЮЛ), застрахованы, % , не застрахованы (всего/ИП/ЮЛ)
-function HudRegionTable({ rows }) {
+function HudRegionTable({ rows, district }) {
   return (
     <div className="hud-rtable-wrap">
       <table className="hud-rtable">
         <thead>
           <tr>
-            <th rowSpan={2} className="hud-rt-region">Регион</th>
+            <th rowSpan={2} className="hud-rt-region">{district ? 'Район' : 'Регион'}</th>
             <th colSpan={3}>Кол-во предприятий</th>
             <th rowSpan={2}>Застра&shy;хованных</th>
             <th rowSpan={2}>% страхо&shy;вания</th>
@@ -259,8 +292,8 @@ function HudRegionTable({ rows }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.region + i}>
-              <td className="hud-rt-region" title={r.region}>{r.region}</td>
+            <tr key={r.region + i} className={r.is_total ? 'hud-rt-total' : undefined}>
+              <td className="hud-rt-region" title={r.region}>{r.is_total ? `Итого: ${r.region}` : r.region}</td>
               <td className="num strong">{fmtNum(r.total)}</td>
               <td className="num">{fmtNum(r.ul_total)}</td>
               <td className="num">{fmtNum(r.ip_total)}</td>
@@ -598,7 +631,7 @@ const ACTIVITY_LIST_COLUMNS = [
   { key: 'at', label: 'Когда', mono: true, render: (it) => fmtDT(it.at) },
 ]
 
-function HudExpiryModal({ year, month, region, onClose }) {
+function HudExpiryModal({ year, month, region, district, onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -607,12 +640,14 @@ function HudExpiryModal({ year, month, region, onClose }) {
   useEffect(() => {
     let alive = true
     setLoading(true)
-    api.get('/api/dashboard/expiry-list', { params: { year, month, region, page, page_size: pageSize } })
+    const params = { year, month, region, page, page_size: pageSize }
+    if (district) params.district = district
+    api.get('/api/dashboard/expiry-list', { params })
       .then((res) => { if (alive) setData(res.data) })
       .catch(() => { if (alive) setData(null) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [year, month, region, page])
+  }, [year, month, region, district, page])
 
   const total = data?.total || 0
   const pages = Math.max(1, Math.ceil(total / pageSize))
@@ -624,7 +659,7 @@ function HudExpiryModal({ year, month, region, onClose }) {
         <div className="hud-modal-head">
           <div>
             <div className="hud-modal-title">Окончание страховки — {MONTHS_FULL[month - 1]} {year}</div>
-            <div className="hud-modal-sub">{region} · предприятий: <b>{fmtNum(total)}</b></div>
+            <div className="hud-modal-sub">{district ? `${region} · ${district}` : region} · предприятий: <b>{fmtNum(total)}</b></div>
           </div>
           <button className="hud-modal-close" onClick={onClose}>✕</button>
         </div>
@@ -716,7 +751,9 @@ function HudExpiry() {
                         className={'hud-hm-cell hud-exp-cell' + (c > 0 ? ' on' : '')}
                         disabled={c === 0}
                         title={`${MONTHS_FULL[mi]} ${data.year}: ${c} ${plural(c, 'предприятие', 'предприятия', 'предприятий')}`}
-                        onClick={() => c > 0 && setSel({ region: r.region, month: mi + 1 })}
+                        onClick={() => c > 0 && setSel(data.geo_level === 'district'
+                          ? { region: data.geo_region, district: r.region, month: mi + 1 }
+                          : { region: r.region, month: mi + 1 })}
                         style={c > 0 ? { '--lvl': Math.min(1, 0.3 + 0.7 * (c / maxv)) } : undefined}>
                         {c > 0 ? fmtNum(c) : ''}
                       </button>
@@ -730,7 +767,7 @@ function HudExpiry() {
         </div>
       )}
       {sel && (
-        <HudExpiryModal year={data.year} month={sel.month} region={sel.region} onClose={() => setSel(null)} />
+        <HudExpiryModal year={data.year} month={sel.month} region={sel.region} district={sel.district} onClose={() => setSel(null)} />
       )}
     </HudCard>
   )
@@ -1055,6 +1092,12 @@ function HudInsurerRanking({ id, title, mode, initial, color }) {
             : <>Застраховано за период: <b>{fmtNum(data.total)}</b> {unit}</>}
         </span>
       </div>
+      {mode === 'enterprises' && (
+        <div className="hud-size-legend">
+          {SIZE_PARTS.map((p) => <span key={p.key} className={'hud-sz ' + p.cls}><i />{p.label}</span>)}
+          <span className="hud-sz rest"><i />размер не указан</span>
+        </div>
+      )}
       {active && !loading && data && items.length === 0 ? (
         <div className="hud-act-empty">Договоров, начавшихся в этот период, нет</div>
       ) : (
@@ -1110,6 +1153,8 @@ const DashboardHud = () => {
   }
 
   const ins = data.insurance
+  // региональный пользователь — разбивки по районам его области
+  const byDistrict = ins.geo_level === 'district'
   const op = data.oppv
 
   const insTiles = [
@@ -1150,7 +1195,7 @@ const DashboardHud = () => {
 
   // В меню — каждая таблица/график отдельно (без KPI-панелей)
   const navItems = [
-    ...(ins.region_table?.length ? [{ id: 'sec-region', label: 'Страхование по регионам' }] : []),
+    ...(ins.region_table?.length ? [{ id: 'sec-region', label: byDistrict ? 'Страхование по районам' : 'Страхование по регионам' }] : []),
     { id: 'sec-expiry', label: 'Окончание страховки' },
     { id: 'sec-form', label: 'Форма предприятия' },
     ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Рейтинг страховых компаний' }] : []),
@@ -1160,7 +1205,7 @@ const DashboardHud = () => {
       ? [{ id: 'sec-status-rank', label: 'Рейтинг статусов' }] : []),
     { id: 'sec-status-act', label: 'Активность статусов' },
     { id: 'sec-overdue', label: 'Итог не обновлён после встречи' },
-    ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: 'Заполненность статусов по регионам' }] : []),
+    ...(ins.status_fill?.length ? [{ id: 'sec-status-fill', label: byDistrict ? 'Заполненность статусов по районам' : 'Заполненность статусов по регионам' }] : []),
     ...(op ? [{ id: 'sec-oked', label: 'Рейтинг ОКЭД по сотрудникам' }] : []),
     { id: 'sec-activity', label: 'Активность заходов' },
   ]
@@ -1176,8 +1221,8 @@ const DashboardHud = () => {
       <KpiPanel tiles={insTiles} cols={4} />
       {ins.region_table && ins.region_table.length > 0 && (
         <div className="hud-charts">
-          <HudCard id="sec-region" title="Страхование по регионам" wide>
-            <HudRegionTable rows={ins.region_table} />
+          <HudCard id="sec-region" title={byDistrict ? `Страхование по районам — ${ins.geo_region}` : 'Страхование по регионам'} wide>
+            <HudRegionTable rows={ins.region_table} district={byDistrict} />
           </HudCard>
         </div>
       )}
@@ -1220,8 +1265,8 @@ const DashboardHud = () => {
       <div className="hud-charts"><HudOverdueCalendar /></div>
       {ins.status_fill && ins.status_fill.length > 0 && (
         <div className="hud-charts">
-          <HudCard id="sec-status-fill" title="Рейтинг регионов по заполненности статусов" wide>
-            <div className="hud-fill-note">Доля незастрахованных предприятий региона, которым проставлен статус</div>
+          <HudCard id="sec-status-fill" title={byDistrict ? 'Рейтинг районов по заполненности статусов' : 'Рейтинг регионов по заполненности статусов'} wide>
+            <div className="hud-fill-note">{byDistrict ? 'Доля предприятий района, которым проставлен статус' : 'Доля незастрахованных предприятий региона, которым проставлен статус'}</div>
             <HudFillRanking rows={ins.status_fill} />
           </HudCard>
         </div>

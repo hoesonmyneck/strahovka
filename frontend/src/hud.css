@@ -876,3 +876,26 @@
 }
 .hud-clear-btn:hover { background: rgba(34, 211, 238, .14); border-color: var(--h-line-hi); }
 .hud-dim { opacity: .45; transition: opacity .15s; }
+
+/* итоговая строка по области (у регионального пользователя — над районами) */
+.hud-rtable tbody tr.hud-rt-total td {
+  background: rgba(34, 211, 238, .10); font-weight: 700; color: #fff;
+  border-bottom: 1px solid rgba(56, 189, 248, .35);
+}
+.hud-rtable tbody tr.hud-rt-total .hud-rt-region { color: #fff; }
+
+/* рейтинг страховых по предприятиям: разбивка по размеру */
+.hud-rank-row.with-sizes { align-items: center; }
+.hud-rank-row.with-sizes .hud-rank-label { white-space: normal; display: flex; flex-direction: column; gap: 3px; }
+.hud-rank-sizes { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--h-dim); }
+.hud-rank-sizes b { color: var(--h-tx); font-weight: 600; font-variant-numeric: tabular-nums; }
+.hud-sz { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.hud-sz i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.hud-sz.big i, .hud-seg.big { background: #2ee6c5; }
+.hud-sz.mid i, .hud-seg.mid { background: #4a9bff; }
+.hud-sz.small i, .hud-seg.small { background: #ffb347; }
+.hud-sz.rest i, .hud-seg.rest { background: rgba(143, 168, 212, .35); }
+.hud-rank-stack { display: flex; overflow: hidden; box-shadow: 0 0 10px rgba(34, 211, 238, .25); }
+.hud-seg { display: block; height: 100%; flex: 0 0 auto; }
+.hud-seg.rest { flex: 1 1 auto; }
+.hud-size-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -6px 0 14px; font-size: 12px; color: var(--h-dim); }

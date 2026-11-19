@@ -1087,6 +1087,32 @@ def get_metrics(
 
 # ============ DASHBOARD (KPI для руководства) ============
 
+# У регионального пользователя разбивки дашборда идут не по областям, а по
+# районам его области (у общереспубликанского — по областям, как раньше).
+NO_DISTRICT_LABEL = "Район не указан"
+SIZE_KEYS = ("Крупное", "Среднее", "Малое")
+
+
+def _geo_col(S, user):
+    """Колонка разбивки: район для регионального пользователя, иначе область."""
+    return S.rai_name if user.region else S.obl_name
+
+
+def _geo_label(v, user):
+    if v:
+        return v
+    return NO_DISTRICT_LABEL if user.region else None   # область без названия не показываем
+
+
+def _size_cols(S):
+    """Счётчики по размеру предприятия (Крупное / Среднее / Малое) для агрегатов."""
+    return [func.coalesce(func.sum(case((S.org_size == k, 1), else_=0)), 0).label(f"sz{i}")
+            for i, k in enumerate(SIZE_KEYS)]
+
+
+def _sizes_of(row):
+    return {k: int(getattr(row, f"sz{i}") or 0) for i, k in enumerate(SIZE_KEYS)}
+
 @app.get("/api/dashboard/kpis")
 def dashboard_kpis(
     current_user: models.User = Depends(auth.require_dashboard),
@@ -1123,45 +1149,56 @@ def dashboard_kpis(
     total = insured + not_insured  # «Всего организаций» — как в разделе страхование
     coverage = round(insured * 100.0 / (insured + not_insured), 1) if (insured + not_insured) else 0.0
 
-    # Полная разбивка по регионам (для таблицы и рейтингов).
+    # Полная разбивка по регионам (для таблицы и рейтингов). У регионального
+    # пользователя — по районам его области, первой строкой — итог по области.
+    GEO = _geo_col(S, current_user)
     region_rows = scope(db.query(
-        S.obl_name,
+        GEO.label("obl_name"),
         func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
         func.coalesce(func.sum(case((S.status == 0, 1), else_=0)), 0).label("nins"),
         func.coalesce(func.sum(case((and_(S.ip == 1, OBL), 1), else_=0)), 0).label("ip_tot"),
         func.coalesce(func.sum(case((and_(S.ip == 0, OBL), 1), else_=0)), 0).label("ul_tot"),
         func.coalesce(func.sum(case((and_(S.ip == 1, S.status == 0), 1), else_=0)), 0).label("ip_nins"),
         func.coalesce(func.sum(case((and_(S.ip == 0, S.status == 0), 1), else_=0)), 0).label("ul_nins"),
-    )).group_by(S.obl_name).all()
+    )).group_by(GEO).all()
+
+    def _rt_row(name, ins_c, nins_c, ip_tot, ul_tot, ip_nins, ul_nins, is_total=False):
+        tot_c = ins_c + nins_c
+        return {
+            "region": name, "is_total": is_total,
+            "total": tot_c, "ip_total": ip_tot, "ul_total": ul_tot,
+            "insured": ins_c,
+            "coverage": round(ins_c * 100.0 / tot_c, 1) if tot_c else 0.0,
+            "not_insured": nins_c, "ip_not_insured": ip_nins, "ul_not_insured": ul_nins,
+        }
 
     region_table = []
     for r in region_rows:
-        if not r.obl_name:   # без региона — в списке не показываем
+        name = _geo_label(r.obl_name, current_user)
+        if not name:   # без региона — в списке не показываем
             continue
-        ins_c = r.ins or 0
-        nins_c = r.nins or 0
-        tot_c = ins_c + nins_c
-        region_table.append({
-            "region": r.obl_name,
-            "total": tot_c, "ip_total": r.ip_tot or 0, "ul_total": r.ul_tot or 0,
-            "insured": ins_c,
-            "coverage": round(ins_c * 100.0 / tot_c, 1) if tot_c else 0.0,
-            "not_insured": nins_c, "ip_not_insured": r.ip_nins or 0, "ul_not_insured": r.ul_nins or 0,
-        })
+        region_table.append(_rt_row(name, r.ins or 0, r.nins or 0, r.ip_tot or 0, r.ul_tot or 0,
+                                    r.ip_nins or 0, r.ul_nins or 0))
     region_table.sort(key=lambda x: x["total"], reverse=True)
+    if region:   # итог по области — первой строкой
+        f = lambda k: sum(x[k] for x in region_table)
+        region_table.insert(0, _rt_row(region, f("insured"), f("not_insured"), f("ip_total"), f("ul_total"),
+                                       f("ip_not_insured"), f("ul_not_insured"), is_total=True))
+    geo_rows = [x for x in region_table if not x["is_total"]]
 
     # Рейтинг регионов по застрахованным (топ-10) — из той же разбивки
     by_region = [
         {"label": x["region"], "insured": x["insured"], "not_insured": x["not_insured"], "total": x["total"]}
-        for x in sorted(region_table, key=lambda x: x["insured"], reverse=True)[:10]
+        for x in sorted(geo_rows, key=lambda x: x["insured"], reverse=True)[:10]
     ]
 
     # Рейтинг страховых компаний (КСЖ) по числу застрахованных предприятий.
     by_insurer = [
-        {"label": r.ins_name, "value": int(r.cnt or 0)}
+        {"label": r.ins_name, "value": int(r.cnt or 0), "sizes": _sizes_of(r)}
         for r in scope(db.query(
             S.system_delimiter_bin_name.label("ins_name"),
             func.count().label("cnt"),
+            *_size_cols(S),
         ).filter(S.status == 1,
                  S.system_delimiter_bin_name.isnot(None),
                  S.system_delimiter_bin_name != ""))
@@ -1213,20 +1250,21 @@ def dashboard_kpis(
     # (как в таблице страхования) сколько уже имеют проставленный статус.
     # Рейтинг — по проценту, но отдаём и числа (заполнено / всего).
     B = models.BinStatus
-    need_rows = scope(db.query(S.obl_name, func.count().label("c"))).group_by(S.obl_name).all()
-    need_map = {r.obl_name: int(r.c or 0) for r in need_rows}
-    filled_rows = scope(db.query(S.obl_name, func.count().label("c"))
+    need_rows = scope(db.query(GEO.label("g"), func.count().label("c"))).group_by(GEO).all()
+    need_map = {r.g: int(r.c or 0) for r in need_rows}
+    filled_rows = scope(db.query(GEO.label("g"), func.count().label("c"))
                         .join(B, B.bin == S.bin)
                         .filter(B.status.isnot(None), B.status != "")
-                        ).group_by(S.obl_name).all()
-    filled_map = {r.obl_name: int(r.c or 0) for r in filled_rows}
+                        ).group_by(GEO).all()
+    filled_map = {r.g: int(r.c or 0) for r in filled_rows}
     status_fill = []
     for obl, total_need in need_map.items():
-        if not obl:   # без региона — не показываем
+        name = _geo_label(obl, current_user)
+        if not name:   # без региона — не показываем
             continue
         filled = filled_map.get(obl, 0)
         status_fill.append({
-            "region": obl, "filled": filled, "total": total_need,
+            "region": name, "filled": filled, "total": total_need,
             "pct": round(filled * 100.0 / total_need, 1) if total_need else 0.0,
         })
     status_fill.sort(key=lambda x: (x["pct"], x["filled"]), reverse=True)
@@ -1251,6 +1289,9 @@ def dashboard_kpis(
         "by_status_meeting": by_status_meeting,
         "by_size": by_size,
         "region_table": region_table,
+        # разбивки по районам (региональный пользователь) или по областям
+        "geo_level": "district" if region else "region",
+        "geo_region": region,
         "status_fill": status_fill,
     }
 
@@ -1324,7 +1365,7 @@ def dashboard_insurer_ranking(
         date_from, date_to = date_to, date_from
     M, S = models.InsuranceRecord, models.CompanySummary
     q = (db.query(M.bin.label("bin"), M.system_delimiter_bin_name.label("ins"),
-                  M.count_employees.label("emp"))
+                  M.count_employees.label("emp"), S.org_size.label("size"))
          .join(S, S.bin == M.bin)
          .filter(S.status.in_((0, 1)), M.date_beg.isnot(None),
                  M.system_delimiter_bin_name.isnot(None), M.system_delimiter_bin_name != ""))
@@ -1338,8 +1379,12 @@ def dashboard_insurer_ranking(
            .order_by(M.bin, M.system_delimiter_bin_name, M.date_beg.desc(), M.id.desc())
            .subquery())
     val = func.count() if mode == "enterprises" else func.coalesce(func.sum(sub.c.emp), 0)
-    rows = db.query(sub.c.ins, val.label("v")).group_by(sub.c.ins).order_by(val.desc()).all()
-    items = [{"label": r.ins, "value": int(r.v or 0)} for r in rows]
+    size_cols = [func.coalesce(func.sum(case((sub.c.size == k, 1), else_=0)), 0).label(f"sz{i}")
+                 for i, k in enumerate(SIZE_KEYS)] if mode == "enterprises" else []
+    rows = (db.query(sub.c.ins, val.label("v"), *size_cols)
+            .group_by(sub.c.ins).order_by(val.desc()).all())
+    items = [{"label": r.ins, "value": int(r.v or 0),
+              **({"sizes": _sizes_of(r)} if mode == "enterprises" else {})} for r in rows]
     return {"mode": mode,
             "date_from": date_from.isoformat() if date_from else None,
             "date_to": date_to.isoformat() if date_to else None,
@@ -1404,18 +1449,18 @@ def expiry_heatmap(
         return q.filter(S.obl_name == region) if region else q
 
     eff = _expiry_end_expr(S)
+    GEO = _geo_col(S, current_user)   # у регионального — районы его области
     rows = scope(
-        db.query(S.obl_name, func.extract('month', eff).label('m'), func.count().label('c'))
+        db.query(GEO, func.extract('month', eff).label('m'), func.count().label('c'))
         .filter(S.status == 1, func.extract('year', eff) == year)
-    ).group_by(S.obl_name, func.extract('month', eff)).all()
+    ).group_by(GEO, func.extract('month', eff)).all()
 
     agg = {}
     for obl, m, c in rows:
-        agg.setdefault(obl or "—", {})[int(m)] = int(c)
+        agg.setdefault(_geo_label(obl, current_user) or "—", {})[int(m)] = int(c)
 
-    # Полный список регионов (чтобы показать все, даже с нулями)
-    all_regions = [r[0] for r in scope(db.query(S.obl_name).distinct()).all() if r[0]]
-    all_regions.sort()
+    # Полный список регионов / районов (чтобы показать все, даже с нулями)
+    all_regions = sorted({_geo_label(r[0], current_user) for r in scope(db.query(GEO).distinct()).all()} - {None})
 
     regions = []
     for obl in all_regions:
@@ -1425,7 +1470,8 @@ def expiry_heatmap(
             'months': [months.get(mo, 0) for mo in range(1, 13)],
             'total': sum(months.values()),
         })
-    return {'year': year, 'regions': regions}
+    return {'year': year, 'regions': regions,
+            'geo_level': 'district' if region else 'region', 'geo_region': region}
 
 
 @app.get("/api/dashboard/expiry-list", response_model=schemas.InsuranceRecordList)
@@ -1433,13 +1479,15 @@ def expiry_list(
     year: int,
     month: int = Query(..., ge=1, le=12),
     region: str = Query(...),
+    district: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
     """Список застрахованных предприятий конкретного региона, у которых страховка
-    заканчивается в указанном месяце года (клик по ячейке карты окончаний)."""
+    заканчивается в указанном месяце года (клик по ячейке карты окончаний).
+    district — район (у регионального пользователя карта идёт по районам)."""
     S = models.CompanySummary
     # Региональный пользователь видит только свой регион
     if current_user.region:
@@ -1450,6 +1498,9 @@ def expiry_list(
          .filter(S.status == 1, S.obl_name == region,
                  func.extract('year', eff) == year,
                  func.extract('month', eff) == month))
+    if district:
+        q = q.filter(or_(S.rai_name.is_(None), S.rai_name == "") if district == NO_DISTRICT_LABEL
+                     else S.rai_name == district)
     total = q.count()
     records = q.order_by(eff.asc(), S.bin.asc()).offset((page - 1) * page_size).limit(page_size).all()
 
