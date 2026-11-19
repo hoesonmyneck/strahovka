@@ -1101,7 +1101,8 @@ function HudInsurerRanking({ id, title, mode, initial, color }) {
       {mode === 'enterprises' && (
         <div className="hud-size-legend">
           {SIZE_PARTS.map((p) => <span key={p.key} className={'hud-sz ' + p.cls}><i />{p.label}</span>)}
-          <span className="hud-sz rest"><i />размер не указан</span>
+          {/* «не указан» — только если такие предприятия действительно есть */}
+          {items.some((it) => it.sizes && restOf(it) > 0) && <span className="hud-sz rest"><i />размер не указан</span>}
         </div>
       )}
       {active && !loading && data && items.length === 0 ? (
