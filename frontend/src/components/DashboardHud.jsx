@@ -317,6 +317,50 @@ function HudRegionTable({ rows, district }) {
   )
 }
 
+// Рейтинг ГАКа: место ГАК среди страховых в регионе и доля застрахованных ГАК
+function HudGakTable({ rows, district }) {
+  const pct = (v) => fmtPct(v)
+  return (
+    <div className="hud-rtable-wrap">
+      <table className="hud-rtable hud-gak-table">
+        <thead>
+          <tr>
+            <th className="hud-rt-region">{district ? 'Район' : 'Регион'}</th>
+            <th>Рейтинг ГАКа в регионе</th>
+            <th>Кол-во предприятий</th>
+            <th>Кол-во предприятий застрахованных</th>
+            <th>% застрахованных</th>
+            <th>Кол-во людей</th>
+            <th>Кол-во людей застрахованных</th>
+            <th>% застрахованных</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.region + i} className={r.is_total ? 'hud-rt-total' : undefined}>
+              <td className="hud-rt-region" title={r.region}>{r.region}</td>
+              <td className="num center">
+                {r.rank ? (
+                  <span className={'hud-gak-rank' + (r.rank <= 3 ? ' top' + r.rank : '')}
+                    title={`ГАК на ${r.rank} месте из ${r.insurers} страховых компаний`}>
+                    {r.rank}<i> из {r.insurers}</i>
+                  </span>
+                ) : <span className="dim" title="Нет застрахованных ГАК предприятий">—</span>}
+              </td>
+              <td className="num strong">{fmtNum(r.ent)}</td>
+              <td className="num ins">{fmtNum(r.gak_ent)}</td>
+              <td className="num"><span className="hud-rt-cov">{pct(r.ent_pct)}</span></td>
+              <td className="num strong">{fmtNum(r.ppl)}</td>
+              <td className="num ins">{fmtNum(r.gak_ppl)}</td>
+              <td className="num"><span className="hud-rt-cov">{pct(r.ppl_pct)}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // Разбивка по размеру предприятия: линия показывает ПРОЦЕНТ застрахованных
 function HudSizeBreakdown({ items }) {
   return (
@@ -1263,6 +1307,7 @@ const DashboardHud = () => {
   // В меню — каждая таблица/график отдельно (без KPI-панелей)
   const navItems = [
     ...(ins.region_table?.length ? [{ id: 'sec-region', label: byDistrict ? 'Страхование по районам' : 'Страхование по регионам' }] : []),
+    ...(ins.gak_rating?.length ? [{ id: 'sec-gak', label: 'Рейтинг ГАКа' }] : []),
     { id: 'sec-expiry', label: 'Окончание страховки' },
     { id: 'sec-form', label: 'Форма предприятия' },
     ...(ins.by_insurer?.length ? [{ id: 'sec-insurer', label: 'Рейтинг страховых компаний' }] : []),
@@ -1316,6 +1361,17 @@ const DashboardHud = () => {
         <div className="hud-charts">
           <HudCard id="sec-region" title={byDistrict ? `Страхование по районам — ${ins.geo_region}${ins.scope?.district ? ' · ' + ins.scope.district : ''}` : 'Страхование по регионам'} wide>
             <HudRegionTable rows={ins.region_table} district={byDistrict} />
+          </HudCard>
+        </div>
+      )}
+      {ins.gak_rating && ins.gak_rating.length > 0 && (
+        <div className="hud-charts">
+          <HudCard id="sec-gak" title="Рейтинг ГАКа" wide>
+            <div className="hud-fill-note">
+              Застрахованные — по договорам ГАК. Место — среди страховых компаний региона по числу
+              застрахованных предприятий. Люди всего — по ЕСУТД (активные трудовые договоры), если нет — по договору.
+            </div>
+            <HudGakTable rows={ins.gak_rating} district={byDistrict} />
           </HudCard>
         </div>
       )}

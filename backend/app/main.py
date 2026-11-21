@@ -1278,6 +1278,10 @@ def dashboard_kpis(
         for x in sorted(geo_rows, key=lambda x: x["insured"], reverse=True)[:10]
     ]
 
+    # ── Рейтинг ГАКа: по каждой области (одна область — по районам) место ГАК
+    # среди страховых компаний, доля застрахованных ГАК предприятий и людей.
+    gak_rating = _gak_rating(db, S, scope, GEO, sc, OBL)
+
     # Рейтинг страховых компаний (КСЖ) по числу застрахованных предприятий.
     by_insurer = [
         {"label": r.ins_name, "value": int(r.cnt or 0), "sizes": _sizes_of(r)}
@@ -1385,6 +1389,7 @@ def dashboard_kpis(
         "geo_region": region,
         "scope": sc.info(),
         "status_fill": status_fill,
+        "gak_rating": gak_rating,
     }
 
     # ── ОППВ (по oppv_records) ──
@@ -1433,6 +1438,66 @@ def dashboard_kpis(
         oppv = None
 
     return {"insurance": insurance, "oppv": oppv}
+
+
+# ГАК — АО «Компания по страхованию жизни „Государственная аннуитетная компания“»
+GAK_NAME_LIKE = "%Государственная аннуитетная%"
+
+
+def _gak_rating(db, S, scope, GEO, sc, OBL):
+    """Строки таблицы «Рейтинг ГАКа» (первой — итог по всему охвату).
+      ent / gak_ent — предприятий всего (обязанных) / застраховано ГАК;
+      ppl / gak_ppl — людей всего / застраховано ГАК. Всего людей — по ЕСУТД
+        (активные трудовые договоры; есть почти у всех), если нет — число
+        сотрудников из договора; застраховано ГАК — по договорам ГАК;
+      rank / insurers — место ГАК среди страховых компаний по числу
+        застрахованных предприятий / сколько страховых в регионе."""
+    is_gak = S.system_delimiter_bin_name.ilike(GAK_NAME_LIKE)
+    gak_ins = and_(S.status == 1, is_gak)
+    people = func.coalesce(S.esutd_akt_td, S.total_employees_count, 0)
+    base = scope(db.query(
+        GEO.label("g"),
+        func.count().label("ent"),
+        func.coalesce(func.sum(people), 0).label("ppl"),
+        func.coalesce(func.sum(case((gak_ins, 1), else_=0)), 0).label("gak_ent"),
+        func.coalesce(func.sum(case((gak_ins, S.count_employees), else_=0)), 0).label("gak_ppl"),
+    ).filter(OBL)).group_by(GEO).all()
+    per_ins = scope(db.query(
+        GEO.label("g"), S.system_delimiter_bin_name.label("ins"), func.count().label("c"),
+    ).filter(S.status == 1, S.system_delimiter_bin_name.isnot(None),
+             S.system_delimiter_bin_name != "")).group_by(GEO, S.system_delimiter_bin_name).all()
+
+    by_geo, total_by_ins = {}, {}
+    for g, ins, c in per_ins:
+        by_geo.setdefault(g, {})[ins] = int(c)
+        total_by_ins[ins] = total_by_ins.get(ins, 0) + int(c)
+
+    def rank_of(counts):
+        gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
+        if not gak:
+            return None, len(counts)
+        return 1 + sum(1 for ins, c in counts.items()
+                       if c > gak and "Государственная аннуитетная" not in (ins or "")), len(counts)
+
+    def row(name, ent, ppl, gak_ent, gak_ppl, counts, is_total=False):
+        rank, n = rank_of(counts)
+        ent, ppl, gak_ent, gak_ppl = int(ent or 0), int(ppl or 0), int(gak_ent or 0), int(gak_ppl or 0)
+        return {"region": name, "is_total": is_total, "rank": rank, "insurers": n,
+                "ent": ent, "gak_ent": gak_ent, "ent_pct": round(gak_ent * 100.0 / ent, 1) if ent else 0.0,
+                "ppl": ppl, "gak_ppl": gak_ppl, "ppl_pct": round(gak_ppl * 100.0 / ppl, 1) if ppl else 0.0}
+
+    rows = []
+    for r in base:
+        name = sc.label(r.g)
+        if not name:
+            continue
+        rows.append(row(name, r.ent, r.ppl, r.gak_ent, r.gak_ppl, by_geo.get(r.g, {})))
+    rows.sort(key=lambda x: (x["rank"] is None, x["rank"] or 0, -x["ent_pct"]))
+    if not sc.district and len(rows) > 1:   # итог по всему охвату — первой строкой
+        f = lambda k: sum(x[k] for x in rows)
+        title = sc.single or ("Казахстан" if sc.regions is None else "Все мои области")
+        rows.insert(0, row(title, f("ent"), f("ppl"), f("gak_ent"), f("gak_ppl"), total_by_ins, is_total=True))
+    return rows
 
 
 @app.get("/api/dashboard/insurer-ranking")
