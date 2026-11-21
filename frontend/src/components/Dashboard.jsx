@@ -961,6 +961,9 @@ const Dashboard = () => {
 
   // Доступ к разделу ОПВР: админ или пользователь с флагом appvr_access
   const canAppvr = isAdmin() || !!user?.appvr_access
+  // Выбор области в фильтрах: у админа — все области, у аккаунта с доп.
+  // областью — две его области (у одной области выбора нет)
+  const canPickRegion = isAdmin() || !!user?.region2
   // Доступ к «Дашборду»: админ или пользователь с флагом dashboard_access
   const canDashboard = isAdmin() || !!user?.dashboard_access
   // Активный раздел: 'insurance' (страхование) или 'oppv' (пенсионные взносы).
@@ -1668,6 +1671,16 @@ const Dashboard = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // Клик по предприятию в списках дашборда — то же самое: «Страхование» + этот
+  // БИН. Дашборд шлёт событие open-bin (он в отдельном компоненте).
+  const openBinRef = useRef(openBinFromNotification)
+  openBinRef.current = openBinFromNotification
+  useEffect(() => {
+    const onOpenBin = (e) => { if (e.detail != null) openBinRef.current(e.detail) }
+    window.addEventListener('open-bin', onOpenBin)
+    return () => window.removeEventListener('open-bin', onOpenBin)
+  }, [])
+
   // Отправка файла + опрос фоновой задачи.
   // Фаза 'sending' — реальный % передачи байтов; 'processing' — реальный %
   // разбора строк на сервере (сервер обновляет счётчик, мы опрашиваем статус).
@@ -1780,6 +1793,17 @@ const Dashboard = () => {
     }
   }
 
+  // Дополнительная область аккаунта ("" — убрать)
+  const setRegion2 = async (u, val) => {
+    try {
+      await api.patch(`/api/users/${u.id}`, { region2: val })
+      toast.success(val ? `${u.username}: доп. область — ${val}` : `${u.username}: доп. область убрана`)
+      fetchUsers()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Ошибка')
+    }
+  }
+
   // ИИН аккаунта: редактируется прямо в таблице, сохраняется по потере фокуса/Enter
   const [iinDraft, setIinDraft] = useState({})   // { [userId]: 'строка' }
 
@@ -1885,6 +1909,9 @@ const Dashboard = () => {
       fetchUsers()
     } else if (isManager()) {
       // Менеджеру регионы нужны для выпадашки при создании аккаунта
+      fetchRegions()
+    } else if (user?.region2) {
+      // Две области — в фильтре выбор области (сервер отдаёт только его области)
       fetchRegions()
     } else if (user?.region) {
       // Региональный пользователь — загружаем только его районы
@@ -2170,7 +2197,20 @@ const Dashboard = () => {
                         <td>{u.username}</td>
                         <td>{u.full_name || '—'}</td>
                         <td>{u.role}</td>
-                        <td>{u.region || '— все регионы —'}</td>
+                        <td>
+                          {u.region || '— все регионы —'}
+                          {/* доп. область: аккаунт видит обе области */}
+                          {u.region && u.role !== 'admin' && (
+                            <select className="region2-select" value={u.region2 || ''}
+                              onChange={(e) => setRegion2(u, e.target.value)}
+                              title="Дополнительная область: аккаунт будет видеть обе области">
+                              <option value="">+ доп. область</option>
+                              {availableRegions.filter((r) => r !== u.region).map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'center' }}>
                           {u.role === 'admin' ? (
                             <span style={{ color: '#999' }}>—</span>
@@ -2611,8 +2651,8 @@ const Dashboard = () => {
             />
           </div>
 
-          {/* Для admin — выбор области; для регионального пользователя — скрыто */}
-          {isAdmin() && (
+          {/* Выбор области: admin — все, аккаунт с двумя областями — свои; у одной области — скрыто */}
+          {canPickRegion && (
             <div className="filter-group">
               <label>Область</label>
               <select
@@ -2623,7 +2663,7 @@ const Dashboard = () => {
                   fetchDistricts(val)
                 }}
               >
-                <option value="">Все области</option>
+                <option value="">{isAdmin() ? 'Все области' : 'Все мои области'}</option>
                 {availableRegions.map(r => (
                   <option key={r} value={r}>{r}</option>
                 ))}
@@ -2632,7 +2672,7 @@ const Dashboard = () => {
           )}
 
           {/* Район — для admin зависит от выбранной области, для регионального — все его районы */}
-          {(isAdmin() ? filters.obl_name : user?.region) && (
+          {(canPickRegion ? filters.obl_name : user?.region) && (
             <div className="filter-group">
               <label>Район</label>
               <select

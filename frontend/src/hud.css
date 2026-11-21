@@ -907,3 +907,17 @@
 }
 .hud-row-total .hud-hm-region, .hud-row-total .hud-rank-label { color: #fff; font-weight: 700; }
 .hud-pos-total { color: #04162a; background: linear-gradient(135deg, #22d3ee, #3b82f6); border-color: transparent; }
+
+/* фильтр дашборда по области и району */
+.hud-geo-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px;
+  margin: -4px 0 6px; padding: 12px 16px; border-radius: 12px;
+  background: rgba(10, 24, 60, .55); border: 1px solid var(--h-line);
+}
+.hud-geo-bar select { min-width: 220px; }
+.hud-geo-bar select:disabled { opacity: .7; cursor: default; }
+.hud-h2-note { margin-left: 12px; font-size: 12.5px; font-weight: 500; color: var(--h-dim); text-shadow: none; }
+
+/* строки списков-провалов: клик открывает предприятие в «Страховании» */
+.hud-modal-table tbody tr.hud-row-link { cursor: pointer; }
+.hud-modal-table tbody tr.hud-row-link:hover td { background: rgba(34, 211, 238, .12); color: #fff; }

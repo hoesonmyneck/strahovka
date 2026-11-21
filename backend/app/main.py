@@ -29,6 +29,8 @@ models.Base.metadata.create_all(bind=engine)
 with engine.connect() as _conn:
     for _sql in [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(200)",
+        # Дополнительная область аккаунта (обслуживает две области)
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS region2 VARCHAR(200)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS appvr_access INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_access INTEGER DEFAULT 0",
         # ЭЦП-вход: ИИН аккаунта + флаг отключения ЭЦП
@@ -518,14 +520,37 @@ def _apply_status_in_filter(query, bin_col, params: dict):
     return query.filter(bin_col.in_(sub))
 
 
-def apply_filters(query, model, params: dict, force_region: str = None):
-    """Применяет все фильтры к запросу. force_region — обязательный регион для региональных пользователей."""
+def _user_regions(user):
+    """Области, доступные пользователю: None — все (аккаунт «Весь Казахстан»),
+    иначе основная область и дополнительная (если задана)."""
+    if not getattr(user, "region", None):
+        return None
+    regs = [user.region]
+    r2 = getattr(user, "region2", None)
+    if r2 and r2 not in regs:
+        regs.append(r2)
+    return regs
+
+
+def _region_list(force_region):
+    """force_region: строка (одна область) или список областей."""
+    if not force_region:
+        return None
+    return [force_region] if isinstance(force_region, str) else list(force_region)
+
+
+def apply_filters(query, model, params: dict, force_region=None):
+    """Применяет все фильтры к запросу. force_region — обязательные области
+    регионального пользователя (строка или список)."""
     M = model
 
-    # Региональный пользователь — жёстко фиксируем регион, obl_name из params игнорируем
-    if force_region:
-        query = query.filter(M.obl_name == force_region)
-        params = {k: v for k, v in params.items() if k != 'obl_name'}
+    # Региональный пользователь — жёстко фиксируем области. При одной области
+    # obl_name из params игнорируем; при двух — им можно выбрать одну из своих.
+    regs = _region_list(force_region)
+    if regs:
+        query = query.filter(M.obl_name.in_(regs))
+        if len(regs) == 1:
+            params = {k: v for k, v in params.items() if k != 'obl_name'}
 
     bin_ = params.get("bin")
     if bin_:
@@ -716,12 +741,14 @@ def _set_setting(db, key, value):
     db.commit()
 
 
-def apply_summary_filters(query, params: dict, force_region: str = None):
+def apply_summary_filters(query, params: dict, force_region=None):
     """Фильтры уровня компании поверх предрасчётной таблицы company_summary."""
     S = models.CompanySummary
-    if force_region:
-        query = query.filter(S.obl_name == force_region)
-        params = {k: v for k, v in params.items() if k != 'obl_name'}
+    regs = _region_list(force_region)
+    if regs:
+        query = query.filter(S.obl_name.in_(regs))
+        if len(regs) == 1:
+            params = {k: v for k, v in params.items() if k != 'obl_name'}
 
     bin_ = params.get("bin")
     if bin_:
@@ -1060,7 +1087,7 @@ def get_metrics(
                 func.sum(case((S.status == 1, 1), else_=0)).label("insured_bins"),
                 func.sum(case((S.status == 0, 1), else_=0)).label("not_insured_bins"),
             ),
-            params, force_region=current_user.region,
+            params, force_region=_user_regions(current_user),
         ).one()
         return schemas.MetricsResponse(
             total_bins=row.total_bins or 0,
@@ -1069,7 +1096,7 @@ def get_metrics(
         )
 
     # Живой путь (сложные фильтры или предрасчёт ещё не готов): агрегируем по БИН.
-    flags = bin_flags_subquery(db, params, force_region=current_user.region)
+    flags = bin_flags_subquery(db, params, force_region=_user_regions(current_user))
     row = db.query(
         func.count().label("total_bins"),
         func.sum(case((flags.c.ins_old == 1, 1), else_=0)).label("insured_bins"),
@@ -1093,15 +1120,70 @@ NO_DISTRICT_LABEL = "Район не указан"
 SIZE_KEYS = ("Крупное", "Среднее", "Малое")
 
 
-def _geo_col(S, user):
-    """Колонка разбивки: район для регионального пользователя, иначе область."""
-    return S.rai_name if user.region else S.obl_name
+def _district_cond(S, district):
+    """Условие «предприятие в районе district» (с учётом «Район не указан»)."""
+    if district == NO_DISTRICT_LABEL:
+        return or_(S.rai_name.is_(None), S.rai_name == "")
+    return S.rai_name == district
 
 
-def _geo_label(v, user):
-    if v:
-        return v
-    return NO_DISTRICT_LABEL if user.region else None   # область без названия не показываем
+class DashScope:
+    """Охват дашборда: какие области (None — все) и, если область одна, район.
+    Одна область → разбивки по её районам (первой строкой — вся область);
+    несколько / все → по областям."""
+
+    def __init__(self, regions, district=None):
+        self.regions = regions
+        self.district = district if (regions and len(regions) == 1) else None
+
+    @property
+    def single(self):
+        return self.regions[0] if self.regions and len(self.regions) == 1 else None
+
+    @property
+    def by_district(self):
+        return self.single is not None
+
+    @property
+    def show_total(self):          # строка «вся область» над районами
+        return self.by_district and not self.district
+
+    @property
+    def active(self):              # есть ли вообще ограничение
+        return self.regions is not None or bool(self.district)
+
+    def apply(self, q, S):
+        if self.regions is not None:
+            q = q.filter(S.obl_name.in_(self.regions))
+        if self.district:
+            q = q.filter(_district_cond(S, self.district))
+        return q
+
+    def geo(self, S):
+        return S.rai_name if self.by_district else S.obl_name
+
+    def label(self, v):
+        if v:
+            return v
+        return NO_DISTRICT_LABEL if self.by_district else None   # область без названия не показываем
+
+    def info(self):
+        return {"regions": self.regions, "region": self.single, "district": self.district}
+
+
+def _dash_scope(user, region=None, district=None):
+    """Охват по фильтру дашборда (область, район) в пределах прав пользователя:
+    региональный аккаунт может выбрать только свои области."""
+    allowed = _user_regions(user)
+    region = (region or "").strip() or None
+    district = (district or "").strip() or None
+    if region:
+        if allowed is not None and region not in allowed:
+            raise HTTPException(403, "Нет доступа к этой области")
+        regions = [region]
+    else:
+        regions = allowed
+    return DashScope(regions, district)
 
 
 def _size_cols(S):
@@ -1115,16 +1197,20 @@ def _sizes_of(row):
 
 @app.get("/api/dashboard/kpis")
 def dashboard_kpis(
+    region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db)
 ):
     """Сводные показатели по страхованию и ОППВ для HUD-дашборда.
-    Для регионального пользователя — только его регион."""
+    region / district — фильтр дашборда; региональный пользователь — только
+    в пределах своих областей."""
     S = models.CompanySummary
-    region = current_user.region
+    sc = _dash_scope(current_user, region, district)
+    region = sc.single          # одна область → разбивки по районам
 
     def scope(q):
-        return q.filter(S.obl_name == region) if region else q
+        return sc.apply(q, S)
 
     # «Предприятие» в разделе страхование считается только среди ОБЯЗАННЫХ
     # (status 0 — не застрахован, 1 — застрахован); status 2 (прочее) не в счёт.
@@ -1151,7 +1237,7 @@ def dashboard_kpis(
 
     # Полная разбивка по регионам (для таблицы и рейтингов). У регионального
     # пользователя — по районам его области, первой строкой — итог по области.
-    GEO = _geo_col(S, current_user)
+    GEO = sc.geo(S)
     region_rows = scope(db.query(
         GEO.label("obl_name"),
         func.coalesce(func.sum(case((S.status == 1, 1), else_=0)), 0).label("ins"),
@@ -1174,13 +1260,13 @@ def dashboard_kpis(
 
     region_table = []
     for r in region_rows:
-        name = _geo_label(r.obl_name, current_user)
+        name = sc.label(r.obl_name)
         if not name:   # без региона — в списке не показываем
             continue
         region_table.append(_rt_row(name, r.ins or 0, r.nins or 0, r.ip_tot or 0, r.ul_tot or 0,
                                     r.ip_nins or 0, r.ul_nins or 0))
     region_table.sort(key=lambda x: x["total"], reverse=True)
-    if region:   # итог по области — первой строкой
+    if sc.show_total:   # итог по области — первой строкой
         f = lambda k: sum(x[k] for x in region_table)
         region_table.insert(0, _rt_row(region, f("insured"), f("not_insured"), f("ip_total"), f("ul_total"),
                                        f("ip_not_insured"), f("ul_not_insured"), is_total=True))
@@ -1238,8 +1324,8 @@ def dashboard_kpis(
     # Для регионального пользователя — только предприятия его региона.
     def _status_rank(col):
         q = db.query(col, func.count()).filter(col.isnot(None), col != "")
-        if region:
-            q = (q.join(S, S.bin == models.BinStatus.bin).filter(S.obl_name == region))
+        if sc.active:
+            q = sc.apply(q.join(S, S.bin == models.BinStatus.bin), S)
         return [{"label": r[0], "value": r[1]}
                 for r in q.group_by(col).order_by(func.count().desc()).all()]
     by_status = _status_rank(models.BinStatus.status)
@@ -1259,7 +1345,7 @@ def dashboard_kpis(
     filled_map = {r.g: int(r.c or 0) for r in filled_rows}
     status_fill = []
     for obl, total_need in need_map.items():
-        name = _geo_label(obl, current_user)
+        name = sc.label(obl)
         if not name:   # без региона — не показываем
             continue
         filled = filled_map.get(obl, 0)
@@ -1268,7 +1354,7 @@ def dashboard_kpis(
             "pct": round(filled * 100.0 / total_need, 1) if total_need else 0.0,
         })
     status_fill.sort(key=lambda x: (x["pct"], x["filled"]), reverse=True)
-    if region:   # у регионального — первой строкой вся область (в рейтинге не участвует)
+    if sc.show_total:   # одна область — первой строкой вся область (в рейтинге не участвует)
         f_tot = sum(x["filled"] for x in status_fill)
         n_tot = sum(x["total"] for x in status_fill)
         status_fill.insert(0, {"region": region, "filled": f_tot, "total": n_tot, "is_total": True,
@@ -1295,8 +1381,9 @@ def dashboard_kpis(
         "by_size": by_size,
         "region_table": region_table,
         # разбивки по районам (региональный пользователь) или по областям
-        "geo_level": "district" if region else "region",
+        "geo_level": "district" if sc.by_district else "region",
         "geo_region": region,
+        "scope": sc.info(),
         "status_fill": status_fill,
     }
 
@@ -1306,7 +1393,8 @@ def dashboard_kpis(
         if db.execute(text("SELECT 1 FROM oppv_records LIMIT 1")).first():
             O = models.OppvRecord
             def oscope(q):
-                return q.filter(O.region == region) if region else q
+                # районов в выгрузке ОППВ нет — фильтруется только по области
+                return q.filter(O.region.in_(sc.regions)) if sc.regions is not None else q
             orow = oscope(db.query(
                 func.count().label("rows"),
                 func.coalesce(func.sum(O.fot), 0).label("sum_fot"),
@@ -1352,6 +1440,8 @@ def dashboard_insurer_ranking(
     mode: str = "enterprises",
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
@@ -1378,8 +1468,7 @@ def dashboard_insurer_ranking(
         q = q.filter(M.date_beg >= date_from)
     if date_to:
         q = q.filter(M.date_beg <= date_to)
-    if current_user.region:
-        q = q.filter(S.obl_name == current_user.region)
+    q = _dash_scope(current_user, region, district).apply(q, S)
     sub = (q.distinct(M.bin, M.system_delimiter_bin_name)
            .order_by(M.bin, M.system_delimiter_bin_name, M.date_beg.desc(), M.id.desc())
            .subquery())
@@ -1442,19 +1531,23 @@ def _expiry_end_expr(S):
 @app.get("/api/dashboard/expiry-heatmap")
 def expiry_heatmap(
     year: int,
+    region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
     """Сколько застрахованных предприятий у которых заканчивается страховка в
-    каждом месяце выбранного года, в разбивке по регионам (все регионы РК)."""
+    каждом месяце выбранного года, в разбивке по регионам (одна область — по
+    её районам). region / district — фильтр дашборда."""
     S = models.CompanySummary
-    region = current_user.region
+    sc = _dash_scope(current_user, region, district)
+    region = sc.single
 
     def scope(q):
-        return q.filter(S.obl_name == region) if region else q
+        return sc.apply(q, S)
 
     eff = _expiry_end_expr(S)
-    GEO = _geo_col(S, current_user)   # у регионального — районы его области
+    GEO = sc.geo(S)   # одна область — районы
     rows = scope(
         db.query(GEO, func.extract('month', eff).label('m'), func.count().label('c'))
         .filter(S.status == 1, func.extract('year', eff) == year)
@@ -1462,10 +1555,10 @@ def expiry_heatmap(
 
     agg = {}
     for obl, m, c in rows:
-        agg.setdefault(_geo_label(obl, current_user) or "—", {})[int(m)] = int(c)
+        agg.setdefault(sc.label(obl) or "—", {})[int(m)] = int(c)
 
     # Полный список регионов / районов (чтобы показать все, даже с нулями)
-    all_regions = sorted({_geo_label(r[0], current_user) for r in scope(db.query(GEO).distinct()).all()} - {None})
+    all_regions = sorted({sc.label(r[0]) for r in scope(db.query(GEO).distinct()).all()} - {None})
 
     regions = []
     for obl in all_regions:
@@ -1475,12 +1568,12 @@ def expiry_heatmap(
             'months': [months.get(mo, 0) for mo in range(1, 13)],
             'total': sum(months.values()),
         })
-    if region:   # у регионального — первой строкой вся область (сумма районов)
+    if sc.show_total:   # одна область — первой строкой вся область (сумма районов)
         months_tot = [sum(r['months'][i] for r in regions) for i in range(12)]
         regions.insert(0, {'region': region, 'months': months_tot,
                            'total': sum(months_tot), 'is_total': True})
     return {'year': year, 'regions': regions,
-            'geo_level': 'district' if region else 'region', 'geo_region': region}
+            'geo_level': 'district' if sc.by_district else 'region', 'geo_region': region}
 
 
 @app.get("/api/dashboard/expiry-list", response_model=schemas.InsuranceRecordList)
@@ -1498,9 +1591,7 @@ def expiry_list(
     заканчивается в указанном месяце года (клик по ячейке карты окончаний).
     district — район (у регионального пользователя карта идёт по районам)."""
     S = models.CompanySummary
-    # Региональный пользователь видит только свой регион
-    if current_user.region:
-        region = current_user.region
+    _dash_scope(current_user, region)   # региональный — только свои области
 
     eff = _expiry_end_expr(S)
     q = (db.query(S, S.obl.label("obl"), S.act.label("act"), S.ins_old.label("ins_old"))
@@ -1508,8 +1599,7 @@ def expiry_list(
                  func.extract('year', eff) == year,
                  func.extract('month', eff) == month))
     if district:
-        q = q.filter(or_(S.rai_name.is_(None), S.rai_name == "") if district == NO_DISTRICT_LABEL
-                     else S.rai_name == district)
+        q = q.filter(_district_cond(S, district))
     total = q.count()
     records = q.order_by(eff.asc(), S.bin.asc()).offset((page - 1) * page_size).limit(page_size).all()
 
@@ -1547,6 +1637,7 @@ def status_activity(
     month: int = Query(..., ge=1, le=12),
     region: Optional[str] = None,
     field: str = "status",
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
@@ -1561,9 +1652,8 @@ def status_activity(
     H = models.BinStatusHistory
     if field not in ("status", "kgit_status", "meeting_status"):
         raise HTTPException(400, "Неизвестный столбец статуса")
-    # Региональный пользователь — только свой регион
-    if current_user.region:
-        region = current_user.region
+    # Охват: выбранные область/район в пределах прав пользователя
+    sc = _dash_scope(current_user, region, district)
 
     days_in_month = calendar.monthrange(year, month)[1]
     agg = {}
@@ -1574,8 +1664,8 @@ def status_activity(
              .filter(B.status.isnot(None), B.status != "",
                      func.extract('year', B.updated_at) == year,
                      func.extract('month', B.updated_at) == month))
-        if region:
-            q = q.join(S, S.bin == B.bin).filter(S.obl_name == region)
+        if sc.active:
+            q = sc.apply(q.join(S, S.bin == B.bin), S)
         for status, d, c in q.group_by(B.status, day_expr).all():
             agg.setdefault(status, {})[int(d)] = int(c)
         base_list = INSURANCE_STATUSES
@@ -1587,8 +1677,8 @@ def status_activity(
                      H.changed_by != "system-migration",
                      func.extract('year', H.changed_at) == year,
                      func.extract('month', H.changed_at) == month))
-        if region:
-            q = q.join(S, S.bin == H.bin).filter(S.obl_name == region)
+        if sc.active:
+            q = sc.apply(q.join(S, S.bin == H.bin), S)
         for val, at in q.all():
             s = base_of(val)
             day = at.day
@@ -1611,8 +1701,9 @@ def status_activity(
         })
 
     # Список регионов для фильтра (для регионального пользователя — только его)
-    if current_user.region:
-        regions = [current_user.region]
+    allowed = _user_regions(current_user)
+    if allowed is not None:
+        regions = list(allowed)
     else:
         regions = sorted(r[0] for r in db.query(S.obl_name).distinct().all() if r[0])
 
@@ -1633,7 +1724,7 @@ MONTHS_RU = ["январь", "февраль", "март", "апрель", "ма
              "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 
 
-def _status_region_counts(db, field, year, month, region=None):
+def _status_region_counts(db, field, year, month, sc=None):
     """{(регион, статус): кол-во} за месяц — та же логика, что у таблицы
     «Активность статусов»: ГАК — по текущим статусам и дате обновления,
     КГИТ/встречи — по журналу (дата смены этого столбца)."""
@@ -1645,8 +1736,8 @@ def _status_region_counts(db, field, year, month, region=None):
              .filter(B.status.isnot(None), B.status != "",
                      func.extract('year', B.updated_at) == year,
                      func.extract('month', B.updated_at) == month))
-        if region:
-            q = q.filter(S.obl_name == region)
+        if sc is not None:
+            q = sc.apply(q, S)
         for reg, st, c in q.group_by(S.obl_name, B.status).all():
             counts[(reg or "Без региона", st)] = counts.get((reg or "Без региона", st), 0) + int(c)
     else:
@@ -1657,8 +1748,8 @@ def _status_region_counts(db, field, year, month, region=None):
                      H.changed_by != "system-migration",
                      func.extract('year', H.changed_at) == year,
                      func.extract('month', H.changed_at) == month))
-        if region:
-            q = q.filter(S.obl_name == region)
+        if sc is not None:
+            q = sc.apply(q, S)
         for reg, val in q.all():
             k = (reg or "Без региона", base_of(val))
             counts[k] = counts.get(k, 0) + 1
@@ -1669,16 +1760,18 @@ def _status_region_counts(db, field, year, month, region=None):
 def status_activity_export(
     year: int,
     month: int = Query(..., ge=1, le=12),
+    region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
     """Excel «Активность статусов»: 3 листа — Статус ГАК, Статус КГИТ, Статус
     встречи. На каждом — регионы × статусы за месяц + «ИТОГО» по строкам и
     столбцам. Региональный пользователь — только свой регион."""
-    region = current_user.region or None
+    sc = _dash_scope(current_user, region, district)
     S = models.CompanySummary
-    if region:
-        regions = [region]
+    if sc.regions is not None:
+        regions = list(sc.regions)
     else:
         present = {r[0] for r in db.query(S.obl_name).distinct().all() if r[0]}
         regions = ([r for r in REPORT_REGION_ORDER if r in present]
@@ -1700,10 +1793,10 @@ def status_activity_export(
               ("meeting_status", "Статус встречи", MEETING_STATUSES)]
     period = f"{MONTHS_RU[month - 1]} {year}"
     for field, title, base_list in sheets:
-        counts = _status_region_counts(db, field, year, month, region)
+        counts = _status_region_counts(db, field, year, month, sc)
         statuses = list(base_list) + sorted({s for (_, s) in counts} - set(base_list))
         rows = list(regions)
-        if any(r == "Без региона" for (r, _) in counts) and not region:
+        if any(r == "Без региона" for (r, _) in counts) and sc.regions is None:
             rows.append("Без региона")
 
         ws = wb.add_worksheet(title)
@@ -1760,6 +1853,7 @@ def status_activity_list(
     day: Optional[int] = Query(None, ge=1, le=31),
     status: Optional[str] = None,
     region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
@@ -1768,8 +1862,7 @@ def status_activity_list(
     статусам и дате обновления, КГИТ/встречи — по журналу."""
     if field not in ("status", "kgit_status", "meeting_status"):
         raise HTTPException(400, "Неизвестный столбец статуса")
-    if current_user.region:
-        region = current_user.region
+    sc = _dash_scope(current_user, region, district)
     B, S, H = models.BinStatus, models.CompanySummary, models.BinStatusHistory
     LIMIT = 1000
     items = []
@@ -1784,8 +1877,8 @@ def status_activity_list(
             q = q.filter(func.extract('day', B.updated_at) == day)
         if status:
             q = q.filter(B.status == status)
-        if region:
-            q = q.filter(S.obl_name == region)
+        if sc is not None:
+            q = sc.apply(q, S)
         for r in q.order_by(B.updated_at.desc()).limit(LIMIT).all():
             items.append({"bin": _bin12(r.bin), "bin_name": r.bin_name, "region": r.obl_name,
                           "status": r.status,
@@ -1801,8 +1894,8 @@ def status_activity_list(
                      func.extract('month', H.changed_at) == month))
         if day:
             q = q.filter(func.extract('day', H.changed_at) == day)
-        if region:
-            q = q.filter(S.obl_name == region)
+        if sc is not None:
+            q = sc.apply(q, S)
         for r in q.order_by(H.changed_at.desc()).all():
             st_ = base_of(r.new_value)
             if status and st_ != status:
@@ -1821,7 +1914,7 @@ MEETING_FINAL_STATUSES = ["Договор заключен с ГАК", "Дого
                           "Отказ в заключении с ГАК"]
 
 
-def _overdue_meetings_query(db, region=None):
+def _overdue_meetings_query(db, regions=None, district=None):
     """Встречи КГИТ (назначена/перенесена) с прошедшей датой, по которым ГАК не
     обновил итог ПОСЛЕ того, как ДКГИТ назначил/перенёс встречу.
 
@@ -1856,8 +1949,11 @@ def _overdue_meetings_query(db, region=None):
                               and_(kh.c.at.is_(None),
                                    or_(B.meeting_date.is_(None),
                                        B.meeting_date < B.kgit_date)))))))
-    if region:
-        q = q.filter(S.obl_name == region)
+    regs = _region_list(regions)
+    if regs:
+        q = q.filter(S.obl_name.in_(regs))
+    if district:
+        q = q.filter(_district_cond(S, district))
     return q
 
 
@@ -1866,24 +1962,25 @@ def overdue_meetings(
     year: int,
     month: int = Query(..., ge=1, le=12),
     region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
     """Счётчики для календаря: по дням месяца (дата встречи) — сколько встреч
     прошло без обновлённого итога; + всего за всё время."""
     import calendar
-    if current_user.region:
-        region = current_user.region
+    sc = _dash_scope(current_user, region, district)
     B, S = models.BinStatus, models.CompanySummary
-    base = _overdue_meetings_query(db, region)
+    base = _overdue_meetings_query(db, sc.regions, sc.district)
     total_all = base.count()
     rows = (base.filter(func.extract('year', B.kgit_date) == year,
                         func.extract('month', B.kgit_date) == month)
             .with_entities(func.extract('day', B.kgit_date), func.count())
             .group_by(func.extract('day', B.kgit_date)).all())
     days = {int(d): int(c) for d, c in rows}
-    if current_user.region:
-        regions = [current_user.region]
+    allowed = _user_regions(current_user)
+    if allowed is not None:
+        regions = list(allowed)
     else:
         regions = sorted(r[0] for r in db.query(S.obl_name).distinct().all() if r[0])
     return {"year": year, "month": month,
@@ -1900,14 +1997,14 @@ def overdue_meetings_list(
     month: Optional[int] = Query(None, ge=1, le=12),
     day: Optional[int] = Query(None, ge=1, le=31),
     region: Optional[str] = None,
+    district: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db),
 ):
     """Предприятия с просроченным итогом: за день / месяц / всё время."""
-    if current_user.region:
-        region = current_user.region
+    sc = _dash_scope(current_user, region, district)
     B = models.BinStatus
-    q = _overdue_meetings_query(db, region)
+    q = _overdue_meetings_query(db, sc.regions, sc.district)
     if year:
         q = q.filter(func.extract('year', B.kgit_date) == year)
     if month:
@@ -1940,7 +2037,8 @@ def _alerts_source(db, user):
     B, S, H = models.BinStatus, models.CompanySummary, models.BinStatusHistory
     is_dkgit = user.role == "dkgit"
 
-    q1 = _overdue_meetings_query(db, user.region)
+    regs = _user_regions(user)
+    q1 = _overdue_meetings_query(db, regs)
     if is_dkgit:
         q1 = q1.filter(B.status.in_(DKGIT_VIEW_STATUSES))
     parts = [q1.with_entities(B.bin.label("bin"), literal("meeting").label("kind"),
@@ -1959,8 +2057,8 @@ def _alerts_source(db, user):
                       cast(since, Date).label("ref_date"))
              .select_from(B).outerjoin(h, h.c.bin == B.bin)
              .filter(col == IN_WORK, since < cutoff, *extra))
-        if user.region:
-            q = q.join(S, S.bin == B.bin).filter(S.obl_name == user.region)
+        if regs:
+            q = q.join(S, S.bin == B.bin).filter(S.obl_name.in_(regs))
         return q
 
     kind_field = {"kgit": "kgit_status", "status": "status"}
@@ -2212,7 +2310,7 @@ def _notify(db, *, bin_, target, message, actor, now, demo_uid=None):
     roles = ["dkgit"] if target == "to_dkgit" else ["user", "manager"]
     q = db.query(U.id).filter(U.role.in_(roles), U.is_active == 1, U.username != actor)
     if region:
-        q = q.filter(or_(U.region == region, U.region.is_(None)))
+        q = q.filter(or_(U.region == region, U.region2 == region, U.region.is_(None)))
     text_ = f"{message}: {name}"[:500]
     for (uid,) in q.all():
         db.add(models.Notification(user_id=uid, bin=bin_, kind=target, message=text_,
@@ -2634,7 +2732,8 @@ def company_passport(
     s = db.query(S).filter(S.bin == bin_).first()
     if not s:
         raise HTTPException(404, "Предприятие не найдено")
-    if current_user.region and s.obl_name != current_user.region:
+    regs = _user_regions(current_user)
+    if regs is not None and s.obl_name not in regs:
         raise HTTPException(403, "Нет доступа к предприятию другого региона")
     st = db.query(B).filter(B.bin == bin_).first()
     if current_user.role == "dkgit" and not (st and st.status in DKGIT_VIEW_STATUSES):
@@ -2900,7 +2999,7 @@ def get_records(
         params["_light_bins"] = _bins_by_light(db, params["light"])
 
     # Одна строка на БИН (реестр организаций): предрасчёт или живой дедуп
-    query, Model = registry_query(db, params, force_region=current_user.region)
+    query, Model = registry_query(db, params, force_region=_user_regions(current_user))
 
     total = query.count()
 
@@ -3161,7 +3260,7 @@ def download_records(
 
     # Готовые суточные файлы: без фильтров / застрахованы / не застрахованы —
     # только для пользователей без региона и без прочих фильтров.
-    cached = cached_export_path(params, current_user.region)
+    cached = cached_export_path(params, _user_regions(current_user))
     if cached and os.path.exists(cached):
         return FileResponse(
             cached,
@@ -3170,7 +3269,7 @@ def download_records(
         )
 
     # Иначе генерируем на лету во временный файл и удаляем после отдачи.
-    query = records_export_query(db, params, force_region=current_user.region)
+    query = records_export_query(db, params, force_region=_user_regions(current_user))
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     tmp.close()
     write_records_xlsx(query, tmp.name)
@@ -3830,7 +3929,11 @@ def get_regions(
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
 ):
-    """Список уникальных областей из таблицы (для фильтра)"""
+    """Список уникальных областей из таблицы (для фильтра). Региональному
+    пользователю — только его области (основная и дополнительная)."""
+    regs = _user_regions(current_user)
+    if regs is not None:
+        return sorted(regs)
     rows = (
         db.query(models.InsuranceRecord.obl_name)
         .filter(models.InsuranceRecord.obl_name.isnot(None))
@@ -3848,6 +3951,9 @@ def get_districts(
     db: Session = Depends(database.get_db)
 ):
     """Список уникальных районов для заданной области"""
+    regs = _user_regions(current_user)
+    if regs is not None and region not in regs:
+        raise HTTPException(403, "Нет доступа к этой области")
     rows = (
         db.query(models.InsuranceRecord.rai_name)
         .filter(
@@ -3946,6 +4052,14 @@ def update_user(
         raise HTTPException(404, "Пользователь не найден")
     if data.role is not None and data.role in ALLOWED_ROLES:
         user.role = data.role
+    # Дополнительная область: только у аккаунта с основной областью, не та же самая
+    if data.region2 is not None:
+        r2 = data.region2.strip() or None
+        if r2 and not user.region:
+            raise HTTPException(400, "Доп. область задаётся только аккаунту с основной областью")
+        if r2 and r2 == user.region:
+            r2 = None
+        user.region2 = r2
     if data.appvr_access is not None:
         user.appvr_access = 1 if data.appvr_access else 0
     if data.dashboard_access is not None:
@@ -4061,6 +4175,7 @@ def login_stats_table(
 def login_heatmap(
     year: int,
     month: int = Query(..., ge=1, le=12),
+    region: Optional[str] = None,
     current_user: models.User = Depends(auth.require_dashboard),
     db: Session = Depends(database.get_db)
 ):
@@ -4080,8 +4195,10 @@ def login_heatmap(
                  or_(L.role.is_(None), L.role != "demo"),   # демо-аккаунт не учитываем
                  L.logged_at >= start,
                  L.logged_at < end + timedelta(days=1)))
-    if current_user.region:
-        q = q.filter(L.region == current_user.region)
+    # фильтр дашборда по области (районов в журнале входов нет)
+    log_regs = _dash_scope(current_user, region).regions
+    if log_regs is not None:
+        q = q.filter(L.region.in_(log_regs))
     rows = q.group_by(L.region, day_expr).all()
     # всего заходов и уникальных учёток за месяц по региону (не сумма дневных uniq)
     mq = (db.query(L.region,
@@ -4091,8 +4208,8 @@ def login_heatmap(
                   or_(L.role.is_(None), L.role != "demo"),
                   L.logged_at >= start,
                   L.logged_at < end + timedelta(days=1)))
-    if current_user.region:
-        mq = mq.filter(L.region == current_user.region)
+    if log_regs is not None:
+        mq = mq.filter(L.region.in_(log_regs))
     month_tot = {}
     for region, c, u in mq.group_by(L.region).all():
         month_tot[region or NO_REGION_LABEL] = (int(c), int(u))

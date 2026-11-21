@@ -149,6 +149,9 @@ class User(Base):
     hashed_password = Column(String(255))
     role = Column(String(20), default="user")  # admin или user
     region = Column(String(200), nullable=True)  # None = без ограничений, иначе = значение obl_name
+    # Дополнительная область (аккаунт обслуживает две области). Действует только
+    # вместе с основной region; пусто — одна область.
+    region2 = Column(String(200), nullable=True)
     appvr_access = Column(Integer, default=0)  # 1 = доступ к разделу ОПВР (Пенсионные взносы)
     dashboard_access = Column(Integer, default=0)  # 1 = доступ к разделу «Дашборд»
     # ЭЦП-аутентификация (второй фактор). iin — ИИН, привязанный админом; вход

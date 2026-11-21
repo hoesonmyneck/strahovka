@@ -1763,3 +1763,6 @@ input[type="checkbox"]:checked { animation: chk-pop .22s ease-out; }
 .notif-item { min-width: 0; }
 .notif-text { flex: 1 1 auto; }
 .notif-msg, .notif-meta { white-space: normal; overflow-wrap: anywhere; }
+
+/* админ-панель: дополнительная область аккаунта */
+.region2-select { display: block; margin-top: 4px; max-width: 220px; font-size: 12px; padding: 2px 4px; border-radius: 4px; }

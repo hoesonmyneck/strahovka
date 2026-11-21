@@ -128,6 +128,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     role: Optional[str] = None
+    region2: Optional[str] = None      # доп. область; "" — убрать
     appvr_access: Optional[int] = None
     dashboard_access: Optional[int] = None
     iin: Optional[str] = None
@@ -142,6 +143,7 @@ class UserResponse(UserBase):
     iin: Optional[str] = None
     eds_disabled: int = 0
     full_name: Optional[str] = None
+    region2: Optional[str] = None      # дополнительная область аккаунта
     # Демонстрационный аккаунт: role здесь — роль текущего вида (user / dkgit),
     # is_demo = True, demo_view — «gak» или «dkgit»
     is_demo: bool = False

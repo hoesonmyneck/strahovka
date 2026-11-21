@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../utils/api.js'
+import { useAuth } from '../context/AuthContext.jsx'
 import { Shield, Coins, Activity, Download, ListTree, ChevronLeft, ChevronRight } from 'lucide-react'
 import { ThinkingOrb } from 'thinking-orbs'
 import { KpiSpark, CountUp } from './KpiSpark.jsx'
@@ -366,7 +367,7 @@ function HudDonut({ a, b, labelA, labelB }) {
 }
 
 // Активность заходов по регионам за месяц (гит-календарь)
-function HudActivity() {
+function HudActivity({ geo = {} }) {
   const [data, setData] = useState(null)
   const [month, setMonth] = useState(() => {
     const d = new Date()
@@ -374,16 +375,19 @@ function HudActivity() {
   })
   const [loading, setLoading] = useState(false)
 
-  const load = useCallback(async (m) => {
+  const load = useCallback(async (m, g) => {
     const [y, mo] = (m || '').split('-')
     if (!y || !mo) return
     setLoading(true)
     try {
-      const res = await api.get('/api/logs/heatmap', { params: { year: Number(y), month: Number(mo) } })
+      // районов в журнале входов нет — фильтруется только по области
+      const params = { year: Number(y), month: Number(mo) }
+      if (g?.region) params.region = g.region
+      const res = await api.get('/api/logs/heatmap', { params })
       setData(res.data)
     } catch { setData(null) } finally { setLoading(false) }
   }, [])
-  useEffect(() => { load(month) }, [month, load])
+  useEffect(() => { load(month, geo) }, [month, geo, load])
 
   return (
     <HudCard id="sec-activity" wide>
@@ -442,6 +446,14 @@ const fmtDate = (s) => {
 }
 const bin12 = (b) => (b == null ? '' : String(b).padStart(12, '0'))
 
+// Открыть предприятие в разделе «Страхование» (там — таблица только с ним).
+// Переключение делает Dashboard.jsx по событию open-bin.
+const openBinInInsurance = (bin) => {
+  if (bin == null || bin === '') return
+  window.dispatchEvent(new CustomEvent('open-bin', { detail: bin }))
+}
+const ROW_LINK_TITLE = 'Открыть в разделе «Страхование»'
+
 const fmtDT = (s) => (s
   ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   : '—')
@@ -495,11 +507,12 @@ function HudListModal({ title, subtitle, load, columns, onClose }) {
               </thead>
               <tbody>
                 {items.map((it, i) => (
-                  <tr key={i}>
+                  <tr key={i} className={it.bin ? 'hud-row-link' : undefined} title={it.bin ? ROW_LINK_TITLE : undefined}
+                    onClick={it.bin ? () => { onClose(); openBinInInsurance(it.bin) } : undefined}>
                     {columns.map((c) => {
                       const v = c.render ? c.render(it) : it[c.key]
                       return (
-                        <td key={c.key} className={c.mono ? 'mono' : ''} title={typeof v === 'string' ? v : undefined}>
+                        <td key={c.key} className={c.mono ? 'mono' : ''}>
                           {v == null || v === '' ? '—' : v}
                         </td>
                       )
@@ -533,7 +546,7 @@ const OVERDUE_COLUMNS = [
     render: (it) => (it.days_overdue != null ? `${it.days_overdue} ${plural(it.days_overdue, 'день', 'дня', 'дней')}` : '—') },
 ]
 
-function HudOverdueCalendar() {
+function HudOverdueCalendar({ geo = {} }) {
   const [month, setMonth] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -543,17 +556,27 @@ function HudOverdueCalendar() {
   const [loading, setLoading] = useState(false)
   const [drill, setDrill] = useState(null)   // {day} | {all: true}
 
+  // Фильтр дашборда (область/район) важнее своего выбора области в блоке
+  const geoOn = !!(geo.region || geo.district)
+  const scopeParams = (reg) => {
+    const p = {}
+    if (geo.region) p.region = geo.region
+    else if (!geoOn && reg) p.region = reg
+    if (geo.district) p.district = geo.district
+    return p
+  }
+  const scopeLabel = geo.district ? `${geo.region ? geo.region + ' · ' : ''}${geo.district}`
+    : (geo.region || region || 'Все регионы')
   const load = useCallback(async (m, reg) => {
     const [y, mo] = (m || '').split('-')
     if (!y || !mo) return
     setLoading(true)
     try {
-      const params = { year: Number(y), month: Number(mo) }
-      if (reg) params.region = reg
+      const params = { year: Number(y), month: Number(mo), ...scopeParams(reg) }
       const res = await api.get('/api/dashboard/overdue-meetings', { params })
       setData(res.data)
     } catch { setData(null) } finally { setLoading(false) }
-  }, [])
+  }, [geo])
   useEffect(() => { load(month, region) }, [month, region, load])
 
   const [y, mo] = month.split('-').map(Number)
@@ -565,8 +588,7 @@ function HudOverdueCalendar() {
   const isoOf = (d) => `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 
   const openList = (drillSpec) => {
-    const params = {}
-    if (region) params.region = region
+    const params = scopeParams(region)
     if (!drillSpec.all) { params.year = y; params.month = mo; params.day = drillSpec.day }
     return api.get('/api/dashboard/overdue-meetings/list', { params }).then((r) => r.data)
   }
@@ -575,10 +597,12 @@ function HudOverdueCalendar() {
     <HudCard id="sec-overdue" title="Итог не обновлён после встречи" wide>
       <div className="hud-activity-bar">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
-        <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
-          <option value="">Все регионы</option>
-          {(data?.regions || []).map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        {!geoOn && (
+          <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
+            <option value="">Все регионы</option>
+            {(data?.regions || []).map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
         {data && (
           <>
             <span className="hud-od-sum">За месяц: <b>{fmtNum(data.total_month)}</b></span>
@@ -617,7 +641,7 @@ function HudOverdueCalendar() {
         <HudListModal
           title={drill.all ? 'Итог не обновлён — все просроченные встречи'
             : `Итог не обновлён — встречи ${drill.day} ${MONTHS_FULL[mo - 1].toLowerCase()} ${y}`}
-          subtitle={region || 'Все регионы'}
+          subtitle={scopeLabel}
           load={() => openList(drill)}
           columns={OVERDUE_COLUMNS}
           onClose={() => setDrill(null)}
@@ -684,7 +708,8 @@ function HudExpiryModal({ year, month, region, district, onClose }) {
               </thead>
               <tbody>
                 {data.items.map((it) => (
-                  <tr key={it.id}>
+                  <tr key={it.id} className="hud-row-link" title={ROW_LINK_TITLE}
+                    onClick={() => { onClose(); openBinInInsurance(it.bin) }}>
                     <td className="mono">{bin12(it.bin)}</td>
                     <td title={it.bin_name}>{it.bin_name || '—'}</td>
                     <td title={it.system_delimiter_bin_name}>{it.system_delimiter_bin_name || '—'}</td>
@@ -711,21 +736,21 @@ function HudExpiryModal({ year, month, region, district, onClose }) {
   )
 }
 
-function HudExpiry() {
+function HudExpiry({ geo = {} }) {
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [sel, setSel] = useState(null) // {region, month}
 
-  const load = useCallback(async (y) => {
+  const load = useCallback(async (y, g) => {
     setLoading(true)
     try {
-      const res = await api.get('/api/dashboard/expiry-heatmap', { params: { year: Number(y) } })
+      const res = await api.get('/api/dashboard/expiry-heatmap', { params: { year: Number(y), ...g } })
       setData(res.data)
     } catch { setData(null) } finally { setLoading(false) }
   }, [])
-  useEffect(() => { load(year) }, [year, load])
+  useEffect(() => { load(year, geo) }, [year, geo, load])
 
   const years = []
   for (let y = now.getFullYear() + 1; y >= now.getFullYear() - 4; y--) years.push(y)
@@ -816,7 +841,7 @@ function HudStatusRanking({ ins }) {
 }
 
 // Активность статусов: по статусам (Y) × дни месяца, фильтры месяц + регион
-function HudStatusActivity() {
+function HudStatusActivity({ geo = {} }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [region, setRegion] = useState('')
@@ -826,17 +851,27 @@ function HudStatusActivity() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
 
+  // Фильтр дашборда (область/район) важнее своего выбора области в блоке
+  const geoOn = !!(geo.region || geo.district)
+  const scopeParams = (reg) => {
+    const p = {}
+    if (geo.region) p.region = geo.region
+    else if (!geoOn && reg) p.region = reg
+    if (geo.district) p.district = geo.district
+    return p
+  }
+  const scopeLabel = geo.district ? `${geo.region ? geo.region + ' · ' : ''}${geo.district}`
+    : (geo.region || region || 'все регионы')
   const load = useCallback(async (m, reg, field) => {
     const [y, mo] = (m || '').split('-')
     if (!y || !mo) return
     setLoading(true)
     try {
-      const params = { year: Number(y), month: Number(mo), field }
-      if (reg) params.region = reg
+      const params = { year: Number(y), month: Number(mo), field, ...scopeParams(reg) }
       const res = await api.get('/api/dashboard/status-activity', { params })
       setData(res.data)
     } catch { setData(null) } finally { setLoading(false) }
-  }, [])
+  }, [geo])
   useEffect(() => { load(month, region, mode) }, [month, region, mode, load])
 
   const regions = data?.regions || []
@@ -853,7 +888,7 @@ function HudStatusActivity() {
     const params = { year: ay, month: amo, field: mode }
     if (spec.day) params.day = spec.day
     if (spec.status) params.status = spec.status
-    if (region) params.region = region
+    Object.assign(params, scopeParams(region))
     return api.get('/api/dashboard/status-activity/list', { params }).then((r) => r.data)
   }
 
@@ -865,7 +900,7 @@ function HudStatusActivity() {
     setExporting(true)
     try {
       const res = await api.get('/api/dashboard/status-activity/export', {
-        params: { year: Number(y), month: Number(mo) }, responseType: 'blob',
+        params: { year: Number(y), month: Number(mo), ...scopeParams(region) }, responseType: 'blob',
       })
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
@@ -887,10 +922,12 @@ function HudStatusActivity() {
       <div className="hud-activity-bar">
         <HudStatusTabs value={mode} onChange={setMode} />
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="hud-month" />
-        <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
-          <option value="">Все регионы</option>
-          {regions.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        {!geoOn && (
+          <select className="hud-month" value={region} onChange={(e) => setRegion(e.target.value)}>
+            <option value="">Все регионы</option>
+            {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
         <button type="button" className="hud-export-btn" onClick={exportExcel} disabled={exporting}
           title="Excel за выбранный месяц: листы «Статус ГАК», «Статус КГИТ», «Статус встречи» (регионы × статусы)">
           <Download size={15} /> {exporting ? 'Формирую…' : 'Скачать Excel'}
@@ -954,7 +991,7 @@ function HudStatusActivity() {
       {drill && (
         <HudListModal
           title={`Активность — ${modeLabel}: ${drill.status || 'все статусы'}`}
-          subtitle={`${drill.day ? `${drill.day} ` : ''}${(MONTHS_FULL[amo - 1] || '').toLowerCase()} ${ay} · ${region || 'все регионы'}`}
+          subtitle={`${drill.day ? `${drill.day} ` : ''}${(MONTHS_FULL[amo - 1] || '').toLowerCase()} ${ay} · ${scopeLabel}`}
           load={() => openActivityList(drill)}
           columns={ACTIVITY_LIST_COLUMNS}
           onClose={() => setDrill(null)}
@@ -1048,7 +1085,7 @@ function HudNav({ items, open, setOpen }) {
 // Без периода — действующие договоры на сегодня (данные из общего запроса
 // дашборда). С периодом — договоры, НАЧАВШИЕСЯ в эти даты («Дата начала»),
 // включая уже закончившиеся: сколько предприятий / людей застраховано за период.
-function HudInsurerRanking({ id, title, mode, initial, color }) {
+function HudInsurerRanking({ id, title, mode, initial, color, geo = {} }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [data, setData] = useState(null)      // null — период не задан
@@ -1061,7 +1098,7 @@ function HudInsurerRanking({ id, title, mode, initial, color }) {
     setLoading(true)
     // небольшая задержка: дату часто набирают с клавиатуры по цифре
     const t = setTimeout(() => {
-      const params = { mode }
+      const params = { mode, ...geo }
       if (from) params.date_from = from
       if (to) params.date_to = to
       api.get('/api/dashboard/insurer-ranking', { params })
@@ -1070,7 +1107,7 @@ function HudInsurerRanking({ id, title, mode, initial, color }) {
         .finally(() => { if (!cancelled) setLoading(false) })
     }, 350)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [from, to, mode])
+  }, [from, to, mode, geo])
 
   const items = withShortNames(data ? data.items : initial)
   const unit = mode === 'people' ? 'чел.' : 'предприятий'
@@ -1118,13 +1155,36 @@ function HudInsurerRanking({ id, title, mode, initial, color }) {
 
 // ─── Основной компонент ──────────────────────────────────────────────────────
 const DashboardHud = () => {
+  const { user } = useAuth()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
+  // Фильтр дашборда: область и район — то же, что смотреть дашборд от лица
+  // регионального аккаунта. Региональному аккаунту доступны только его области.
+  const [geo, setGeo] = useState({ region: '', district: '' })
+  const [geoRegions, setGeoRegions] = useState([])
+  const [geoDistricts, setGeoDistricts] = useState([])
+  useEffect(() => {
+    api.get('/api/regions').then((r) => setGeoRegions(r.data || [])).catch(() => {})
+  }, [])
+  // область, по которой выбираются районы: выбранная или единственная доступная
+  const districtRegion = geo.region || (user?.region && geoRegions.length === 1 ? geoRegions[0] : '')
+  useEffect(() => {
+    if (!districtRegion) { setGeoDistricts([]); return }
+    api.get('/api/districts', { params: { region: districtRegion } })
+      .then((r) => setGeoDistricts(r.data || [])).catch(() => setGeoDistricts([]))
+  }, [districtRegion])
+  const geoParams = useMemo(() => {
+    const p = {}
+    if (geo.region) p.region = geo.region
+    if (geo.district) p.district = geo.district
+    return p
+  }, [geo])
+
+  const load = useCallback(async (params) => {
     setLoading(true)
     try {
-      const res = await api.get('/api/dashboard/kpis')
+      const res = await api.get('/api/dashboard/kpis', { params })
       setData(res.data)
     } catch {
       setData(null)
@@ -1133,7 +1193,7 @@ const DashboardHud = () => {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(geoParams) }, [geoParams, load])
 
   // Боковое меню разделов: развёрнуто / свёрнуто (помним выбор; на узком экране
   // по умолчанию свёрнуто). Под меню у страницы резервируется место справа.
@@ -1224,16 +1284,42 @@ const DashboardHud = () => {
         <div className="hud-topline-title">Аналитический дашборд</div>
       </div>
 
+      {/* Фильтр по области и району */}
+      <div className="hud-geo-bar">
+        <label className="hud-period-field">Область
+          <select className="hud-month" value={geo.region} disabled={!!user?.region && geoRegions.length <= 1}
+            onChange={(e) => setGeo({ region: e.target.value, district: '' })}>
+            {!(user?.region && geoRegions.length === 1) && (
+              <option value="">{user?.region ? 'Все мои области' : 'Весь Казахстан'}</option>
+            )}
+            {geoRegions.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </label>
+        <label className="hud-period-field">Район
+          <select className="hud-month" value={geo.district} disabled={!districtRegion}
+            onChange={(e) => setGeo({ ...geo, district: e.target.value })}>
+            <option value="">{districtRegion ? 'Все районы' : 'Сначала выберите область'}</option>
+            {geoDistricts.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
+        {(geo.region || geo.district) && (
+          <button type="button" className="hud-clear-btn" onClick={() => setGeo({ region: '', district: '' })}>
+            Сбросить
+          </button>
+        )}
+        {loading && <span className="hud-od-sum">Обновляем…</span>}
+      </div>
+
       <h2 className="hud-h2"><Shield size={18} /> Страхование</h2>
       <KpiPanel tiles={insTiles} cols={4} />
       {ins.region_table && ins.region_table.length > 0 && (
         <div className="hud-charts">
-          <HudCard id="sec-region" title={byDistrict ? `Страхование по районам — ${ins.geo_region}` : 'Страхование по регионам'} wide>
+          <HudCard id="sec-region" title={byDistrict ? `Страхование по районам — ${ins.geo_region}${ins.scope?.district ? ' · ' + ins.scope.district : ''}` : 'Страхование по регионам'} wide>
             <HudRegionTable rows={ins.region_table} district={byDistrict} />
           </HudCard>
         </div>
       )}
-      <div className="hud-charts"><HudExpiry /></div>
+      <div className="hud-charts"><HudExpiry geo={geoParams} /></div>
       <div className="hud-charts">
         <HudCard id="sec-form" title="Форма предприятия" wide>
           <HudDonut a={ins.ul_cnt} b={ins.ip_cnt} labelA="ЮЛ" labelB="ИП" />
@@ -1246,13 +1332,13 @@ const DashboardHud = () => {
       </div>
       {ins.by_insurer && ins.by_insurer.length > 0 && (
         <div className="hud-charts">
-          <HudInsurerRanking id="sec-insurer" mode="enterprises" initial={ins.by_insurer} color="var(--h-teal)"
+          <HudInsurerRanking id="sec-insurer" mode="enterprises" initial={ins.by_insurer} color="var(--h-teal)" geo={geoParams}
             title="Рейтинг страховых компаний по застрахованным предприятиям" />
         </div>
       )}
       {ins.by_insurer_emp && ins.by_insurer_emp.length > 0 && (
         <div className="hud-charts">
-          <HudInsurerRanking id="sec-insurer-emp" mode="people" initial={ins.by_insurer_emp} color="var(--h-cyan)"
+          <HudInsurerRanking id="sec-insurer-emp" mode="people" initial={ins.by_insurer_emp} color="var(--h-cyan)" geo={geoParams}
             title="Рейтинг страховых компаний по застрахованным людям" />
         </div>
       )}
@@ -1268,8 +1354,8 @@ const DashboardHud = () => {
           <HudStatusRanking ins={ins} />
         </div>
       ) : null}
-      <div className="hud-charts"><HudStatusActivity /></div>
-      <div className="hud-charts"><HudOverdueCalendar /></div>
+      <div className="hud-charts"><HudStatusActivity geo={geoParams} /></div>
+      <div className="hud-charts"><HudOverdueCalendar geo={geoParams} /></div>
       {ins.status_fill && ins.status_fill.length > 0 && (
         <div className="hud-charts">
           <HudCard id="sec-status-fill" title={byDistrict ? 'Рейтинг районов по заполненности статусов' : 'Рейтинг регионов по заполненности статусов'} wide>
@@ -1281,7 +1367,9 @@ const DashboardHud = () => {
 
       {op && (
         <>
-          <h2 className="hud-h2"><Coins size={18} /> Анализ ОППВ</h2>
+          <h2 className="hud-h2"><Coins size={18} /> Анализ ОППВ
+            {geo.district && <span className="hud-h2-note">по всей области — районов в данных ОППВ нет</span>}
+          </h2>
           <KpiPanel tiles={opTiles} cols={3} />
           <div className="hud-charts">
             <HudCard id="sec-oked" title="Рейтинг ОКЭД по сотрудникам" wide>
@@ -1292,7 +1380,7 @@ const DashboardHud = () => {
       )}
 
       <h2 className="hud-h2"><Activity size={18} /> Активность</h2>
-      <div className="hud-charts"><HudActivity /></div>
+      <div className="hud-charts"><HudActivity geo={geoParams} /></div>
     </div>
   )
 }
