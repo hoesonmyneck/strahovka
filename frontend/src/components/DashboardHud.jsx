@@ -341,11 +341,8 @@ function HudGakTable({ rows, district }) {
               <td className="hud-rt-region" title={r.region}>{r.region}</td>
               <td className="num center">
                 {r.rank ? (
-                  <span className={'hud-gak-rank' + (r.rank <= 3 ? ' top' + r.rank : '')}
-                    title={`ГАК на ${r.rank} месте из ${r.insurers} страховых компаний`}>
-                    {r.rank}<i> из {r.insurers}</i>
-                  </span>
-                ) : <span className="dim" title="Нет застрахованных ГАК предприятий">—</span>}
+                  <span className={'hud-gak-rank' + (r.rank <= 3 ? ' top' + r.rank : '')}>{r.rank}</span>
+                ) : <span className="dim">—</span>}
               </td>
               <td className="num strong">{fmtNum(r.ent)}</td>
               <td className="num ins">{fmtNum(r.gak_ent)}</td>
@@ -1367,10 +1364,6 @@ const DashboardHud = () => {
       {ins.gak_rating && ins.gak_rating.length > 0 && (
         <div className="hud-charts">
           <HudCard id="sec-gak" title="Рейтинг ГАКа" wide>
-            <div className="hud-fill-note">
-              Застрахованные — по договорам ГАК. Место — среди страховых компаний региона по числу
-              застрахованных предприятий. Люди всего — по ЕСУТД (активные трудовые договоры), если нет — по договору.
-            </div>
             <HudGakTable rows={ins.gak_rating} district={byDistrict} />
           </HudCard>
         </div>
