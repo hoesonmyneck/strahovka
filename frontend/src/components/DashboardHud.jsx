@@ -328,10 +328,10 @@ function HudGakTable({ rows, district }) {
             <th className="hud-rt-region">{district ? 'Район' : 'Регион'}</th>
             <th>Рейтинг ГАКа в регионе</th>
             <th>Кол-во предприятий</th>
-            <th>Кол-во предприятий застрахованных</th>
+            <th>Кол-во предприятий застрахованных ГАКом</th>
             <th>% застрахованных</th>
             <th>Кол-во людей</th>
-            <th>Кол-во людей застрахованных</th>
+            <th>Кол-во людей застрахованных ГАКом</th>
             <th>% застрахованных</th>
           </tr>
         </thead>
@@ -341,7 +341,7 @@ function HudGakTable({ rows, district }) {
               <td className="hud-rt-region" title={r.region}>{r.region}</td>
               <td className="num center">
                 {r.rank ? (
-                  <span className={'hud-gak-rank' + (r.rank <= 3 ? ' top' + r.rank : '')}>{r.rank}</span>
+                  <span className={'hud-gak-rank' + (r.rank <= 5 ? ' good' : r.rank <= 7 ? ' mid' : '')}>{r.rank}</span>
                 ) : <span className="dim">—</span>}
               </td>
               <td className="num strong">{fmtNum(r.ent)}</td>
