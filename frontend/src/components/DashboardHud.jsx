@@ -317,6 +317,12 @@ function HudRegionTable({ rows, district }) {
   )
 }
 
+// Место ГАК: 1–5 — зелёный, 6–7 — жёлтый, дальше — без цвета
+function GakRank({ rank }) {
+  if (!rank) return <span className="dim">—</span>
+  return <span className={'hud-gak-rank' + (rank <= 5 ? ' good' : rank <= 7 ? ' mid' : '')}>{rank}</span>
+}
+
 // Рейтинг ГАКа: место ГАК среди страховых в регионе и доля застрахованных ГАК
 function HudGakTable({ rows, district }) {
   const pct = (v) => fmtPct(v)
@@ -330,6 +336,7 @@ function HudGakTable({ rows, district }) {
             <th>Кол-во предприятий</th>
             <th>Кол-во предприятий застрахованных ГАКом</th>
             <th>% застрахованных</th>
+            <th>Рейтинг ГАКа в регионе по количеству людей</th>
             <th>Кол-во людей</th>
             <th>Кол-во людей застрахованных ГАКом</th>
             <th>% застрахованных</th>
@@ -340,13 +347,12 @@ function HudGakTable({ rows, district }) {
             <tr key={r.region + i} className={r.is_total ? 'hud-rt-total' : undefined}>
               <td className="hud-rt-region" title={r.region}>{r.region}</td>
               <td className="num center">
-                {r.rank ? (
-                  <span className={'hud-gak-rank' + (r.rank <= 5 ? ' good' : r.rank <= 7 ? ' mid' : '')}>{r.rank}</span>
-                ) : <span className="dim">—</span>}
+                <GakRank rank={r.rank} />
               </td>
               <td className="num strong">{fmtNum(r.ent)}</td>
               <td className="num ins">{fmtNum(r.gak_ent)}</td>
               <td className="num"><span className="hud-rt-cov">{pct(r.ent_pct)}</span></td>
+              <td className="num center"><GakRank rank={r.rank_ppl} /></td>
               <td className="num strong">{fmtNum(r.ppl)}</td>
               <td className="num ins">{fmtNum(r.gak_ppl)}</td>
               <td className="num"><span className="hud-rt-cov">{pct(r.ppl_pct)}</span></td>

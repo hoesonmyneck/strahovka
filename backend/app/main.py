@@ -1451,7 +1451,8 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         (активные трудовые договоры; есть почти у всех), если нет — число
         сотрудников из договора; застраховано ГАК — по договорам ГАК;
       rank / insurers — место ГАК среди страховых компаний по числу
-        застрахованных предприятий / сколько страховых в регионе."""
+        застрахованных предприятий / сколько страховых в регионе;
+      rank_ppl — место ГАК среди страховых по числу застрахованных людей."""
     is_gak = S.system_delimiter_bin_name.ilike(GAK_NAME_LIKE)
     gak_ins = and_(S.status == 1, is_gak)
     people = func.coalesce(S.esutd_akt_td, S.total_employees_count, 0)
@@ -1464,13 +1465,17 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
     ).filter(OBL)).group_by(GEO).all()
     per_ins = scope(db.query(
         GEO.label("g"), S.system_delimiter_bin_name.label("ins"), func.count().label("c"),
+        func.coalesce(func.sum(S.count_employees), 0).label("p"),
     ).filter(S.status == 1, S.system_delimiter_bin_name.isnot(None),
              S.system_delimiter_bin_name != "")).group_by(GEO, S.system_delimiter_bin_name).all()
 
-    by_geo, total_by_ins = {}, {}
-    for g, ins, c in per_ins:
+    by_geo, total_by_ins = {}, {}            # {ins: (предприятий, людей)}
+    by_geo_p, total_by_ins_p = {}, {}
+    for g, ins, c, p in per_ins:
         by_geo.setdefault(g, {})[ins] = int(c)
         total_by_ins[ins] = total_by_ins.get(ins, 0) + int(c)
+        by_geo_p.setdefault(g, {})[ins] = int(p or 0)
+        total_by_ins_p[ins] = total_by_ins_p.get(ins, 0) + int(p or 0)
 
     def rank_of(counts):
         gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
@@ -1479,10 +1484,11 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         return 1 + sum(1 for ins, c in counts.items()
                        if c > gak and "Государственная аннуитетная" not in (ins or "")), len(counts)
 
-    def row(name, ent, ppl, gak_ent, gak_ppl, counts, is_total=False):
+    def row(name, ent, ppl, gak_ent, gak_ppl, counts, counts_p, is_total=False):
         rank, n = rank_of(counts)
+        rank_ppl = rank_of(counts_p)[0] if rank else None
         ent, ppl, gak_ent, gak_ppl = int(ent or 0), int(ppl or 0), int(gak_ent or 0), int(gak_ppl or 0)
-        return {"region": name, "is_total": is_total, "rank": rank, "insurers": n,
+        return {"region": name, "is_total": is_total, "rank": rank, "insurers": n, "rank_ppl": rank_ppl,
                 "ent": ent, "gak_ent": gak_ent, "ent_pct": round(gak_ent * 100.0 / ent, 1) if ent else 0.0,
                 "ppl": ppl, "gak_ppl": gak_ppl, "ppl_pct": round(gak_ppl * 100.0 / ppl, 1) if ppl else 0.0}
 
@@ -1491,12 +1497,12 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         name = sc.label(r.g)
         if not name:
             continue
-        rows.append(row(name, r.ent, r.ppl, r.gak_ent, r.gak_ppl, by_geo.get(r.g, {})))
+        rows.append(row(name, r.ent, r.ppl, r.gak_ent, r.gak_ppl, by_geo.get(r.g, {}), by_geo_p.get(r.g, {})))
     rows.sort(key=lambda x: (x["rank"] is None, x["rank"] or 0, -x["ent_pct"]))
     if not sc.district and len(rows) > 1:   # итог по всему охвату — первой строкой
         f = lambda k: sum(x[k] for x in rows)
         title = sc.single or ("Казахстан" if sc.regions is None else "Все мои области")
-        rows.insert(0, row(title, f("ent"), f("ppl"), f("gak_ent"), f("gak_ppl"), total_by_ins, is_total=True))
+        rows.insert(0, row(title, f("ent"), f("ppl"), f("gak_ent"), f("gak_ppl"), total_by_ins, total_by_ins_p, is_total=True))
     return rows
 
 
