@@ -317,6 +317,36 @@ function HudRegionTable({ rows, district }) {
   )
 }
 
+// Скачать таблицу «Рейтинг ГАКа» в Excel (с текущим фильтром области/района)
+function GakExportButton({ geo }) {
+  const [busy, setBusy] = useState(false)
+  const run = async () => {
+    setBusy(true)
+    try {
+      const res = await api.get('/api/dashboard/gak-rating/export', { params: geo, responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.setAttribute('download', ['Рейтинг_ГАКа', geo.region, geo.district].filter(Boolean).join('_') + '.xlsx')
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      alert('Не удалось сформировать Excel')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="hud-activity-bar">
+      <button type="button" className="hud-export-btn" onClick={run} disabled={busy}>
+        <Download size={15} /> {busy ? 'Формирую…' : 'Скачать Excel'}
+      </button>
+    </div>
+  )
+}
+
 // Место ГАК: 1–5 — зелёный, 6–7 — жёлтый, дальше — без цвета
 function GakRank({ rank }) {
   if (!rank) return <span className="dim">—</span>
@@ -1370,6 +1400,7 @@ const DashboardHud = () => {
       {ins.gak_rating && ins.gak_rating.length > 0 && (
         <div className="hud-charts">
           <HudCard id="sec-gak" title="Рейтинг ГАКа" wide>
+            <GakExportButton geo={geoParams} />
             <HudGakTable rows={ins.gak_rating} district={byDistrict} />
           </HudCard>
         </div>

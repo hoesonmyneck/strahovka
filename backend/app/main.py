@@ -1506,6 +1506,78 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
     return rows
 
 
+@app.get("/api/dashboard/gak-rating/export")
+def gak_rating_export(
+    region: Optional[str] = None,
+    district: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Excel таблицы «Рейтинг ГАКа» — те же строки, что на дашборде
+    (с учётом фильтра области/района и региона пользователя)."""
+    S = models.CompanySummary
+    sc = _dash_scope(current_user, region, district)
+    rows = _gak_rating(db, S, lambda q: sc.apply(q, S), sc.geo(S), sc, S.status.in_((0, 1)))
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp.close()
+    wb = xlsxwriter.Workbook(tmp.name)
+    f_title = wb.add_format({'bold': True, 'font_size': 13})
+    f_head = wb.add_format({'bold': True, 'border': 1, 'align': 'center', 'valign': 'vcenter',
+                            'text_wrap': True, 'bg_color': '#E8EDF7'})
+    f_txt = wb.add_format({'border': 1})
+    f_int = wb.add_format({'border': 1, 'num_format': '#,##0'})
+    f_pct = wb.add_format({'border': 1, 'num_format': '0.0"%"'})
+    f_rank = wb.add_format({'border': 1, 'align': 'center'})
+    f_good = wb.add_format({'border': 1, 'align': 'center', 'bold': True, 'bg_color': '#C6EFCE', 'font_color': '#006100'})
+    f_mid = wb.add_format({'border': 1, 'align': 'center', 'bold': True, 'bg_color': '#FFEB9C', 'font_color': '#7F6000'})
+    tot = {k: wb.add_format({**v, 'bold': True, 'bg_color': '#F2F4F8'}) for k, v in {
+        'txt': {'border': 1}, 'int': {'border': 1, 'num_format': '#,##0'},
+        'pct': {'border': 1, 'num_format': '0.0"%"'}, 'rank': {'border': 1, 'align': 'center'}}.items()}
+
+    def rank_fmt(rank, is_total):
+        if rank and rank <= 5:
+            return f_good
+        if rank and rank <= 7:
+            return f_mid
+        return tot['rank'] if is_total else f_rank
+
+    ws = wb.add_worksheet("Рейтинг ГАКа")
+    scope_title = (f"{sc.single}, {sc.district}" if sc.district else sc.single) or (
+        "Казахстан" if sc.regions is None else ", ".join(sc.regions))
+    ws.write(0, 0, f"Рейтинг ГАКа — {scope_title}", f_title)
+    heads = ["Район" if sc.by_district else "Регион", "Рейтинг ГАКа в регионе",
+             "Кол-во предприятий", "Кол-во предприятий застрахованных ГАКом", "% застрахованных",
+             "Рейтинг ГАКа в регионе по количеству людей", "Кол-во людей",
+             "Кол-во людей застрахованных ГАКом", "% застрахованных"]
+    for j, h in enumerate(heads):
+        ws.write(2, j, h, f_head)
+    ws.set_row(2, 48)
+    ws.set_column(0, 0, 34)
+    ws.set_column(1, len(heads) - 1, 16)
+    for i, r in enumerate(rows, start=3):
+        t = r["is_total"]
+        ws.write(i, 0, r["region"], tot['txt'] if t else f_txt)
+        for j, k in ((1, "rank"), (5, "rank_ppl")):
+            if r[k]:
+                ws.write_number(i, j, r[k], rank_fmt(r[k], t))
+            else:
+                ws.write(i, j, "—", rank_fmt(None, t))
+        for j, k in ((2, "ent"), (3, "gak_ent"), (6, "ppl"), (7, "gak_ppl")):
+            ws.write_number(i, j, r[k], tot['int'] if t else f_int)
+        for j, k in ((4, "ent_pct"), (8, "ppl_pct")):
+            ws.write_number(i, j, r[k], tot['pct'] if t else f_pct)
+    ws.freeze_panes(3, 1)
+    wb.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="gak_rating.xlsx",
+        background=BackgroundTask(os.unlink, tmp.name),
+    )
+
+
 @app.get("/api/dashboard/insurer-ranking")
 def dashboard_insurer_ranking(
     mode: str = "enterprises",
