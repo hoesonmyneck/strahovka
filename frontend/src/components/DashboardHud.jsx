@@ -137,10 +137,16 @@ function HudBubbles({ items }) {
 }
 
 // ─── Карточка-обёртка для графиков ───────────────────────────────────────────
-function HudCard({ title, children, wide, id }) {
+// actions — элементы справа в строке заголовка (например, «Скачать Excel»)
+function HudCard({ title, children, wide, id, actions }) {
   return (
     <div id={id} className={'hud-card hud-chart-card' + (wide ? ' hud-chart-card--wide' : '')}>
-      {title && <div className="hud-chart-title">{title}</div>}
+      {title && (
+        <div className={'hud-chart-title' + (actions ? ' has-actions' : '')}>
+          {title}
+          {actions}
+        </div>
+      )}
       {children}
     </div>
   )
@@ -339,11 +345,9 @@ function GakExportButton({ geo }) {
     }
   }
   return (
-    <div className="hud-activity-bar">
-      <button type="button" className="hud-export-btn" onClick={run} disabled={busy}>
-        <Download size={15} /> {busy ? 'Формирую…' : 'Скачать Excel'}
-      </button>
-    </div>
+    <button type="button" className="hud-export-btn" onClick={run} disabled={busy}>
+      <Download size={15} /> {busy ? 'Формирую…' : 'Скачать Excel'}
+    </button>
   )
 }
 
@@ -1399,8 +1403,7 @@ const DashboardHud = () => {
       )}
       {ins.gak_rating && ins.gak_rating.length > 0 && (
         <div className="hud-charts">
-          <HudCard id="sec-gak" title="Рейтинг ГАКа" wide>
-            <GakExportButton geo={geoParams} />
+          <HudCard id="sec-gak" title="Рейтинг ГАКа" wide actions={<GakExportButton geo={geoParams} />}>
             <HudGakTable rows={ins.gak_rating} district={byDistrict} />
           </HudCard>
         </div>

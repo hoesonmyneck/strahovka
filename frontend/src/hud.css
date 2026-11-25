@@ -933,3 +933,7 @@
 /* места 1–5 — зелёный, 6–7 — жёлтый, остальные — без цвета */
 .hud-gak-rank.good { color: #04221a; background: linear-gradient(135deg, #5ef0a8, #22c47e); border-color: transparent; }
 .hud-gak-rank.mid  { color: #2a1d02; background: linear-gradient(135deg, #ffe27a, #f5c13a); border-color: transparent; }
+
+/* кнопки в строке заголовка карточки — справа, без «свечения» заголовка */
+.hud-chart-title.has-actions { flex-wrap: wrap; row-gap: 8px; }
+.hud-chart-title .hud-export-btn { margin-left: auto; text-shadow: none; letter-spacing: normal; }
