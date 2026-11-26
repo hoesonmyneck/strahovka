@@ -351,15 +351,94 @@ function GakExportButton({ geo }) {
   )
 }
 
-// Место ГАК: 1–5 — зелёный, 6–7 — жёлтый, дальше — без цвета
+// Место ГАК: 1–3 — зелёный, 4–6 — жёлтый, 7–9 — красный, дальше — без цвета
 function GakRank({ rank }) {
   if (!rank) return <span className="dim">—</span>
-  return <span className={'hud-gak-rank' + (rank <= 5 ? ' good' : rank <= 7 ? ' mid' : '')}>{rank}</span>
+  const cls = rank <= 3 ? ' good' : rank <= 6 ? ' mid' : rank <= 9 ? ' bad' : ''
+  return <span className={'hud-gak-rank' + cls}>{rank}</span>
+}
+
+// Короткое имя страховой для тултипа — последнее название в кавычках:
+// «Акционерное общество "Компания по страхованию жизни "Nomad Life"» → «Nomad Life»
+const shortInsName = (s) => {
+  const parts = String(s || '').split(/["«»“”„]/).map((x) => x.trim()).filter(Boolean)
+  return parts.length > 1 ? parts[parts.length - 1] : shortOrgName(s)
+}
+
+// Тултип «топ-10 страховых» у ячейки места ГАК
+function GakTopTip({ tip }) {
+  if (!tip) return null
+  const { rect, list, title, unit } = tip
+  const w = 400
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left + rect.width / 2 - w / 2))
+  const below = rect.bottom + 8
+  const style = { left, width: w }
+  if (window.innerHeight - below < 60 + list.length * 26) style.bottom = window.innerHeight - rect.top + 8
+  else style.top = below
+  return createPortal(
+    <div className="hud-gak-tip" style={style}>
+      <div className="hud-gak-tip-title">{title}</div>
+      {list.map((x, i) => (
+        <React.Fragment key={x.place}>
+          {i > 0 && x.place - list[i - 1].place > 1 && <div className="hud-gak-tip-gap">…</div>}
+          <div className={'hud-gak-tip-row' + (x.gak ? ' gak' : '')}>
+            <span className="pl">{x.place}</span>
+            <span className="nm">{shortInsName(x.name)}</span>
+            <span className="vl">{fmtNum(x.value)} {unit}</span>
+          </div>
+        </React.Fragment>
+      ))}
+    </div>,
+    document.body,
+  )
 }
 
 // Рейтинг ГАКа: место ГАК среди страховых в регионе и доля застрахованных ГАК
 function HudGakTable({ rows, district }) {
   const pct = (v) => fmtPct(v)
+  const [tip, setTip] = useState(null)
+  // Раскрытые области: { [область]: { loading, rows } } — районы грузятся по клику
+  const [open, setOpen] = useState({})
+  useEffect(() => { setOpen({}) }, [rows])
+  const canExpand = !district
+  const toggle = (region) => {
+    if (open[region]) {
+      setOpen((o) => { const n = { ...o }; delete n[region]; return n })
+      return
+    }
+    setOpen((o) => ({ ...o, [region]: { loading: true, rows: [] } }))
+    api.get('/api/dashboard/gak-rating', { params: { region } })
+      .then((r) => setOpen((o) => (o[region] ? { ...o, [region]: { loading: false, rows: r.data.rows.filter((x) => !x.is_total) } } : o)))
+      .catch(() => setOpen((o) => (o[region] ? { ...o, [region]: { loading: false, rows: [], error: true } } : o)))
+  }
+  const tipOn = (e, r, kind) => {
+    const list = kind === 'ent' ? r.top_ent : r.top_ppl
+    if (!list || !list.length) return
+    setTip({
+      rect: e.currentTarget.getBoundingClientRect(), list,
+      title: `${r.region}: ${kind === 'ent' ? 'по застрахованным предприятиям' : 'по застрахованным людям'}`,
+      unit: kind === 'ent' ? 'предпр.' : 'чел.',
+    })
+  }
+  const tipOff = () => setTip(null)
+
+  const cells = (r) => (
+    <>
+      <td className="num center hud-gak-hover" onMouseEnter={(e) => tipOn(e, r, 'ent')} onMouseLeave={tipOff}>
+        <GakRank rank={r.rank} />
+      </td>
+      <td className="num strong">{fmtNum(r.ent)}</td>
+      <td className="num ins">{fmtNum(r.gak_ent)}</td>
+      <td className="num"><span className="hud-rt-cov">{pct(r.ent_pct)}</span></td>
+      <td className="num center hud-gak-hover" onMouseEnter={(e) => tipOn(e, r, 'ppl')} onMouseLeave={tipOff}>
+        <GakRank rank={r.rank_ppl} />
+      </td>
+      <td className="num strong">{fmtNum(r.ppl)}</td>
+      <td className="num ins">{fmtNum(r.gak_ppl)}</td>
+      <td className="num"><span className="hud-rt-cov">{pct(r.ppl_pct)}</span></td>
+    </>
+  )
+
   return (
     <div className="hud-rtable-wrap">
       <table className="hud-rtable hud-gak-table">
@@ -377,23 +456,40 @@ function HudGakTable({ rows, district }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.region + i} className={r.is_total ? 'hud-rt-total' : undefined}>
-              <td className="hud-rt-region" title={r.region}>{r.region}</td>
-              <td className="num center">
-                <GakRank rank={r.rank} />
-              </td>
-              <td className="num strong">{fmtNum(r.ent)}</td>
-              <td className="num ins">{fmtNum(r.gak_ent)}</td>
-              <td className="num"><span className="hud-rt-cov">{pct(r.ent_pct)}</span></td>
-              <td className="num center"><GakRank rank={r.rank_ppl} /></td>
-              <td className="num strong">{fmtNum(r.ppl)}</td>
-              <td className="num ins">{fmtNum(r.gak_ppl)}</td>
-              <td className="num"><span className="hud-rt-cov">{pct(r.ppl_pct)}</span></td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const exp = canExpand && !r.is_total
+            const st = open[r.region]
+            return (
+              <React.Fragment key={r.region + i}>
+                <tr className={r.is_total ? 'hud-rt-total' : (st ? 'hud-gak-open' : undefined)}>
+                  <td className="hud-rt-region" title={exp ? `${r.region} — нажмите, чтобы ${st ? 'свернуть' : 'раскрыть по районам'}` : r.region}>
+                    {exp ? (
+                      <button type="button" className="hud-gak-exp" onClick={() => toggle(r.region)}>
+                        <ChevronRight size={14} className={'hud-gak-chev' + (st ? ' on' : '')} />
+                        <span>{r.region}</span>
+                      </button>
+                    ) : r.region}
+                  </td>
+                  {cells(r)}
+                </tr>
+                {st && st.loading && (
+                  <tr className="hud-gak-sub"><td colSpan={9} className="hud-gak-sub-msg">Загрузка районов…</td></tr>
+                )}
+                {st && !st.loading && st.rows.length === 0 && (
+                  <tr className="hud-gak-sub"><td colSpan={9} className="hud-gak-sub-msg">{st.error ? 'Не удалось загрузить районы' : 'Нет данных по районам'}</td></tr>
+                )}
+                {st && st.rows.map((d, j) => (
+                  <tr key={r.region + '|' + d.region + j} className="hud-gak-sub">
+                    <td className="hud-rt-region" title={d.region}><span className="hud-gak-sub-name">{d.region}</span></td>
+                    {cells(d)}
+                  </tr>
+                ))}
+              </React.Fragment>
+            )
+          })}
         </tbody>
       </table>
+      <GakTopTip tip={tip} />
     </div>
   )
 }

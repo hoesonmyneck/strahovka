@@ -1484,11 +1484,28 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         return 1 + sum(1 for ins, c in counts.items()
                        if c > gak and "Государственная аннуитетная" not in (ins or "")), len(counts)
 
+    def top_of(counts, n=10):
+        """Топ-n страховых (ГАК — одной строкой; при равенстве ГАК выше, как в rank_of).
+        Если ГАК ниже n-го места — добавляется последней строкой со своим местом."""
+        gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
+        gak_name = next((ins for ins in counts if "Государственная аннуитетная" in (ins or "")), None)
+        items = [(ins, c, False) for ins, c in counts.items()
+                 if c and "Государственная аннуитетная" not in (ins or "")]
+        if gak:
+            items.append((gak_name, gak, True))
+        items.sort(key=lambda x: (-x[1], not x[2]))
+        out = [{"place": i + 1, "name": ins, "value": c, "gak": g} for i, (ins, c, g) in enumerate(items)]
+        top = out[:n]
+        if gak and not any(x["gak"] for x in top):
+            top.append(next(x for x in out if x["gak"]))
+        return top
+
     def row(name, ent, ppl, gak_ent, gak_ppl, counts, counts_p, is_total=False):
         rank, n = rank_of(counts)
         rank_ppl = rank_of(counts_p)[0] if rank else None
         ent, ppl, gak_ent, gak_ppl = int(ent or 0), int(ppl or 0), int(gak_ent or 0), int(gak_ppl or 0)
         return {"region": name, "is_total": is_total, "rank": rank, "insurers": n, "rank_ppl": rank_ppl,
+                "top_ent": top_of(counts), "top_ppl": top_of(counts_p),
                 "ent": ent, "gak_ent": gak_ent, "ent_pct": round(gak_ent * 100.0 / ent, 1) if ent else 0.0,
                 "ppl": ppl, "gak_ppl": gak_ppl, "ppl_pct": round(gak_ppl * 100.0 / ppl, 1) if ppl else 0.0}
 
@@ -1504,6 +1521,21 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         title = sc.single or ("Казахстан" if sc.regions is None else "Все мои области")
         rows.insert(0, row(title, f("ent"), f("ppl"), f("gak_ent"), f("gak_ppl"), total_by_ins, total_by_ins_p, is_total=True))
     return rows
+
+
+@app.get("/api/dashboard/gak-rating")
+def gak_rating(
+    region: Optional[str] = None,
+    district: Optional[str] = None,
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Строки «Рейтинга ГАКа» для охвата (область → по районам). Нужен, чтобы
+    раскрыть строку области в районы, не пересчитывая весь дашборд."""
+    S = models.CompanySummary
+    sc = _dash_scope(current_user, region, district)
+    return {"geo_level": "district" if sc.by_district else "region",
+            "rows": _gak_rating(db, S, lambda q: sc.apply(q, S), sc.geo(S), sc, S.status.in_((0, 1)))}
 
 
 @app.get("/api/dashboard/gak-rating/export")
@@ -1531,15 +1563,19 @@ def gak_rating_export(
     f_rank = wb.add_format({'border': 1, 'align': 'center'})
     f_good = wb.add_format({'border': 1, 'align': 'center', 'bold': True, 'bg_color': '#C6EFCE', 'font_color': '#006100'})
     f_mid = wb.add_format({'border': 1, 'align': 'center', 'bold': True, 'bg_color': '#FFEB9C', 'font_color': '#7F6000'})
+    f_bad = wb.add_format({'border': 1, 'align': 'center', 'bold': True, 'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
     tot = {k: wb.add_format({**v, 'bold': True, 'bg_color': '#F2F4F8'}) for k, v in {
         'txt': {'border': 1}, 'int': {'border': 1, 'num_format': '#,##0'},
         'pct': {'border': 1, 'num_format': '0.0"%"'}, 'rank': {'border': 1, 'align': 'center'}}.items()}
 
     def rank_fmt(rank, is_total):
-        if rank and rank <= 5:
+        # 1–3 — зелёный, 4–6 — жёлтый, 7–9 — красный, дальше — без цвета
+        if rank and rank <= 3:
             return f_good
-        if rank and rank <= 7:
+        if rank and rank <= 6:
             return f_mid
+        if rank and rank <= 9:
+            return f_bad
         return tot['rank'] if is_total else f_rank
 
     ws = wb.add_worksheet("Рейтинг ГАКа")
