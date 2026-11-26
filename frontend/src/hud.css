@@ -969,3 +969,10 @@
 .hud-gak-tip-row.gak { background: rgba(46, 230, 197, .16); color: #fff; font-weight: 700; }
 .hud-gak-tip-row.gak .pl { color: #5ef0a8; }
 .hud-gak-tip-gap { padding: 0 4px 0 32px; color: var(--h-dim); line-height: 1; }
+
+/* Рейтинг ГАКа: сортировка по столбцам мест */
+.hud-gak-table th.hud-gak-sortable { cursor: pointer; user-select: none; transition: color .15s; }
+.hud-gak-table th.hud-gak-sortable:hover { color: #6fe6ff; }
+.hud-gak-table th.hud-gak-sortable.on { color: #6fe6ff; }
+.hud-gak-sort { display: inline-block; margin-left: 5px; font-size: 11px; opacity: .55; }
+.hud-gak-table th.on .hud-gak-sort { opacity: 1; }

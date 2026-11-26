@@ -1444,6 +1444,107 @@ def dashboard_kpis(
 GAK_NAME_LIKE = "%Государственная аннуитетная%"
 
 
+# ── помощники «Рейтинга ГАКа» (counts — {страховая: число})
+def _gak_rank_of(counts):
+    gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
+    if not gak:
+        return None, len(counts)
+    return 1 + sum(1 for ins, c in counts.items()
+                   if c > gak and "Государственная аннуитетная" not in (ins or "")), len(counts)
+
+
+def _gak_top_of(counts, n=10):
+    """Топ-n страховых (ГАК — одной строкой; при равенстве ГАК выше, как в rank_of).
+    Если ГАК ниже n-го места — добавляется последней строкой со своим местом."""
+    gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
+    gak_name = next((ins for ins in counts if "Государственная аннуитетная" in (ins or "")), None)
+    items = [(ins, c, False) for ins, c in counts.items()
+             if c and "Государственная аннуитетная" not in (ins or "")]
+    if gak:
+        items.append((gak_name, gak, True))
+    items.sort(key=lambda x: (-x[1], not x[2]))
+    out = [{"place": i + 1, "name": ins, "value": c, "gak": g} for i, (ins, c, g) in enumerate(items)]
+    top = out[:n]
+    if gak and not any(x["gak"] for x in top):
+        top.append(next(x for x in out if x["gak"]))
+    return top
+
+
+def _gak_row(name, ent, ppl, gak_ent, gak_ppl, counts, counts_p, is_total=False):
+    rank, n = _gak_rank_of(counts)
+    rank_ppl = _gak_rank_of(counts_p)[0] if rank else None
+    ent, ppl, gak_ent, gak_ppl = int(ent or 0), int(ppl or 0), int(gak_ent or 0), int(gak_ppl or 0)
+    return {"region": name, "is_total": is_total, "rank": rank, "insurers": n, "rank_ppl": rank_ppl,
+            "top_ent": _gak_top_of(counts), "top_ppl": _gak_top_of(counts_p),
+            "ent": ent, "gak_ent": gak_ent, "ent_pct": round(gak_ent * 100.0 / ent, 1) if ent else 0.0,
+            "ppl": ppl, "gak_ppl": gak_ppl, "ppl_pct": round(gak_ppl * 100.0 / ppl, 1) if ppl else 0.0}
+
+
+def _gak_queries(db, S, scope, keys, OBL):
+    """Два агрегата по company_summary с группировкой по keys (колонки):
+    base — предприятия/люди всего и у ГАК; per_ins — по каждой страховой."""
+    is_gak = S.system_delimiter_bin_name.ilike(GAK_NAME_LIKE)
+    gak_ins = and_(S.status == 1, is_gak)
+    people = func.coalesce(S.esutd_akt_td, S.total_employees_count, 0)
+    base = scope(db.query(
+        *keys,
+        func.count().label("ent"),
+        func.coalesce(func.sum(people), 0).label("ppl"),
+        func.coalesce(func.sum(case((gak_ins, 1), else_=0)), 0).label("gak_ent"),
+        func.coalesce(func.sum(case((gak_ins, S.count_employees), else_=0)), 0).label("gak_ppl"),
+    ).filter(OBL)).group_by(*keys).all()
+    per_ins = scope(db.query(
+        *keys, S.system_delimiter_bin_name.label("ins"), func.count().label("c"),
+        func.coalesce(func.sum(S.count_employees), 0).label("p"),
+    ).filter(S.status == 1, S.system_delimiter_bin_name.isnot(None),
+             S.system_delimiter_bin_name != "")).group_by(*keys, S.system_delimiter_bin_name).all()
+    return base, per_ins
+
+
+def _gak_sort(rows):
+    rows.sort(key=lambda x: (x["rank"] is None, x["rank"] or 0, -x["ent_pct"], x["region"]))
+    return rows
+
+
+# Районы всех областей разом (для раскрытия строк) — кэш до пересборки предрасчёта
+_GAK_DISTRICTS_CACHE = {}
+
+
+def _gak_districts_all(db, sc):
+    """{область: [строки районов]} для всех областей охвата — один проход по базе."""
+    key = (_get_setting(db, "summary_version"), tuple(sc.regions) if sc.regions is not None else None)
+    hit = _GAK_DISTRICTS_CACHE.get(key)
+    if hit is not None:
+        return hit
+    S = models.CompanySummary
+    scope = lambda q: q.filter(S.obl_name.in_(sc.regions)) if sc.regions is not None else q
+    base, per_ins = _gak_queries(db, S, scope, (S.obl_name, S.rai_name), S.status.in_((0, 1)))
+    cnt, cnt_p = {}, {}
+    for obl, rai, ins, c, p in per_ins:
+        k = (obl, rai or None)
+        d, dp = cnt.setdefault(k, {}), cnt_p.setdefault(k, {})
+        d[ins] = d.get(ins, 0) + int(c)
+        dp[ins] = dp.get(ins, 0) + int(p or 0)
+    # «Район не указан»: NULL и пустая строка — одна строка
+    agg = {}
+    for obl, rai, ent, ppl, gak_ent, gak_ppl in base:
+        if not obl:
+            continue
+        a = agg.setdefault((obl, rai or None), [0, 0, 0, 0])
+        for i, v in enumerate((ent, ppl, gak_ent, gak_ppl)):
+            a[i] += int(v or 0)
+    out = {}
+    for (obl, rai), (ent, ppl, gak_ent, gak_ppl) in agg.items():
+        out.setdefault(obl, []).append(_gak_row(rai or NO_DISTRICT_LABEL, ent, ppl, gak_ent, gak_ppl,
+                                                cnt.get((obl, rai), {}), cnt_p.get((obl, rai), {})))
+    for obl in out:
+        _gak_sort(out[obl])
+    if len(_GAK_DISTRICTS_CACHE) > 50:
+        _GAK_DISTRICTS_CACHE.clear()
+    _GAK_DISTRICTS_CACHE[key] = out
+    return out
+
+
 def _gak_rating(db, S, scope, GEO, sc, OBL):
     """Строки таблицы «Рейтинг ГАКа» (первой — итог по всему охвату).
       ent / gak_ent — предприятий всего (обязанных) / застраховано ГАК;
@@ -1453,21 +1554,7 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
       rank / insurers — место ГАК среди страховых компаний по числу
         застрахованных предприятий / сколько страховых в регионе;
       rank_ppl — место ГАК среди страховых по числу застрахованных людей."""
-    is_gak = S.system_delimiter_bin_name.ilike(GAK_NAME_LIKE)
-    gak_ins = and_(S.status == 1, is_gak)
-    people = func.coalesce(S.esutd_akt_td, S.total_employees_count, 0)
-    base = scope(db.query(
-        GEO.label("g"),
-        func.count().label("ent"),
-        func.coalesce(func.sum(people), 0).label("ppl"),
-        func.coalesce(func.sum(case((gak_ins, 1), else_=0)), 0).label("gak_ent"),
-        func.coalesce(func.sum(case((gak_ins, S.count_employees), else_=0)), 0).label("gak_ppl"),
-    ).filter(OBL)).group_by(GEO).all()
-    per_ins = scope(db.query(
-        GEO.label("g"), S.system_delimiter_bin_name.label("ins"), func.count().label("c"),
-        func.coalesce(func.sum(S.count_employees), 0).label("p"),
-    ).filter(S.status == 1, S.system_delimiter_bin_name.isnot(None),
-             S.system_delimiter_bin_name != "")).group_by(GEO, S.system_delimiter_bin_name).all()
+    base, per_ins = _gak_queries(db, S, scope, (GEO.label("g"),), OBL)
 
     by_geo, total_by_ins = {}, {}            # {ins: (предприятий, людей)}
     by_geo_p, total_by_ins_p = {}, {}
@@ -1477,37 +1564,7 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         by_geo_p.setdefault(g, {})[ins] = int(p or 0)
         total_by_ins_p[ins] = total_by_ins_p.get(ins, 0) + int(p or 0)
 
-    def rank_of(counts):
-        gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
-        if not gak:
-            return None, len(counts)
-        return 1 + sum(1 for ins, c in counts.items()
-                       if c > gak and "Государственная аннуитетная" not in (ins or "")), len(counts)
-
-    def top_of(counts, n=10):
-        """Топ-n страховых (ГАК — одной строкой; при равенстве ГАК выше, как в rank_of).
-        Если ГАК ниже n-го места — добавляется последней строкой со своим местом."""
-        gak = sum(c for ins, c in counts.items() if "Государственная аннуитетная" in (ins or ""))
-        gak_name = next((ins for ins in counts if "Государственная аннуитетная" in (ins or "")), None)
-        items = [(ins, c, False) for ins, c in counts.items()
-                 if c and "Государственная аннуитетная" not in (ins or "")]
-        if gak:
-            items.append((gak_name, gak, True))
-        items.sort(key=lambda x: (-x[1], not x[2]))
-        out = [{"place": i + 1, "name": ins, "value": c, "gak": g} for i, (ins, c, g) in enumerate(items)]
-        top = out[:n]
-        if gak and not any(x["gak"] for x in top):
-            top.append(next(x for x in out if x["gak"]))
-        return top
-
-    def row(name, ent, ppl, gak_ent, gak_ppl, counts, counts_p, is_total=False):
-        rank, n = rank_of(counts)
-        rank_ppl = rank_of(counts_p)[0] if rank else None
-        ent, ppl, gak_ent, gak_ppl = int(ent or 0), int(ppl or 0), int(gak_ent or 0), int(gak_ppl or 0)
-        return {"region": name, "is_total": is_total, "rank": rank, "insurers": n, "rank_ppl": rank_ppl,
-                "top_ent": top_of(counts), "top_ppl": top_of(counts_p),
-                "ent": ent, "gak_ent": gak_ent, "ent_pct": round(gak_ent * 100.0 / ent, 1) if ent else 0.0,
-                "ppl": ppl, "gak_ppl": gak_ppl, "ppl_pct": round(gak_ppl * 100.0 / ppl, 1) if ppl else 0.0}
+    row = _gak_row
 
     rows = []
     for r in base:
@@ -1515,7 +1572,7 @@ def _gak_rating(db, S, scope, GEO, sc, OBL):
         if not name:
             continue
         rows.append(row(name, r.ent, r.ppl, r.gak_ent, r.gak_ppl, by_geo.get(r.g, {}), by_geo_p.get(r.g, {})))
-    rows.sort(key=lambda x: (x["rank"] is None, x["rank"] or 0, -x["ent_pct"]))
+    _gak_sort(rows)
     if not sc.district and len(rows) > 1:   # итог по всему охвату — первой строкой
         f = lambda k: sum(x[k] for x in rows)
         title = sc.single or ("Казахстан" if sc.regions is None else "Все мои области")
@@ -1536,6 +1593,16 @@ def gak_rating(
     sc = _dash_scope(current_user, region, district)
     return {"geo_level": "district" if sc.by_district else "region",
             "rows": _gak_rating(db, S, lambda q: sc.apply(q, S), sc.geo(S), sc, S.status.in_((0, 1)))}
+
+
+@app.get("/api/dashboard/gak-rating/districts")
+def gak_rating_districts(
+    current_user: models.User = Depends(auth.require_dashboard),
+    db: Session = Depends(database.get_db),
+):
+    """Районы всех доступных областей для раскрытия строк «Рейтинга ГАКа»:
+    грузится один раз в фоне, раскрытие строки — мгновенно."""
+    return _gak_districts_all(db, _dash_scope(current_user))
 
 
 @app.get("/api/dashboard/gak-rating/export")

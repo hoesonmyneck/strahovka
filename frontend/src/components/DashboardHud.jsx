@@ -397,20 +397,54 @@ function GakTopTip({ tip }) {
 function HudGakTable({ rows, district }) {
   const pct = (v) => fmtPct(v)
   const [tip, setTip] = useState(null)
-  // Раскрытые области: { [область]: { loading, rows } } — районы грузятся по клику
-  const [open, setOpen] = useState({})
-  useEffect(() => { setOpen({}) }, [rows])
   const canExpand = !district
-  const toggle = (region) => {
-    if (open[region]) {
-      setOpen((o) => { const n = { ...o }; delete n[region]; return n })
-      return
-    }
-    setOpen((o) => ({ ...o, [region]: { loading: true, rows: [] } }))
-    api.get('/api/dashboard/gak-rating', { params: { region } })
-      .then((r) => setOpen((o) => (o[region] ? { ...o, [region]: { loading: false, rows: r.data.rows.filter((x) => !x.is_total) } } : o)))
-      .catch(() => setOpen((o) => (o[region] ? { ...o, [region]: { loading: false, rows: [], error: true } } : o)))
+  // Районы всех областей грузятся одним запросом в фоне сразу при показе таблицы
+  // (на сервере — кэш до обновления данных), раскрытие строки — мгновенно.
+  const [dist, setDist] = useState(null)        // { [область]: строки районов } | 'error'
+  const [open, setOpen] = useState({})          // { [область]: true }
+  useEffect(() => {
+    setOpen({})
+    if (!canExpand) return
+    let alive = true
+    api.get('/api/dashboard/gak-rating/districts')
+      .then((r) => alive && setDist(r.data))
+      .catch(() => alive && setDist('error'))
+    return () => { alive = false }
+  }, [rows, canExpand])
+  const toggle = (region) => setOpen((o) => {
+    const n = { ...o }
+    if (n[region]) delete n[region]; else n[region] = true
+    return n
+  })
+  const subOf = (region) => {
+    if (!open[region]) return null
+    if (dist === 'error') return { error: true, rows: [] }
+    if (!dist) return { loading: true, rows: [] }
+    return { rows: dist[region] || [] }
   }
+
+  // Сортировка по столбцам мест (клик по заголовку: по возрастанию ↔ по убыванию).
+  // Итоговая строка всегда первая, «—» (у ГАК нет застрахованных) — всегда в конце.
+  const [sort, setSort] = useState(null)        // { key: 'rank' | 'rank_ppl', dir: 1 | -1 }
+  const sortBy = (key) => setSort((s) => (s && s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }))
+  const sorted = (list) => {
+    if (!sort) return list
+    const pctKey = sort.key === 'rank' ? 'ent_pct' : 'ppl_pct'
+    return [...list].sort((a, b) => {
+      if (a.is_total !== b.is_total) return a.is_total ? -1 : 1
+      const va = a[sort.key], vb = b[sort.key]
+      if (!va !== !vb) return va ? -1 : 1
+      if (va !== vb) return (va - vb) * sort.dir
+      return (b[pctKey] - a[pctKey]) * sort.dir
+    })
+  }
+  const SortTh = ({ k, children }) => (
+    <th className={'hud-gak-sortable' + (sort?.key === k ? ' on' : '')} onClick={() => sortBy(k)}
+      title="Нажмите, чтобы отсортировать по месту">
+      {children}
+      <span className="hud-gak-sort">{sort?.key === k ? (sort.dir === 1 ? '▲' : '▼') : '⇅'}</span>
+    </th>
+  )
   const tipOn = (e, r, kind) => {
     const list = kind === 'ent' ? r.top_ent : r.top_ppl
     if (!list || !list.length) return
@@ -445,20 +479,20 @@ function HudGakTable({ rows, district }) {
         <thead>
           <tr>
             <th className="hud-rt-region">{district ? 'Район' : 'Регион'}</th>
-            <th>Рейтинг ГАКа в регионе</th>
+            <SortTh k="rank">Рейтинг ГАКа в регионе</SortTh>
             <th>Кол-во предприятий</th>
             <th>Кол-во предприятий застрахованных ГАКом</th>
             <th>% застрахованных</th>
-            <th>Рейтинг ГАКа в регионе по количеству людей</th>
+            <SortTh k="rank_ppl">Рейтинг ГАКа в регионе по количеству людей</SortTh>
             <th>Кол-во людей</th>
             <th>Кол-во людей застрахованных ГАКом</th>
             <th>% застрахованных</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
+          {sorted(rows).map((r, i) => {
             const exp = canExpand && !r.is_total
-            const st = open[r.region]
+            const st = subOf(r.region)
             return (
               <React.Fragment key={r.region + i}>
                 <tr className={r.is_total ? 'hud-rt-total' : (st ? 'hud-gak-open' : undefined)}>
@@ -478,7 +512,7 @@ function HudGakTable({ rows, district }) {
                 {st && !st.loading && st.rows.length === 0 && (
                   <tr className="hud-gak-sub"><td colSpan={9} className="hud-gak-sub-msg">{st.error ? 'Не удалось загрузить районы' : 'Нет данных по районам'}</td></tr>
                 )}
-                {st && st.rows.map((d, j) => (
+                {st && sorted(st.rows).map((d, j) => (
                   <tr key={r.region + '|' + d.region + j} className="hud-gak-sub">
                     <td className="hud-rt-region" title={d.region}><span className="hud-gak-sub-name">{d.region}</span></td>
                     {cells(d)}
