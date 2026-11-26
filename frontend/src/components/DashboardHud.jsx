@@ -423,24 +423,28 @@ function HudGakTable({ rows, district }) {
     return { rows: dist[region] || [] }
   }
 
-  // Сортировка по столбцам мест (клик по заголовку: по возрастанию ↔ по убыванию).
-  // Итоговая строка всегда первая, «—» (у ГАК нет застрахованных) — всегда в конце.
-  const [sort, setSort] = useState(null)        // { key: 'rank' | 'rank_ppl', dir: 1 | -1 }
-  const sortBy = (key) => setSort((s) => (s && s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }))
+  // Сортировка по любому столбцу (клик по заголовку: ▲ по возрастанию ↔ ▼ по убыванию).
+  // Первый клик: места и название — по возрастанию, количества и проценты — по убыванию.
+  // Итоговая строка всегда первая; у мест «—» (у ГАК нет застрахованных) — всегда в конце.
+  const [sort, setSort] = useState(null)        // { key, dir: 1 | -1 }
+  const RANK_KEYS = ['rank', 'rank_ppl']
+  const firstDir = (key) => (key === 'region' || RANK_KEYS.includes(key) ? 1 : -1)
+  const sortBy = (key) => setSort((s) => (s && s.key === key ? { key, dir: -s.dir } : { key, dir: firstDir(key) }))
   const sorted = (list) => {
     if (!sort) return list
-    const pctKey = sort.key === 'rank' ? 'ent_pct' : 'ppl_pct'
+    const { key, dir } = sort
     return [...list].sort((a, b) => {
       if (a.is_total !== b.is_total) return a.is_total ? -1 : 1
-      const va = a[sort.key], vb = b[sort.key]
-      if (!va !== !vb) return va ? -1 : 1
-      if (va !== vb) return (va - vb) * sort.dir
-      return (b[pctKey] - a[pctKey]) * sort.dir
+      const va = a[key], vb = b[key]
+      if (key === 'region') return String(va).localeCompare(String(vb), 'ru') * dir
+      if (RANK_KEYS.includes(key) && !va !== !vb) return va ? -1 : 1
+      if (va !== vb) return ((va || 0) - (vb || 0)) * dir
+      return String(a.region).localeCompare(String(b.region), 'ru')
     })
   }
-  const SortTh = ({ k, children }) => (
-    <th className={'hud-gak-sortable' + (sort?.key === k ? ' on' : '')} onClick={() => sortBy(k)}
-      title="Нажмите, чтобы отсортировать по месту">
+  const SortTh = ({ k, className, children }) => (
+    <th className={'hud-gak-sortable' + (sort?.key === k ? ' on' : '') + (className ? ' ' + className : '')}
+      onClick={() => sortBy(k)} title="Нажмите, чтобы отсортировать">
       {children}
       <span className="hud-gak-sort">{sort?.key === k ? (sort.dir === 1 ? '▲' : '▼') : '⇅'}</span>
     </th>
@@ -478,15 +482,15 @@ function HudGakTable({ rows, district }) {
       <table className="hud-rtable hud-gak-table">
         <thead>
           <tr>
-            <th className="hud-rt-region">{district ? 'Район' : 'Регион'}</th>
+            <SortTh k="region" className="hud-rt-region">{district ? 'Район' : 'Регион'}</SortTh>
             <SortTh k="rank">Рейтинг ГАКа в регионе</SortTh>
-            <th>Кол-во предприятий</th>
-            <th>Кол-во предприятий застрахованных ГАКом</th>
-            <th>% застрахованных</th>
+            <SortTh k="ent">Кол-во предприятий</SortTh>
+            <SortTh k="gak_ent">Кол-во предприятий застрахованных ГАКом</SortTh>
+            <SortTh k="ent_pct">% застрахованных</SortTh>
             <SortTh k="rank_ppl">Рейтинг ГАКа в регионе по количеству людей</SortTh>
-            <th>Кол-во людей</th>
-            <th>Кол-во людей застрахованных ГАКом</th>
-            <th>% застрахованных</th>
+            <SortTh k="ppl">Кол-во людей</SortTh>
+            <SortTh k="gak_ppl">Кол-во людей застрахованных ГАКом</SortTh>
+            <SortTh k="ppl_pct">% застрахованных</SortTh>
           </tr>
         </thead>
         <tbody>
