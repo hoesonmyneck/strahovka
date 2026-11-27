@@ -4,6 +4,7 @@ import App from './App.jsx'
 import './styles.css'
 import './hud.css'
 import './theme-dark.css'
+import './hud-light.css'
 
 // Тема (тёмная по умолчанию) ставится на <html> ещё до первой отрисовки — так
 // её получают и страница входа, и экран загрузки, без «белой вспышки».

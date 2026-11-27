@@ -1425,7 +1425,7 @@ const DashboardHud = () => {
     return (
       <div className="hud-view">
         <div className="hud-loading">
-          <ThinkingOrb className="hud-orb" state="searching" size={64} theme="dark" aria-label="Загрузка" />
+          <ThinkingOrb className="hud-orb" state="searching" size={64} theme={document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'} aria-label="Загрузка" />
         </div>
       </div>
     )

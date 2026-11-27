@@ -972,7 +972,7 @@ const Dashboard = () => {
 
   useEffect(() => { localStorage.setItem('section', section) }, [section])
 
-  // Тема разделов «Страхование» и «Анализ ОППВ»: тёмная (HUD, как дашборд) —
+  // Тема всех разделов («Страхование», «Анализ ОППВ», «Дашборд»): тёмная (HUD) —
   // по умолчанию у всех; светлую можно включить кнопкой в шапке. Выбор хранится
   // в браузере. Атрибут вешаем на <html>, чтобы тема доходила и до окон,
   // которые рендерятся порталом в body (меню статусов, паспорт, формы).
@@ -1945,7 +1945,7 @@ const Dashboard = () => {
   }, [tintKgitFilter])
 
   return (
-    <div className={'dashboard' + (section === 'dashboard' || isDark ? ' hud-active' : '')
+    <div className={'dashboard' + (isDark ? ' hud-active' : '')
       + (isDark && section !== 'dashboard' ? ' theme-dark' : '')}>
       <header className="dashboard-header">
         <div>
